@@ -57,3 +57,30 @@ async def test_parse_text_endpoint(bdd_client: AsyncClient):
     )
     assert resp.status_code == 200
     assert resp.json()["text"] == "Utente effettua il login con credenziali valide"
+
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+async def test_ollama_status_running(bdd_client: AsyncClient):
+    with patch("app.api.v1.bdd._probe_ollama", new=AsyncMock(return_value=True)):
+        resp = await bdd_client.get("/api/v1/bdd/ollama/status")
+    assert resp.status_code == 200
+    assert resp.json()["running"] is True
+
+
+async def test_ollama_status_offline(bdd_client: AsyncClient):
+    with patch("app.api.v1.bdd._probe_ollama", new=AsyncMock(return_value=False)):
+        resp = await bdd_client.get("/api/v1/bdd/ollama/status")
+    assert resp.status_code == 200
+    assert resp.json()["running"] is False
+
+
+async def test_ollama_stop_no_process(bdd_client: AsyncClient):
+    with (
+        patch("app.api.v1.bdd.psutil.process_iter", return_value=iter([])),
+        patch("app.api.v1.bdd._probe_ollama", new=AsyncMock(return_value=False)),
+    ):
+        resp = await bdd_client.post("/api/v1/bdd/ollama/stop")
+    assert resp.status_code == 200
+    assert resp.json()["running"] is False

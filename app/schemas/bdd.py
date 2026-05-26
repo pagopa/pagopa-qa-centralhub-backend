@@ -107,3 +107,8 @@ class GenerateRequest(BaseModel):
     title: str
     language: str = "it"
     max_scenarios: int = Field(default=5, ge=1, le=15)
+
+
+class OllamaStatusOut(BaseModel):
+    running: bool
+    url: str

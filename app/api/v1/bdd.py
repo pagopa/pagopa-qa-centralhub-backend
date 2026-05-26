@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
 import uuid
 from typing import Annotated
 
+import httpx
+import psutil
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 
 from app.deps import DbDep
 from app.schemas.bdd import (
     GenerateRequest,
+    OllamaStatusOut,
     ParseRequest,
     ParseResponse,
     ProjectCreate,
@@ -69,13 +73,13 @@ async def test_connection(db: DbDep) -> dict:
 @router.get("/projects", response_model=list[ProjectOut])
 async def list_projects(db: DbDep) -> list[ProjectOut]:
     pairs = await bdd_svc.list_projects(db)
-    return [ProjectOut.model_validate(p, update={"scenario_count": cnt}) for p, cnt in pairs]
+    return [ProjectOut.model_validate(p).model_copy(update={"scenario_count": cnt}) for p, cnt in pairs]
 
 
 @router.post("/projects", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 async def create_project(body: ProjectCreate, db: DbDep) -> ProjectOut:
     p = await bdd_svc.create_project(db, name=body.name, description=body.description)
-    return ProjectOut.model_validate(p, update={"scenario_count": 0})
+    return ProjectOut.model_validate(p).model_copy(update={"scenario_count": 0})
 
 
 @router.get("/projects/{project_id}", response_model=ProjectOut)
@@ -84,7 +88,7 @@ async def get_project(project_id: uuid.UUID, db: DbDep) -> ProjectOut:
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
     _, total = await bdd_svc.list_scenarios(db, project_id=project_id, page_size=1)
-    return ProjectOut.model_validate(p, update={"scenario_count": total})
+    return ProjectOut.model_validate(p).model_copy(update={"scenario_count": total})
 
 
 @router.put("/projects/{project_id}", response_model=ProjectOut)
@@ -94,7 +98,7 @@ async def update_project(project_id: uuid.UUID, body: ProjectUpdate, db: DbDep) 
         raise HTTPException(status_code=404, detail="Project not found")
     p = await bdd_svc.update_project(db, p, body.model_dump(exclude_unset=True))
     _, total = await bdd_svc.list_scenarios(db, project_id=project_id, page_size=1)
-    return ProjectOut.model_validate(p, update={"scenario_count": total})
+    return ProjectOut.model_validate(p).model_copy(update={"scenario_count": total})
 
 
 @router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -270,3 +274,71 @@ def _scenario_out(s) -> ScenarioOut:
     if data.tags is None:
         data.tags = []
     return data
+
+
+# ── Ollama process controls ────────────────────────────────────────────────────
+
+async def _probe_ollama(url: str) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            await client.get(f"{url}/api/tags")
+        return True
+    except Exception:
+        return False
+
+
+@router.get("/ollama/status", response_model=OllamaStatusOut)
+async def ollama_status(db: DbDep) -> OllamaStatusOut:
+    s = await bdd_svc.get_settings(db)
+    dec = bdd_svc.get_decrypted_settings(s)
+    url = dec["ollama_base_url"]
+    return OllamaStatusOut(running=await _probe_ollama(url), url=url)
+
+
+@router.post("/ollama/start", response_model=OllamaStatusOut)
+async def ollama_start(db: DbDep) -> OllamaStatusOut:
+    s = await bdd_svc.get_settings(db)
+    dec = bdd_svc.get_decrypted_settings(s)
+    url = dec["ollama_base_url"]
+
+    if await _probe_ollama(url):
+        return OllamaStatusOut(running=True, url=url)
+
+    try:
+        await asyncio.create_subprocess_exec(
+            "ollama", "serve",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=502, detail="ollama binary not found") from exc
+
+    for _ in range(10):
+        await asyncio.sleep(0.5)
+        if await _probe_ollama(url):
+            return OllamaStatusOut(running=True, url=url)
+
+    return OllamaStatusOut(running=False, url=url)
+
+
+@router.post("/ollama/stop", response_model=OllamaStatusOut)
+async def ollama_stop(db: DbDep) -> OllamaStatusOut:
+    s = await bdd_svc.get_settings(db)
+    dec = bdd_svc.get_decrypted_settings(s)
+    url = dec["ollama_base_url"]
+
+    procs = [p for p in psutil.process_iter(["name", "pid"]) if p.info["name"] == "ollama"]
+    for proc in procs:
+        try:
+            proc.terminate()
+        except psutil.NoSuchProcess:
+            pass
+
+    _, alive = psutil.wait_procs(procs, timeout=3)
+    for proc in alive:
+        try:
+            proc.kill()
+        except psutil.NoSuchProcess:
+            pass
+
+    return OllamaStatusOut(running=await _probe_ollama(url), url=url)
