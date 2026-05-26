@@ -31,5 +31,8 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str = ""
     otel_service_name: str = "qa-hub-backend"
 
+    # GitHub integration
+    github_token: str = ""
+
 
 settings = Settings()
