@@ -68,21 +68,3 @@ class BddSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-
-    def __init__(self, **kwargs):
-        # Apply column-level defaults for any missing kwargs
-        if "id" not in kwargs:
-            kwargs["id"] = 1
-        if "ai_provider" not in kwargs:
-            kwargs["ai_provider"] = "ollama"
-        if "claude_model" not in kwargs:
-            kwargs["claude_model"] = "claude-sonnet-4-6"
-        if "ollama_base_url" not in kwargs:
-            kwargs["ollama_base_url"] = "http://localhost:11434"
-        if "ollama_model" not in kwargs:
-            kwargs["ollama_model"] = "llama3.2"
-        if "gherkin_language" not in kwargs:
-            kwargs["gherkin_language"] = "it"
-        if "max_scenarios" not in kwargs:
-            kwargs["max_scenarios"] = 5
-        super().__init__(**kwargs)
