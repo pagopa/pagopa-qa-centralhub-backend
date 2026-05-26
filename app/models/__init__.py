@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.models.audit_log import AuditLog
+from app.models.bdd import BddProject, BddScenario, BddSettings  # noqa: F401
 from app.models.bug import Bug
 from app.models.coverage import Coverage
 from app.models.dashboard import Dashboard, DashboardWidget
@@ -27,4 +28,7 @@ __all__ = [
     "AuditLog",
     "E2eSuite",
     "E2eRun",
+    "BddProject",
+    "BddScenario",
+    "BddSettings",
 ]
