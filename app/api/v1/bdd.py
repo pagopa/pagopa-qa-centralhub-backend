@@ -26,7 +26,7 @@ from app.schemas.bdd import (
 from app.schemas.common import PaginatedResponse
 from app.services import bdd as bdd_svc
 from app.services.bdd_ai import build_prompt, get_ai_provider, get_system_prompt
-from app.services.bdd_parsers import parse_source
+from app.services.bdd_parsers import ParseError, parse_source
 
 router = APIRouter()
 
@@ -69,13 +69,13 @@ async def test_connection(db: DbDep) -> dict:
 @router.get("/projects", response_model=list[ProjectOut])
 async def list_projects(db: DbDep) -> list[ProjectOut]:
     pairs = await bdd_svc.list_projects(db)
-    return [ProjectOut.model_validate({**p.__dict__, "scenario_count": cnt}) for p, cnt in pairs]
+    return [ProjectOut.model_validate(p, update={"scenario_count": cnt}) for p, cnt in pairs]
 
 
 @router.post("/projects", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 async def create_project(body: ProjectCreate, db: DbDep) -> ProjectOut:
     p = await bdd_svc.create_project(db, name=body.name, description=body.description)
-    return ProjectOut.model_validate({**p.__dict__, "scenario_count": 0})
+    return ProjectOut.model_validate(p, update={"scenario_count": 0})
 
 
 @router.get("/projects/{project_id}", response_model=ProjectOut)
@@ -84,7 +84,7 @@ async def get_project(project_id: uuid.UUID, db: DbDep) -> ProjectOut:
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
     _, total = await bdd_svc.list_scenarios(db, project_id=project_id, page_size=1)
-    return ProjectOut.model_validate({**p.__dict__, "scenario_count": total})
+    return ProjectOut.model_validate(p, update={"scenario_count": total})
 
 
 @router.put("/projects/{project_id}", response_model=ProjectOut)
@@ -94,7 +94,7 @@ async def update_project(project_id: uuid.UUID, body: ProjectUpdate, db: DbDep) 
         raise HTTPException(status_code=404, detail="Project not found")
     p = await bdd_svc.update_project(db, p, body.model_dump(exclude_unset=True))
     _, total = await bdd_svc.list_scenarios(db, project_id=project_id, page_size=1)
-    return ProjectOut.model_validate({**p.__dict__, "scenario_count": total})
+    return ProjectOut.model_validate(p, update={"scenario_count": total})
 
 
 @router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -167,7 +167,7 @@ async def export_scenario(scenario_id: uuid.UUID, db: DbDep) -> Response:
     s = await bdd_svc.get_scenario(db, scenario_id)
     if not s:
         raise HTTPException(status_code=404, detail="Scenario not found")
-    filename = f"{s.title[:50].lower().replace(' ', '_')}.feature"
+    filename = re.sub(r'[^\w\-]', '_', s.title[:50].lower()) + ".feature"
     return Response(
         content=s.gherkin,
         media_type="application/octet-stream",
@@ -189,8 +189,10 @@ async def parse_requirement(body: ParseRequest, db: DbDep) -> ParseResponse:
             confluence_email=dec["confluence_email"],
             confluence_token=dec["confluence_api_token"],
         )
-    except Exception as exc:
+    except ParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Upstream error: {exc}") from exc
     return ParseResponse(text=text)
 
 
@@ -205,8 +207,10 @@ async def parse_file(
     file_bytes = await file.read()
     try:
         text = await parse_source(source_type, content=None, url=None, file_bytes=file_bytes, filename=file.filename)
-    except Exception as exc:
+    except ParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Upstream error: {exc}") from exc
     return ParseResponse(text=text)
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ProjectCreate(BaseModel):
@@ -106,4 +106,4 @@ class GenerateRequest(BaseModel):
     requirement: str
     title: str
     language: str = "it"
-    max_scenarios: int = 5
+    max_scenarios: int = Field(default=5, ge=1, le=15)
