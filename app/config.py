@@ -34,5 +34,10 @@ class Settings(BaseSettings):
     # GitHub integration
     github_token: str = ""
 
+    # Jira integration
+    jira_base_url: str = ""
+    jira_email: str = ""
+    jira_api_token: str = ""
+
 
 settings = Settings()

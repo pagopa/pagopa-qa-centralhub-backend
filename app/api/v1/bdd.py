@@ -250,17 +250,10 @@ async def generate_scenarios(body: GenerateRequest, db: DbDep) -> StreamingRespo
             elapsed_ms = int((time.monotonic() - start) * 1000)
             raw = "".join(full_text)
 
-            m = re.search(r"\{.*\}", raw, re.DOTALL)
-            scenarios: list = []
-            if m:
-                try:
-                    parsed = json.loads(m.group())
-                    scenarios = parsed.get("scenarios", [])
-                except json.JSONDecodeError:
-                    pass
+            scenarios: list = _parse_scenarios(raw)
 
             ai_model = dec["claude_model"] if dec["ai_provider"] == "claude" else dec["ollama_model"]
-            yield f"data: {json.dumps({'done': True, 'scenarios': scenarios, 'generation_time_ms': elapsed_ms, 'ai_provider': dec['ai_provider'], 'ai_model': ai_model})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'scenarios': scenarios, 'raw': raw, 'generation_time_ms': elapsed_ms, 'ai_provider': dec['ai_provider'], 'ai_model': ai_model})}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'error': str(exc)})}\n\n"
 
@@ -274,6 +267,87 @@ def _scenario_out(s) -> ScenarioOut:
     if data.tags is None:
         data.tags = []
     return data
+
+
+# ── LLM output helpers ────────────────────────────────────────────────────────
+
+def _parse_scenarios(raw: str) -> list:
+    """Try multiple strategies to extract scenarios from LLM output."""
+    # Strategy 1: clean then parse full JSON object
+    try:
+        cleaned = _clean_llm_json(raw)
+        m = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if m:
+            parsed = json.loads(m.group())
+            scenarios = parsed.get("scenarios", [])
+            if scenarios:
+                return [s for s in scenarios if s.get("gherkin")]
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Strategy 2: extract each scenario object individually
+    try:
+        cleaned = _clean_llm_json(raw)
+        found = re.findall(r'\{[^{}]*"gherkin"[^{}]*\}', cleaned, re.DOTALL)
+        scenarios = []
+        for item in found:
+            try:
+                s = json.loads(item)
+                if s.get("gherkin"):
+                    scenarios.append(s)
+            except (json.JSONDecodeError, ValueError):
+                continue
+        if scenarios:
+            return scenarios
+    except Exception:
+        pass
+
+    return []
+
+
+def _fix_literal_newlines(text: str) -> str:
+    """Walk JSON character by character and escape literal newlines/tabs inside string values."""
+    result: list[str] = []
+    in_string = False
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c == "\\" and in_string and i + 1 < len(text):
+            result.append(c)
+            result.append(text[i + 1])
+            i += 2
+            continue
+        if c == '"':
+            in_string = not in_string
+            result.append(c)
+        elif in_string and c == "\n":
+            result.append("\\n")
+        elif in_string and c == "\r":
+            result.append("\\r")
+        elif in_string and c == "\t":
+            result.append("\\t")
+        else:
+            result.append(c)
+        i += 1
+    return "".join(result)
+
+
+def _clean_llm_json(text: str) -> str:
+    """Strip markdown fences, fix triple-quoted strings, and fix literal newlines in JSON strings."""
+    text = re.sub(r"^```(?:json)?\s*\n?", "", text.strip(), flags=re.MULTILINE)
+    text = re.sub(r"\n?```\s*$", "", text.strip(), flags=re.MULTILINE)
+
+    def _triple_to_json(m: re.Match) -> str:
+        content = m.group(1)
+        content = content.replace("\\", "\\\\")
+        content = content.replace('"', '\\"')
+        content = content.replace("\n", "\\n")
+        content = content.replace("\r", "\\r")
+        content = content.replace("\t", "\\t")
+        return f'"{content}"'
+
+    text = re.sub(r'"""(.*?)"""', _triple_to_json, text, flags=re.DOTALL)
+    return _fix_literal_newlines(text)
 
 
 # ── Ollama process controls ────────────────────────────────────────────────────

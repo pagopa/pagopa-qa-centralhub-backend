@@ -53,11 +53,21 @@ app/
 ├── main.py                 # FastAPI app factory + middleware
 ├── config.py               # pydantic-settings
 ├── deps.py                 # Shared FastAPI dependencies
-├── api/v1/                 # Versioned API routers
+├── api/v1/
+│   ├── bdd.py              # Gherkin Generator: projects, scenarios, generate (SSE), settings, Ollama controls
+│   ├── e2e.py              # E2E suites and runs
+│   ├── jira.py             # Jira KPI
+│   └── ...
 ├── core/                   # DB engine, auth, security helpers
 ├── models/                 # SQLAlchemy ORM models
-├── schemas/                # Pydantic request/response models
-├── services/               # Business logic + integration clients
+├── schemas/
+│   ├── bdd.py              # BDD request/response models (SettingsOut, ScenarioOut, ...)
+│   └── ...
+├── services/
+│   ├── bdd.py              # BDD CRUD + settings encryption/decryption
+│   ├── bdd_ai.py           # AI provider abstraction (Ollama, Claude)
+│   ├── bdd_parsers.py      # Source parsers (Confluence, PDF, DOCX, text)
+│   └── ...
 └── tasks/                  # Celery/Arq background workers
 alembic/                    # DB migration scripts
 tests/                      # pytest test suite
@@ -66,7 +76,16 @@ docker-compose.yml
 
 ## Environment variables
 
-See `.env.example` for the full list.
+See `.env.example` for the full list. Key variables:
+
+```env
+DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/qa_hub
+SECRET_KEY=<genera con: openssl rand -hex 32>   # usato per cifrare API key BDD in DB
+GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+CORS_ORIGINS=["http://localhost:3000"]
+```
+
+BDD settings (AI provider, Confluence token, Claude API key) are stored encrypted in the database and managed via `PUT /api/v1/bdd/settings`. They are **not** read from environment variables.
 
 ## Design reference
 

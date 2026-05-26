@@ -25,7 +25,15 @@ def test_bdd_scenario_defaults():
 
 
 def test_bdd_settings_defaults():
-    s = BddSettings()
+    s = BddSettings(
+        id=1,
+        ai_provider="ollama",
+        claude_model="claude-sonnet-4-6",
+        ollama_base_url="http://localhost:11434",
+        ollama_model="llama3.2",
+        gherkin_language="it",
+        max_scenarios=5,
+    )
     assert s.id == 1
     assert s.gherkin_language == "it"
     assert s.max_scenarios == 5
