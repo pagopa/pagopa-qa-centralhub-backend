@@ -4,7 +4,7 @@ import base64
 import hashlib
 import uuid
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,7 +28,10 @@ def encrypt_value(value: str | None) -> str | None:
 def decrypt_value(value: str | None) -> str | None:
     if value is None:
         return None
-    return _fernet().decrypt(value.encode()).decode()
+    try:
+        return _fernet().decrypt(value.encode()).decode()
+    except InvalidToken:
+        return None
 
 
 # ── Projects ──────────────────────────────────────────────────────────────────
@@ -79,9 +82,9 @@ async def list_scenarios(
     page_size: int = 20,
 ) -> tuple[list[BddScenario], int]:
     q = select(BddScenario).order_by(BddScenario.created_at.desc())
-    if project_id:
+    if project_id is not None:
         q = q.where(BddScenario.project_id == project_id)
-    if status:
+    if status is not None:
         q = q.where(BddScenario.status == status)
 
     total_q = select(func.count()).select_from(q.subquery())
@@ -97,8 +100,8 @@ async def get_scenario(db: AsyncSession, scenario_id: uuid.UUID) -> BddScenario 
 
 
 async def create_scenario(db: AsyncSession, **kwargs) -> BddScenario:
-    tags = kwargs.pop("tags", [])
-    scenario = BddScenario(**kwargs, tags=tags or [])
+    tags = kwargs.pop("tags", None) or []
+    scenario = BddScenario(**kwargs, tags=tags)
     db.add(scenario)
     await db.commit()
     await db.refresh(scenario)
