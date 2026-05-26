@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    bdd,
     coverage,
     dashboards,
     docs,
@@ -21,6 +22,7 @@ from app.api.v1 import (
 router = APIRouter()
 
 router.include_router(health.router, tags=["health"])
+router.include_router(bdd.router, prefix="/bdd", tags=["bdd"])
 router.include_router(overview.router, prefix="/overview", tags=["overview"])
 router.include_router(runs.router, prefix="/runs", tags=["runs"])
 router.include_router(e2e.router, prefix="/e2e", tags=["e2e"])
