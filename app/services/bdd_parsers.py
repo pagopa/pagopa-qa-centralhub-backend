@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import base64
 import io
+import re
+from urllib.parse import urlparse
 
 import httpx
+import structlog
+
+_log = structlog.get_logger(__name__)
 
 
 class ParseError(Exception):
@@ -51,6 +56,10 @@ async def parse_source(
 
 
 async def _fetch_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ParseError(f"URL scheme must be http or https, got: {parsed.scheme!r}")
+
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         resp = await client.get(url, headers={"User-Agent": "QA-Hub-BDD/1.0"})
         resp.raise_for_status()
@@ -62,12 +71,11 @@ async def _fetch_url(url: str) -> str:
         text = trafilatura.extract(html, include_comments=False, include_tables=True)
         if text:
             return text.strip()
-    except Exception:
-        pass
+        _log.debug("trafilatura_no_content", url=url)
+    except Exception as exc:
+        _log.warning("trafilatura_failed", url=url, error=str(exc))
 
     # Fallback: strip HTML tags naively
-    import re
-
     text = re.sub(r"<[^>]+>", " ", html)
     text = re.sub(r"\s+", " ", text)
     return text.strip()[:10000]
@@ -78,15 +86,13 @@ async def _fetch_confluence(url: str, email: str | None, token: str | None) -> s
         raise ParseError("Confluence credentials not configured in BDD Settings")
 
     # Extract page ID from URL: .../pages/12345/... or ?pageId=12345
-    import re
-
     m = re.search(r"/pages/(\d+)", url) or re.search(r"pageId=(\d+)", url)
     if not m:
         raise ParseError(f"Cannot extract Confluence page ID from URL: {url}")
     page_id = m.group(1)
 
     # Determine base URL (everything up to /wiki/)
-    base_match = re.match(r"(https://[^/]+)", url)
+    base_match = re.match(r"(https?://[^/]+)", url)
     if not base_match:
         raise ParseError("Cannot determine Confluence base URL")
     base = base_match.group(1)
@@ -100,10 +106,8 @@ async def _fetch_confluence(url: str, email: str | None, token: str | None) -> s
         data = resp.json()
 
     body_html = data.get("body", {}).get("storage", {}).get("value", "")
-    import re as _re
-
-    text = _re.sub(r"<[^>]+>", " ", body_html)
-    text = _re.sub(r"\s+", " ", text)
+    text = re.sub(r"<[^>]+>", " ", body_html)
+    text = re.sub(r"\s+", " ", text)
     return text.strip()
 
 
