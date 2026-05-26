@@ -6,6 +6,7 @@ from app.api.v1 import (
     coverage,
     dashboards,
     docs,
+    e2e,
     health,
     integrations,
     jira,
@@ -22,6 +23,7 @@ router = APIRouter()
 router.include_router(health.router, tags=["health"])
 router.include_router(overview.router, prefix="/overview", tags=["overview"])
 router.include_router(runs.router, prefix="/runs", tags=["runs"])
+router.include_router(e2e.router, prefix="/e2e", tags=["e2e"])
 router.include_router(coverage.router, prefix="/coverage", tags=["coverage"])
 router.include_router(jira.router, prefix="/jira", tags=["jira"])
 router.include_router(releases.router, prefix="/releases", tags=["releases"])
