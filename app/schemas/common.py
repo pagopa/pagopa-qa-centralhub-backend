@@ -1,3 +1,23 @@
 from __future__ import annotations
 
-# TODO: Pydantic v2 schemas for common
+from typing import Generic, TypeVar
+
+from pydantic import BaseModel
+
+T = TypeVar("T")
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
+    total: int
+    page: int
+    page_size: int
+
+
+class HealthResponse(BaseModel):
+    status: str
+    version: str
+
+
+class ErrorResponse(BaseModel):
+    detail: str
