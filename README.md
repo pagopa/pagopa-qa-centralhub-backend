@@ -55,8 +55,9 @@ app/
 ├── deps.py                 # Shared FastAPI dependencies
 ├── api/v1/
 │   ├── bdd.py              # Gherkin Generator: projects, scenarios, generate (SSE), settings, Ollama controls
-│   ├── e2e.py              # E2E suites and runs
-│   ├── jira.py             # Jira KPI
+│   ├── e2e.py              # E2E suites and runs (sync, CRUD, bulk delete)
+│   ├── jira.py             # Jira KPI: /overview /trend /sanp/overview /sanp/trend /data/overview /data/trend
+│   ├── docs.py             # Docs & Knowledge Base CRUD + HTML proxy
 │   └── ...
 ├── core/                   # DB engine, auth, security helpers
 ├── models/                 # SQLAlchemy ORM models
@@ -67,6 +68,7 @@ app/
 │   ├── bdd.py              # BDD CRUD + settings encryption/decryption
 │   ├── bdd_ai.py           # AI provider abstraction (Ollama, Claude)
 │   ├── bdd_parsers.py      # Source parsers (Confluence, PDF, DOCX, text)
+│   ├── jira.py             # JiraClient (board/queue/jql), compute_overview, compute_trend
 │   └── ...
 └── tasks/                  # Celery/Arq background workers
 alembic/                    # DB migration scripts
@@ -86,6 +88,20 @@ CORS_ORIGINS=["http://localhost:3000"]
 ```
 
 BDD settings (AI provider, Confluence token, Claude API key) are stored encrypted in the database and managed via `PUT /api/v1/bdd/settings`. They are **not** read from environment variables.
+
+### Jira integration
+
+Requires `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` in `.env`.
+
+- **Testing board** (`BOARD_TESTING = 597`): fetched via Agile board API
+- **SANP/Data queues** (`QUEUE_SANP = 1919`, `QUEUE_DATA = 1416`, `SD_PIDM = 85`): two-step fetch — issue keys from JSM Queue API, full details from `POST /rest/api/3/search/jql`
+- `compute_overview` returns status/component/type/assignee breakdowns and 5 alert lists (no_estimate, backlog_old, blocked_old, open_old, in_progress_old)
+- `open_old`: issue in open/pending statuses with no update for > 5 days
+- `in_progress_old`: issue in progress/review statuses with no update for > 10 days
+
+### Docs HTML proxy
+
+`GET /api/v1/docs/proxy?url=<url>` fetches the page server-side, converts GitHub blob URLs to raw.githubusercontent.com, injects `<base href>`, strips `X-Frame-Options`, and returns an `HTMLResponse`. Used to embed external HTML pages as iframes without CSP/CORS issues.
 
 ## Design reference
 
