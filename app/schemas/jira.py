@@ -30,15 +30,15 @@ class JiraOverview(BaseModel):
     alerts_no_estimate: list[JiraAlert]
     alerts_backlog_old: list[JiraAlert]
     alerts_blocked_old: list[JiraAlert]
+    alerts_open_old: list[JiraAlert]
+    alerts_in_progress_old: list[JiraAlert]
 
 
 class TrendWeek(BaseModel):
     week: str
-    discovery: int
-    delivery: int
-    support: int
-    other: int
-    done: int
+    label: str
+    created: int
+    closed: int
 
 
 class JiraTrend(BaseModel):
