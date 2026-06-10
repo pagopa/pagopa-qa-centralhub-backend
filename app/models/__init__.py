@@ -9,6 +9,7 @@ from app.models.dashboard import Dashboard, DashboardWidget
 from app.models.e2e import E2eRun, E2eSuite
 from app.models.integration import Integration
 from app.models.notification_rule import NotificationRule
+from app.models.psp_fee import PspFeeService, PspFeeSyncStatus  # noqa: F401
 from app.models.release import Release
 from app.models.run import Run, RunStep
 from app.models.suite import Suite
@@ -33,4 +34,6 @@ __all__ = [
     "BddScenario",
     "BddSettings",
     "DocItem",
+    "PspFeeService",
+    "PspFeeSyncStatus",
 ]
