@@ -55,3 +55,97 @@ def test_normalize_record_handles_null_decimal() -> None:
     raw["costo_fisso"] = None
     record = normalize_record(raw)
     assert record["costo_fisso"] is None
+
+
+import pytest
+from unittest.mock import AsyncMock, patch
+
+from app.models.psp_fee import PspFeeService, PspFeeSyncStatus
+from app.services.psp_fee import (
+    fetch_catalog,
+    get_sync_status,
+    list_services,
+    sync_from_source,
+)
+
+
+@pytest.mark.anyio
+async def test_fetch_catalog_calls_configured_url() -> None:
+    mock_response = AsyncMock()
+    mock_response.raise_for_status = lambda: None
+    mock_response.json = lambda: {"content": []}
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response) as mock_get:
+        result = await fetch_catalog()
+
+    mock_get.assert_called_once()
+    assert result == {"content": []}
+
+
+@pytest.mark.anyio
+async def test_sync_from_source_empty_content_raises() -> None:
+    db = AsyncMock()
+
+    with patch(
+        "app.services.psp_fee.fetch_catalog",
+        new_callable=AsyncMock,
+        return_value={"content": []},
+    ):
+        with pytest.raises(ValueError):
+            await sync_from_source(db)
+
+    db.execute.assert_not_called()
+    db.commit.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_sync_from_source_replaces_and_commits() -> None:
+    db = AsyncMock()
+    db.get.return_value = None
+
+    catalog = {
+        "last_Run": "20260610",
+        "notebookVersion": "0.4.0",
+        "content": [SAMPLE_RECORD, SAMPLE_RECORD],
+    }
+
+    with patch(
+        "app.services.psp_fee.fetch_catalog",
+        new_callable=AsyncMock,
+        return_value=catalog,
+    ):
+        count = await sync_from_source(db)
+
+    assert count == 2
+    db.execute.assert_called_once()
+    db.add_all.assert_called_once()
+    inserted = db.add_all.call_args[0][0]
+    assert len(inserted) == 2
+    assert all(isinstance(r, PspFeeService) for r in inserted)
+    db.add.assert_called_once()
+    added_status = db.add.call_args[0][0]
+    assert isinstance(added_status, PspFeeSyncStatus)
+    assert added_status.last_run == "20260610"
+    assert added_status.notebook_version == "0.4.0"
+    assert added_status.item_count == 2
+    db.commit.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_list_services_returns_scalars() -> None:
+    db = AsyncMock()
+    db.scalars.return_value = [PspFeeService(psp_rag_soc="A"), PspFeeService(psp_rag_soc="B")]
+
+    result = await list_services(db)
+
+    assert len(result) == 2
+
+
+@pytest.mark.anyio
+async def test_get_sync_status_returns_none_when_absent() -> None:
+    db = AsyncMock()
+    db.get.return_value = None
+
+    result = await get_sync_status(db)
+
+    assert result is None
