@@ -39,5 +39,8 @@ class Settings(BaseSettings):
     jira_email: str = ""
     jira_api_token: str = ""
 
+    # PSP Fee catalog (Data Hub)
+    psp_fee_json_url: str = "https://pagopa-afm-p-st-fee.s3.eu-central-1.amazonaws.com/output_elenco_servizi.json"
+
 
 settings = Settings()
