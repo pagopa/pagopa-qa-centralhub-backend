@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.tasks import celery_app
+from app.tasks import sync_gpd_position  # noqa: F401  (registers the task with celery_app)
 from app.tasks import sync_psp_fee  # noqa: F401  (registers the task with celery_app)
 
 celery_app.conf.beat_schedule = {
@@ -10,6 +11,10 @@ celery_app.conf.beat_schedule = {
     },
     "sync-psp-fee-services-daily": {
         "task": "app.tasks.sync_psp_fee.sync_psp_fee_services",
+        "schedule": 86400.0,  # ogni 24h
+    },
+    "sync-gpd-position-daily": {
+        "task": "app.tasks.sync_gpd_position.sync_gpd_position_snapshots",
         "schedule": 86400.0,  # ogni 24h
     },
 }
