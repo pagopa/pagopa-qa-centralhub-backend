@@ -1,6 +1,7 @@
 # qa-hub-backend/app/services/psp_fee.py
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import httpx
@@ -60,6 +61,7 @@ async def sync_from_source(db: AsyncSession) -> int:
     sync_status.last_run = data.get("last_Run", "")
     sync_status.notebook_version = data.get("notebookVersion", "")
     sync_status.item_count = len(records)
+    sync_status.synced_at = datetime.now(timezone.utc)
 
     await db.commit()
     return len(records)
