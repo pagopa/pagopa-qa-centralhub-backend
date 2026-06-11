@@ -63,12 +63,14 @@ class GitHubClient:
             if not jobs:
                 return ""
 
-            job_id = jobs[0]["id"]
-            log_resp = await client.get(
-                f"{self.BASE_URL}/repos/{self.repo}/actions/jobs/{job_id}/logs",
-                headers=self._headers(),
-                timeout=30.0,
-                follow_redirects=True,
-            )
-            log_resp.raise_for_status()
-            return log_resp.text
+            logs = []
+            for job in jobs:
+                log_resp = await client.get(
+                    f"{self.BASE_URL}/repos/{self.repo}/actions/jobs/{job['id']}/logs",
+                    headers=self._headers(),
+                    timeout=30.0,
+                    follow_redirects=True,
+                )
+                log_resp.raise_for_status()
+                logs.append(log_resp.text)
+            return "\n".join(logs)

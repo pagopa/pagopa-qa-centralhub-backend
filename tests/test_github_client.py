@@ -84,6 +84,39 @@ async def test_get_job_log_fetches_first_job_logs() -> None:
 
 
 @pytest.mark.anyio
+async def test_get_job_log_concatenates_logs_from_all_jobs() -> None:
+    jobs_response = MagicMock()
+    jobs_response.raise_for_status = MagicMock()
+    jobs_response.json.return_value = {
+        "jobs": [
+            {"id": 111, "name": "Create Runner"},
+            {"id": 222, "name": "Report GPD APD prod"},
+            {"id": 333, "name": "Cleanup Runner"},
+        ]
+    }
+
+    log_responses = []
+    for text in ["create runner log", "report data {'TOTAL': 1}", "cleanup log"]:
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.text = text
+        log_responses.append(resp)
+
+    with patch(
+        "httpx.AsyncClient.get",
+        new_callable=AsyncMock,
+        side_effect=[jobs_response, *log_responses],
+    ) as mock_get:
+        client = GitHubClient(token="test-token", repo="pagopa/pagopa-qa")
+        result = await client.get_job_log(123)
+
+    assert "report data {'TOTAL': 1}" in result
+    assert "actions/jobs/111/logs" in str(mock_get.call_args_list[1].args[0])
+    assert "actions/jobs/222/logs" in str(mock_get.call_args_list[2].args[0])
+    assert "actions/jobs/333/logs" in str(mock_get.call_args_list[3].args[0])
+
+
+@pytest.mark.anyio
 async def test_get_job_log_returns_empty_string_when_no_jobs() -> None:
     jobs_response = MagicMock()
     jobs_response.raise_for_status = MagicMock()
