@@ -6,16 +6,16 @@ import pytest
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.db import async_session
 from app.models.user import User
 from app.services.users import list_users, sync_login, update_user
+from tests._db import TestSession
 
 
 @pytest.fixture
 async def db() -> AsyncIterator[AsyncSession]:
-    async with async_session() as session:
+    async with TestSession() as session:
         yield session
-    async with async_session() as session:
+    async with TestSession() as session:
         await session.execute(delete(User).where(User.email.like("test-%@example.com")))
         await session.commit()
 
@@ -67,6 +67,6 @@ async def test_update_user_changes_role_and_active(db: AsyncSession) -> None:
 async def test_update_user_returns_none_for_unknown_id() -> None:
     import uuid
 
-    async with async_session() as session:
+    async with TestSession() as session:
         result = await update_user(session, uuid.uuid4(), role=None, is_active=None)
     assert result is None

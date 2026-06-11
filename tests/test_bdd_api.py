@@ -5,9 +5,14 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.api.v1.bdd import router as bdd_router
+from app.deps import get_db
+from tests._db import get_test_db
 
 _test_app = FastAPI()
 _test_app.include_router(bdd_router, prefix="/api/v1/bdd")
+# Use a NullPool-backed test engine for DB access so connections aren't
+# reused across the per-test event loops created by pytest-asyncio.
+_test_app.dependency_overrides[get_db] = get_test_db
 
 
 @pytest.fixture
