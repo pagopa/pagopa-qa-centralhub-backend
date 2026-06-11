@@ -32,9 +32,9 @@ class PspFeeService(Base):
     canale_mod_pag_code: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # Commissioni / soglie
-    importo_minimo: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
-    importo_massimo: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
-    costo_fisso: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    importo_minimo: Mapped[Decimal | None] = mapped_column(Numeric(16, 2), nullable=True)
+    importo_massimo: Mapped[Decimal | None] = mapped_column(Numeric(16, 2), nullable=True)
+    costo_fisso: Mapped[Decimal | None] = mapped_column(Numeric(16, 2), nullable=True)
 
     # Flag canali/metodi
     on_us: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
