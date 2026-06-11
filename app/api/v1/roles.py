@@ -15,7 +15,9 @@ async def get_role_matrix(db: DbDep) -> RoleMatrixResponse:
 
 
 @router.patch("/{role}", response_model=dict[str, bool])
-async def update_role_permissions(role: str, payload: RolePermissionUpdate, db: DbDep) -> dict[str, bool]:
+async def update_role_permissions(
+    role: str, payload: RolePermissionUpdate, db: DbDep
+) -> dict[str, bool]:
     try:
         return await roles_svc.update_role_permissions(db, role, payload.permissions)
     except LookupError as exc:
