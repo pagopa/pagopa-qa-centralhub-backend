@@ -4,6 +4,7 @@ from app.models.audit_log import AuditLog
 from app.models.bdd import BddProject, BddScenario, BddSettings  # noqa: F401
 from app.models.docs import DocItem  # noqa: F401
 from app.models.bug import Bug
+from app.models.gpd_position import GpdPositionSnapshot, GpdPositionSyncStatus  # noqa: F401
 from app.models.coverage import Coverage
 from app.models.dashboard import Dashboard, DashboardWidget
 from app.models.e2e import E2eRun, E2eSuite
@@ -36,4 +37,6 @@ __all__ = [
     "DocItem",
     "PspFeeService",
     "PspFeeSyncStatus",
+    "GpdPositionSnapshot",
+    "GpdPositionSyncStatus",
 ]
