@@ -7,9 +7,6 @@ import httpx
 from app.config import settings
 
 BOARD_TESTING = 597
-SD_PIDM = 85
-QUEUE_SANP = 1919
-QUEUE_DATA = 1416
 
 DISCOVERY_TYPES = {
     "Comprensione del requisito",
@@ -49,66 +46,31 @@ class JiraClient:
         self.base = settings.jira_base_url.rstrip("/")
         self.auth = (settings.jira_email, settings.jira_api_token)
 
-    async def get_queue_issues(self, service_desk_id: int, queue_id: int) -> list[dict]:
-        """Fetch all issues from a JSM queue, then load full field details via search."""
-        keys: list[str] = []
-        start = 0
-        async with httpx.AsyncClient(timeout=30) as c:
-            while True:
-                r = await c.get(
-                    f"{self.base}/rest/servicedeskapi/servicedesk/{service_desk_id}/queue/{queue_id}/issue",
-                    auth=self.auth,
-                    params={"start": start, "limit": 100},
-                )
-                r.raise_for_status()
-                data = r.json()
-                batch = data.get("values", [])
-                keys.extend(v["key"] for v in batch)
-                if start + len(batch) >= data.get("size", 0):
-                    break
-                start += len(batch)
-
-        if not keys:
-            return []
-
+    async def get_issues_by_jql(self, jql: str) -> list[dict]:
+        issues: list[dict] = []
         fields = [
             "summary", "status", "issuetype", "priority", "assignee",
             "created", "updated", "components", "timeoriginalestimate", "resolutiondate",
         ]
-        issues: list[dict] = []
+        next_page_token: str | None = None
         async with httpx.AsyncClient(timeout=30) as c:
-            for i in range(0, len(keys), 50):
-                chunk = keys[i:i + 50]
+            while True:
+                payload: dict = {"jql": jql, "maxResults": 100, "fields": fields}
+                if next_page_token:
+                    payload["nextPageToken"] = next_page_token
                 r = await c.post(
                     f"{self.base}/rest/api/3/search/jql",
                     auth=self.auth,
-                    json={"jql": f"issuekey in ({','.join(chunk)})", "maxResults": 50, "fields": fields},
-                )
-                r.raise_for_status()
-                issues.extend(r.json().get("issues", []))
-        return issues
-
-    async def get_issues_by_jql(self, jql: str) -> list[dict]:
-        issues: list[dict] = []
-        start = 0
-        fields = (
-            "summary,status,issuetype,priority,assignee,"
-            "created,updated,components,timeoriginalestimate,resolutiondate"
-        )
-        async with httpx.AsyncClient(timeout=30) as c:
-            while True:
-                r = await c.get(
-                    f"{self.base}/rest/api/2/search",
-                    auth=self.auth,
-                    params={"jql": jql, "startAt": start, "maxResults": 100, "fields": fields},
+                    json=payload,
                 )
                 r.raise_for_status()
                 data = r.json()
-                batch = data.get("issues", [])
-                issues.extend(batch)
-                if start + len(batch) >= data.get("total", 0):
+                issues.extend(data.get("issues", []))
+                if data.get("isLast", True):
                     break
-                start += len(batch)
+                next_page_token = data.get("nextPageToken")
+                if not next_page_token:
+                    break
         return issues
 
     async def get_board_issues(self, board_id: int) -> list[dict]:
