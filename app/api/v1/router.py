@@ -17,6 +17,7 @@ from app.api.v1 import (
     perf,
     psp_fee,
     releases,
+    roles,
     runs,
     users,
 )
@@ -38,4 +39,5 @@ router.include_router(perf.router, prefix="/perf", tags=["perf"])
 router.include_router(dashboards.router, prefix="/dashboards", tags=["dashboards"])
 router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
 router.include_router(users.router, prefix="/users", tags=["users"])
+router.include_router(roles.router, prefix="/roles", tags=["roles"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
