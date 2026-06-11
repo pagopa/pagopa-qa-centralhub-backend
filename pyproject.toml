@@ -57,3 +57,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# The anyio pytest plugin (pulled in transitively) duplicates pytest-asyncio's
+# "auto" handling of `@pytest.mark.anyio` tests, which causes async fixtures
+# (e.g. real-DB sessions) to be torn down against a closed/foreign event loop.
+# Disable it; pytest-asyncio's auto mode already covers all async tests here.
+addopts = "-p no:anyio"
+markers = ["anyio: mark test to run with the (now-disabled) anyio plugin"]
