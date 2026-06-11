@@ -59,12 +59,18 @@ app/
 │   ├── jira.py             # Jira KPI: /overview /trend /sanp/overview /sanp/trend /data/overview /data/trend
 │   ├── gpd_position.py     # GPD Positions Data Hub: GET /snapshots, POST /sync
 │   ├── docs.py             # Docs & Knowledge Base CRUD + HTML proxy
+│   ├── users.py            # GET/PATCH /api/v1/users, POST /api/v1/users/sync-login
+│   ├── roles.py            # GET /api/v1/roles (role/permission matrix), PATCH /api/v1/roles/{role}
 │   └── ...
-├── core/                   # DB engine, auth, security helpers
-├── models/                 # SQLAlchemy ORM models
+├── core/
+│   ├── permissions.py      # ACTION_CATALOG, ACTION_KEYS, EDITABLE_ROLES, compute_role_matrix
+│   └── ...                 # DB engine, security helpers
+├── models/                 # SQLAlchemy ORM models (incl. Role, User.role FK)
 ├── schemas/
 │   ├── bdd.py              # BDD request/response models (SettingsOut, ScenarioOut, ...)
 │   ├── gpd_position.py     # GpdPositionSnapshotOut, GpdPositionSyncStatusOut, ...
+│   ├── user.py             # UserOut, UserListResponse, UserUpdate, sync-login schemas
+│   ├── role.py             # RoleOut, RoleMatrixResponse, RolePermissionUpdate
 │   └── ...
 ├── services/
 │   ├── bdd.py              # BDD CRUD + settings encryption/decryption
@@ -73,6 +79,8 @@ app/
 │   ├── jira.py             # JiraClient (board/queue/jql), compute_overview, compute_trend
 │   ├── gpd_position.py     # parse_report_line, sync_from_source, list_snapshots, get_sync_status
 │   ├── github.py           # GitHubClient (Contents API + Actions API: list_workflow_runs, get_job_log)
+│   ├── users.py            # sync_login, list_users, update_user
+│   ├── roles.py            # get_role_matrix, update_role_permissions
 │   └── ...
 └── tasks/                  # Celery/Arq background workers (sync_e2e, sync_gpd_position, ...)
 alembic/                    # DB migration scripts
@@ -113,6 +121,17 @@ Snapshot giornalieri delle posizioni debitorie GPD, sincronizzati dai run del wo
 - Task Celery `sync_gpd_position_snapshots` schedulato ogni 24h (vedi `app/tasks/schedule.py`)
 
 Vedi `../README.md` per il dettaglio dell'algoritmo di sync.
+
+### Auth & RBAC
+
+L'autenticazione (Google SSO) e l'enforcement dei permessi avvengono lato `qa-hub-frontend`; il backend espone i dati su cui si basa la RBAC e resta volutamente "open" (nessun middleware di auth sulle route API).
+
+- **`roles`** (key, label, is_system, permissions JSON, updated_at) e **`users`** (con FK `role` → `roles.key`, default `"guest"`): tabelle introdotte dalla migration `0008`, che le seed con i 5 ruoli di sistema (`superadmin`, `qa_manager`, `qa_analyst`, `qa_engineer`, `guest`).
+- **`app/core/permissions.py`**: `ACTION_CATALOG` definisce le 10 azioni RBAC (es. `view:bdd`, `manage:bdd`, `sync:trigger`, ...) raggruppate per categoria, `ACTION_KEYS` la lista delle chiavi, `EDITABLE_ROLES` i ruoli non di sistema editabili da `superadmin`, `compute_role_matrix` calcola la matrice ruolo→permessi.
+- **`POST /api/v1/users/sync-login`**: chiamata dal frontend ad ogni login/refresh JWT — crea o aggiorna l'utente (email, nome, idp_sub) e restituisce ruolo e stato attivo.
+- **`GET/PATCH /api/v1/users`**: lista utenti e aggiornamento ruolo/stato (`is_active`), usati dalla tab "Utenti" di `/settings/users`.
+- **`GET /api/v1/roles`**: restituisce `RoleMatrixResponse` (catalogo azioni, ruoli, matrice permessi) usato da `usePermissions`/`useRoleMatrix` nel frontend.
+- **`PATCH /api/v1/roles/{role}`**: aggiorna i permessi di un ruolo non di sistema (usato dalla tab "Ruoli & Permessi").
 
 ### Docs HTML proxy
 
