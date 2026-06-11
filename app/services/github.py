@@ -37,3 +37,38 @@ class GitHubClient:
             resp.raise_for_status()
             data = resp.json()
             return base64.b64decode(data["content"].replace("\n", ""))
+
+    async def list_workflow_runs(self, workflow_file: str, per_page: int = 100, page: int = 1) -> list[dict]:
+        url = f"{self.BASE_URL}/repos/{self.repo}/actions/workflows/{workflow_file}/runs"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                url,
+                params={"status": "success", "per_page": per_page, "page": page},
+                headers=self._headers(),
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("workflow_runs", [])
+
+    async def get_job_log(self, run_id: int) -> str:
+        async with httpx.AsyncClient() as client:
+            jobs_resp = await client.get(
+                f"{self.BASE_URL}/repos/{self.repo}/actions/runs/{run_id}/jobs",
+                headers=self._headers(),
+                timeout=30.0,
+            )
+            jobs_resp.raise_for_status()
+            jobs = jobs_resp.json().get("jobs", [])
+            if not jobs:
+                return ""
+
+            job_id = jobs[0]["id"]
+            log_resp = await client.get(
+                f"{self.BASE_URL}/repos/{self.repo}/actions/jobs/{job_id}/logs",
+                headers=self._headers(),
+                timeout=30.0,
+                follow_redirects=True,
+            )
+            log_resp.raise_for_status()
+            return log_resp.text
