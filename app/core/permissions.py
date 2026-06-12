@@ -73,6 +73,18 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "category": "Amministrazione",
         "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
     },
+    {
+        "key": "view:data_quality",
+        "label": "Data Quality (visualizza)",
+        "category": "Data Quality",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
+    },
+    {
+        "key": "manage:data_quality",
+        "label": "Data Quality (crea/modifica controlli e istanze)",
+        "category": "Data Quality",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False},
+    },
 ]
 
 ACTION_KEYS: set[str] = {entry["key"] for entry in ACTION_CATALOG}

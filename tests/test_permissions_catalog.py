@@ -8,8 +8,13 @@ def test_action_keys_match_catalog() -> None:
     assert ACTION_KEYS == {entry["key"] for entry in ACTION_CATALOG}
 
 
-def test_action_catalog_has_ten_entries() -> None:
-    assert len(ACTION_CATALOG) == 10
+def test_action_catalog_has_twelve_entries() -> None:
+    assert len(ACTION_CATALOG) == 12
+
+
+def test_action_catalog_has_data_quality_entries() -> None:
+    assert "view:data_quality" in ACTION_KEYS
+    assert "manage:data_quality" in ACTION_KEYS
 
 
 def test_compute_role_matrix_uses_defaults_for_qa_engineer() -> None:
