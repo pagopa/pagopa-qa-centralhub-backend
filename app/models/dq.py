@@ -30,9 +30,18 @@ class DqControlStatus(str, enum.Enum):
     NON_ATTIVO = "non_attivo"
 
 
-dq_category_enum = ENUM(DqCategory, name="dq_category", create_type=False)
-dq_risk_level_enum = ENUM(DqRiskLevel, name="dq_risk_level", create_type=False)
-dq_control_status_enum = ENUM(DqControlStatus, name="dq_control_status", create_type=False)
+dq_category_enum = ENUM(
+    DqCategory, name="dq_category", create_type=False, values_callable=lambda e: [m.value for m in e]
+)
+dq_risk_level_enum = ENUM(
+    DqRiskLevel, name="dq_risk_level", create_type=False, values_callable=lambda e: [m.value for m in e]
+)
+dq_control_status_enum = ENUM(
+    DqControlStatus,
+    name="dq_control_status",
+    create_type=False,
+    values_callable=lambda e: [m.value for m in e],
+)
 
 
 class DqDimension(Base):
