@@ -73,7 +73,11 @@ async def test_create_catalog_control_and_list_by_category(db) -> None:
     items = await dq_svc.list_catalog_controls(db, category=DqCategory.PUNTUALE)
     assert any(c.id == control.id for c in items)
 
-    await dq_svc.delete_catalog_control(db, control)
+    updated = await dq_svc.update_catalog_control(db, control, {"description": "Updated description"})
+    assert updated.description == "Updated description"
+    assert updated.updated_at is not None
+
+    await dq_svc.delete_catalog_control(db, updated)
     assert await dq_svc.get_catalog_control(db, control.id) is None
 
 
@@ -115,6 +119,7 @@ async def test_create_and_filter_control_instances(db) -> None:
 
     updated = await dq_svc.update_control_instance(db, instance, {"status": DqControlStatus.ATTIVO})
     assert updated.status == DqControlStatus.ATTIVO
+    assert updated.updated_at is not None
 
     await dq_svc.delete_control_instance(db, updated)
     await dq_svc.delete_catalog_control(db, control)

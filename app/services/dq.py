@@ -105,6 +105,7 @@ async def update_catalog_control(
     for k, v in fields.items():
         setattr(control, k, v)
     await db.commit()
+    await db.refresh(control)
     await db.refresh(control, attribute_names=["dimension"])
     return control
 
@@ -179,6 +180,7 @@ async def update_control_instance(
     for k, v in fields.items():
         setattr(instance, k, v)
     await db.commit()
+    await db.refresh(instance)
     await db.refresh(instance, attribute_names=["catalog_control"])
     await db.refresh(instance.catalog_control, attribute_names=["dimension"])
     return instance
