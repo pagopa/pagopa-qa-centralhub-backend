@@ -59,12 +59,24 @@ class DqCatalogControlOut(DqCatalogControlBase):
 
 # ── Domains ───────────────────────────────────────────────────────────────────
 
-class DqDomainOut(BaseModel):
+class DqDomainBase(BaseModel):
+    name: str
+    sort_order: int = 0
+
+
+class DqDomainCreate(DqDomainBase):
+    pass
+
+
+class DqDomainUpdate(BaseModel):
+    name: str | None = None
+    sort_order: int | None = None
+
+
+class DqDomainOut(DqDomainBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    name: str
-    sort_order: int
     created_at: datetime
     updated_at: datetime
 

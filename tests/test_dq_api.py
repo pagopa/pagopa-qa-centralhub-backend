@@ -109,6 +109,31 @@ async def test_list_domains(client: AsyncClient) -> None:
 
 
 @pytest.mark.anyio
+async def test_create_domain(client: AsyncClient) -> None:
+    with patch(
+        "app.api.v1.dq.dq_svc.create_domain",
+        new_callable=AsyncMock,
+        return_value=DqDomain(id=uuid.uuid4(), name="Nuovo Dominio", sort_order=6, created_at=NOW, updated_at=NOW),
+    ):
+        response = await client.post(
+            "/api/v1/dq/domains", json={"name": "Nuovo Dominio", "sort_order": 6}
+        )
+
+    assert response.status_code == 201
+    assert response.json()["name"] == "Nuovo Dominio"
+
+
+@pytest.mark.anyio
+async def test_update_domain_returns_404_when_missing(client: AsyncClient) -> None:
+    with patch("app.api.v1.dq.dq_svc.get_domain", new_callable=AsyncMock, return_value=None):
+        response = await client.patch(
+            f"/api/v1/dq/domains/{uuid.uuid4()}", json={"sort_order": 1}
+        )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.anyio
 async def test_list_catalog_controls_with_category_filter(client: AsyncClient) -> None:
     dimension = _dimension()
     control = _control(dimension)

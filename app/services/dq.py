@@ -60,6 +60,27 @@ async def get_domain(db: AsyncSession, domain_id: uuid.UUID) -> DqDomain | None:
     return await db.get(DqDomain, domain_id)
 
 
+async def create_domain(db: AsyncSession, name: str, sort_order: int = 0) -> DqDomain:
+    domain = DqDomain(name=name, sort_order=sort_order)
+    db.add(domain)
+    await db.commit()
+    await db.refresh(domain)
+    return domain
+
+
+async def update_domain(db: AsyncSession, domain: DqDomain, fields: dict) -> DqDomain:
+    for k, v in fields.items():
+        setattr(domain, k, v)
+    await db.commit()
+    await db.refresh(domain)
+    return domain
+
+
+async def delete_domain(db: AsyncSession, domain: DqDomain) -> None:
+    await db.delete(domain)
+    await db.commit()
+
+
 # ── Catalog controls ────────────────────────────────────────────────────────
 
 async def list_catalog_controls(

@@ -26,6 +26,7 @@ async def db():
         await session.execute(delete(DqControlInstance).where(DqControlInstance.table_ref.like("pagopa.%test%")))
         await session.execute(delete(DqCatalogControl).where(DqCatalogControl.name.like("Test %")))
         await session.execute(delete(DqDimension).where(DqDimension.name.like("Test %")))
+        await session.execute(delete(DqDomain).where(DqDomain.name.like("Test %")))
         await session.commit()
 
 
@@ -53,6 +54,18 @@ async def test_list_domains_returns_seeded_rows(db) -> None:
     domains = await dq_svc.list_domains(db)
     names = [d.name for d in domains]
     assert names == ["GEC", "GPD", "BIZ", "FDR", "Wallet"]
+
+
+@pytest.mark.anyio
+async def test_create_and_update_domain(db) -> None:
+    domain = await dq_svc.create_domain(db, name="Test Domain", sort_order=99)
+    assert domain.id is not None
+
+    updated = await dq_svc.update_domain(db, domain, {"sort_order": 100})
+    assert updated.sort_order == 100
+
+    await dq_svc.delete_domain(db, updated)
+    assert await dq_svc.get_domain(db, domain.id) is None
 
 
 @pytest.mark.anyio

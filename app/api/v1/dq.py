@@ -17,7 +17,9 @@ from app.schemas.dq import (
     DqDimensionCreate,
     DqDimensionOut,
     DqDimensionUpdate,
+    DqDomainCreate,
     DqDomainOut,
+    DqDomainUpdate,
 )
 from app.services import dq as dq_svc
 
@@ -63,6 +65,29 @@ async def delete_dimension(dimension_id: uuid.UUID, db: DbDep) -> None:
 async def list_domains(db: DbDep) -> list[DqDomainOut]:
     domains = await dq_svc.list_domains(db)
     return [DqDomainOut.model_validate(d) for d in domains]
+
+
+@router.post("/domains", response_model=DqDomainOut, status_code=status.HTTP_201_CREATED)
+async def create_domain(body: DqDomainCreate, db: DbDep) -> DqDomainOut:
+    domain = await dq_svc.create_domain(db, name=body.name, sort_order=body.sort_order)
+    return DqDomainOut.model_validate(domain)
+
+
+@router.patch("/domains/{domain_id}", response_model=DqDomainOut)
+async def update_domain(domain_id: uuid.UUID, body: DqDomainUpdate, db: DbDep) -> DqDomainOut:
+    domain = await dq_svc.get_domain(db, domain_id)
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    domain = await dq_svc.update_domain(db, domain, body.model_dump(exclude_unset=True))
+    return DqDomainOut.model_validate(domain)
+
+
+@router.delete("/domains/{domain_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_domain(domain_id: uuid.UUID, db: DbDep) -> None:
+    domain = await dq_svc.get_domain(db, domain_id)
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    await dq_svc.delete_domain(db, domain)
 
 
 # ── Catalog controls ────────────────────────────────────────────────────────
