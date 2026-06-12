@@ -7,6 +7,7 @@ from app.api.v1 import (
     coverage,
     dashboards,
     docs,
+    dq,
     e2e,
     gpd_position,
     health,
@@ -35,6 +36,7 @@ router.include_router(coverage.router, prefix="/coverage", tags=["coverage"])
 router.include_router(jira.router, prefix="/jira", tags=["jira"])
 router.include_router(releases.router, prefix="/releases", tags=["releases"])
 router.include_router(docs.router, prefix="/docs", tags=["docs"])
+router.include_router(dq.router, prefix="/dq", tags=["dq"])
 router.include_router(perf.router, prefix="/perf", tags=["perf"])
 router.include_router(dashboards.router, prefix="/dashboards", tags=["dashboards"])
 router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
