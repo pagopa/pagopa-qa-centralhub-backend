@@ -23,7 +23,7 @@ async def db():
     async with TestSession() as session:
         yield session
         # Clean up anything created during the test
-        await session.execute(delete(DqControlInstance))
+        await session.execute(delete(DqControlInstance).where(DqControlInstance.table_ref.like("pagopa.%test%")))
         await session.execute(delete(DqCatalogControl).where(DqCatalogControl.name.like("Test %")))
         await session.execute(delete(DqDimension).where(DqDimension.name.like("Test %")))
         await session.commit()
