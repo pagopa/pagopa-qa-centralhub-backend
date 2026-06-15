@@ -19,6 +19,9 @@ htmlcov/
 #Intellij
 .idea/
 
+# VS Code
+.vscode/
+
 # Terraform
 **/.terraform/
 *.tfstate
