@@ -103,18 +103,56 @@ jobs:
     needs: [setup]
     if: ${{ needs.setup.outputs.semver != 'skip' }}
     outputs:
-      version: ${{ steps.release.outputs.version }}
+      version: ${{ steps.export.outputs.version }}
     steps:
-      - name: Make Release
-        id: release
-        uses: pagopa/github-actions-template/maven-release@4a4c25ce28feeec9e619b3132b5327f52023d441 # v1.14.2
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          semver: ${{ needs.setup.outputs.semver }}
+          fetch-depth: 0    # full history + all tags, needed by github-tag-action
+          token: ${{ secrets.BOT_TOKEN_GITHUB }}
+
+      # Map our semver values to github-tag-action's `default_bump` input.
+      # - patch/minor/major  → bump that segment
+      # - buildNumber        → on non-main branches, force a prerelease tag
+      # - skip               → handled by the job-level `if` above
+      - name: Bump tag (release branch)
+        if: ${{ github.ref_name == 'main' }}
+        id: bump_main
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
           github_token: ${{ secrets.BOT_TOKEN_GITHUB }}
-          beta: ${{ inputs.beta }}
-          skip_ci: true
-          prerelease: ${{ github.ref_name != 'main' }}
-          only_tag: false
+          default_bump: ${{ needs.setup.outputs.semver }}
+          tag_prefix: ""
+
+      - name: Bump tag (feature branch — prerelease)
+        if: ${{ github.ref_name != 'main' }}
+        id: bump_feature
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.BOT_TOKEN_GITHUB }}
+          default_bump: patch
+          tag_prefix: ""
+          pre_release_branches: ".*"
+          append_to_pre_release_tag: "beta"
+
+      - name: Create GitHub Release
+        if: ${{ github.ref_name == 'main' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump_main.outputs.new_tag }}
+          name: ${{ steps.bump_main.outputs.new_tag }}
+          body: ${{ steps.bump_main.outputs.changelog }}
+          prerelease: false
+          token: ${{ secrets.BOT_TOKEN_GITHUB }}
+
+      - name: Export version
+        id: export
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "version=${{ steps.bump_main.outputs.new_version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ steps.bump_feature.outputs.new_version }}" >> "$GITHUB_OUTPUT"
+          fi
 
   image:
     needs: [setup, release]

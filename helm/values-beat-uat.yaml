@@ -1,0 +1,98 @@
+microservice-chart:
+  namespace: "qa"
+  nameOverride: "qa-centralhub-beat"
+  fullnameOverride: "qa-centralhub-beat"
+  image:
+    repository: ghcr.io/pagopa/pagopa-qa-centralhub-backend
+    tag: "0.1.0"
+    pullPolicy: Always
+
+  container:
+    command:
+      - "celery"
+    args:
+      - "-A"
+      - "app.tasks.schedule"
+      - "beat"
+      - "--loglevel=info"
+
+  livenessProbe:
+    create: false
+  readinessProbe:
+    create: false
+  startupProbe:
+    create: false
+
+  deployment:
+    create: true
+    replicas: 1   # MUST stay 1 — single scheduler
+
+  service:
+    create: false
+    type: ClusterIP
+    ports: []
+
+  ingress:
+    create: false
+    host: ""
+    path: ""
+    servicePort: 8080
+
+  serviceAccount:
+    create: false
+    annotations: {}
+    name: "qa-workload-identity"
+
+  podAnnotations: {}
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    runAsUser: 1000
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "0.05"
+    limits:
+      memory: "512Mi"
+      cpu: "0.20"
+
+  autoscaling:
+    enable: false
+    minReplica: 1
+    maxReplica: 1
+
+  envConfig:
+    APP_VERSION: "0.1.0"
+    DEBUG: "false"
+    OTEL_EXPORTER_OTLP_ENDPOINT: ""
+    OTEL_SERVICE_NAME: "qa-centralhub-beat"
+
+  envSecret:
+    REDIS_URL: "qa-centralhub-redis-url"
+
+  keyvault:
+    name: "pagopa-u-itn-qa-kv"   # TODO confirm
+    tenantId: "7788edaf-0346-4068-9d79-c868aed15b3d"
+
+  nodeSelector: {}
+  tolerations: []
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node_type
+                operator: In
+                values:
+                  - user
+
+  canaryDelivery:
+    create: false
+    deployment:
+      image:
+        tag: "0.0.0"
+
