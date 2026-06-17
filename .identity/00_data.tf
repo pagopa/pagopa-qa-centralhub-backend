@@ -28,8 +28,8 @@ data "azurerm_key_vault" "key_vault" {
 }
 
 data "azurerm_key_vault" "domain_key_vault" {
-  name                = "pagopa-${var.env_short}-${local.domain}-kv"
-  resource_group_name = "pagopa-${var.env_short}-${local.domain}-sec-rg"
+  name                = "pagopa-${var.env_short}-${local.location_short}-${local.domain}-kv"
+  resource_group_name = "pagopa-${var.env_short}-${local.location_short}-${local.domain}-sec-rg"
 }
 
 data "azurerm_key_vault_secret" "key_vault_sonar" {
@@ -53,8 +53,8 @@ data "azurerm_key_vault_secret" "key_vault_integration_test_subkey" {
 }
 
 data "azurerm_user_assigned_identity" "workload_identity_clientid" {
-  name                = "qi-workload-identity"
-  resource_group_name = "pagopa-${var.env_short}-weu-${var.env}-aks-rg"
+  name                = "qa-workload-identity"
+  resource_group_name = "pagopa-${var.env_short}-${local.location_short}-${var.env}-aks-rg"
 }
 
 data "azurerm_key_vault_secret" "key_vault_deploy_slack_webhook" {

@@ -1,0 +1,10 @@
+apiVersion: v2
+name: pagopa-qa-centralhub-backend
+description: QA Central Hub backend (FastAPI) deployed on PagoPA AKS
+type: application
+version: 0.1.0
+appVersion: 0.1.0
+dependencies:
+  - name: microservice-chart
+    version: 7.5.0
+    repository: "https://pagopa.github.io/aks-microservice-chart-blueprint"

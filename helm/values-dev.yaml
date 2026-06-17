@@ -1,0 +1,129 @@
+# Per-environment Helm values for the FastAPI backend (API).
+# The GitHub Actions reusable workflow injects at runtime:
+#   --set microservice-chart.image.repository=ghcr.io/pagopa/pagopa-qa-centralhub-backend
+#   --set microservice-chart.image.tag=<release version>
+#   --set microservice-chart.azure.workloadIdentityClientId=<vars.WORKLOAD_IDENTITY_ID>
+# Namespace / AKS cluster come from GitHub Environment variables (NAMESPACE,
+# CLUSTER_NAME, CLUSTER_RESOURCE_GROUP) — not from this file.
+
+microservice-chart:
+  namespace: "qa"
+  nameOverride: "qa-centralhub-backend"
+  fullnameOverride: "qa-centralhub-backend"
+  image:
+    repository: ghcr.io/pagopa/pagopa-qa-centralhub-backend
+    tag: "0.1.0"
+    pullPolicy: Always
+
+  livenessProbe:
+    httpGet:
+      path: /api/v1/health
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 6
+  readinessProbe:
+    httpGet:
+      path: /api/v1/health
+      port: 8080
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+
+  deployment:
+    create: true
+    replicas: 1
+
+  service:
+    create: true
+    type: ClusterIP
+    ports:
+      - 8080
+
+  ingress:
+    create: true
+    host: "qa-central-hub.itn.internal.dev.platform.pagopa.it"
+    path: /pagopa-pagopa-qa-central-hub-backend-service/(.*)
+    servicePort: 8080
+
+  serviceAccount:
+    create: false
+    annotations: {}
+    name: "qa-workload-identity"
+
+  podAnnotations: {}
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    runAsUser: 1000
+
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "0.30"
+    limits:
+      memory: "1024Mi"
+      cpu: "0.80"
+
+  autoscaling:
+    enable: true
+    minReplica: 1
+    maxReplica: 2
+    pollingInterval: 10
+    cooldownPeriod: 50
+    triggers:
+      - type: cpu
+        metadata:
+          type: Utilization
+          value: "75"
+
+  # Plain (non-secret) configuration. Override per environment as needed.
+  envConfig:
+    APP_VERSION: "0.1.0"
+    DEBUG: "false"
+    CORS_ORIGINS: '["https://qa-central-hub.dev.platform.pagopa.it"]'
+    OIDC_ISSUER: ""
+    OIDC_AUDIENCE: "qa-hub-backend"
+    JIRA_BASE_URL: "https://pagopa.atlassian.net"
+    JIRA_EMAIL: ""
+    PSP_FEE_JSON_URL: "https://pagopa-afm-p-st-fee.s3.eu-central-1.amazonaws.com/output_elenco_servizi.json"
+    OTEL_EXPORTER_OTLP_ENDPOINT: ""
+    OTEL_SERVICE_NAME: "qa-centralhub-backend"
+
+  # Secrets resolved from Azure Key Vault via the chart's CSI integration.
+  # Each value below is the *name of the secret in Key Vault* (NOT the secret value).
+  # Vault: https://pagopa-d-itn-qa-kv.vault.azure.net/
+  envSecret:
+    DATABASE_URL: "qa-centralhub-database-url"
+    REDIS_URL: "qa-centralhub-redis-url"
+    JWT_SECRET: "qa-centralhub-jwt-secret" # (Not yet used) Must be 32 chars for HS256. used to sign JWTs for API authentication/authorization
+    ENCRYPTION_KEY: "qa-centralhub-encryption-key" # Must be 32 chars for AES-256. used to encrypt sensitive data before storing in DB (e.g. Jira API token)
+    GITHUB_TOKEN: "qa-centralhub-github-token"
+    JIRA_API_TOKEN: "qa-centralhub-jira-api-token"
+
+  keyvault:
+    name: "pagopa-d-itn-qa-kv"
+    tenantId: "7788edaf-0346-4068-9d79-c868aed15b3d"
+
+  nodeSelector: {}
+  tolerations: []
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node_type
+                operator: In
+                values:
+                  - user
+
+  canaryDelivery:
+    create: false
+    deployment:
+      image:
+        tag: "0.0.0"
