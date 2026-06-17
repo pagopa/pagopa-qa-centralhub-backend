@@ -1,0 +1,113 @@
+# Helm values for the Celery worker (same image, different command, no ingress/service).
+# Deploy as a SECOND helm release pointing at the same chart:
+#   helm upgrade --install qa-centralhub-worker-dev ./helm -f helm/values-worker-dev.yaml -n <ns>
+# The reusable workflow overrides image.repository/tag and workloadIdentityClientId.
+
+microservice-chart:
+  namespace: "qa"
+  nameOverride: "qa-centralhub-worker"
+  fullnameOverride: "qa-centralhub-worker"
+  image:
+    repository: ghcr.io/pagopa/pagopa-qa-centralhub-backend
+    tag: "0.1.0"
+    pullPolicy: Always
+
+  # Override default uvicorn CMD: run the Celery worker instead.
+  container:
+    command:
+      - "celery"
+    args:
+      - "-A"
+      - "app.tasks"
+      - "worker"
+      - "--loglevel=info"
+
+  # Workers don't serve HTTP → disable probes/service/ingress.
+  livenessProbe:
+    create: false
+  readinessProbe:
+    create: false
+  startupProbe:
+    create: false
+
+  deployment:
+    create: true
+    replicas: 1
+
+  service:
+    create: false
+    type: ClusterIP
+    ports: []
+
+  ingress:
+    create: false
+    host: ""
+    path: ""
+    servicePort: 8080
+
+  serviceAccount:
+    create: false
+    annotations: {}
+    name: "qa-workload-identity"
+
+  podAnnotations: {}
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    runAsUser: 1000
+
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "0.20"
+    limits:
+      memory: "1024Mi"
+      cpu: "0.60"
+
+  autoscaling:
+    enable: false
+    minReplica: 1
+    maxReplica: 1
+
+  envConfig:
+    APP_VERSION: "0.1.0"
+    DEBUG: "false"
+    JIRA_BASE_URL: "https://pagopa.atlassian.net"
+    JIRA_EMAIL: ""
+    PSP_FEE_JSON_URL: "https://pagopa-afm-p-st-fee.s3.eu-central-1.amazonaws.com/output_elenco_servizi.json"
+    OTEL_EXPORTER_OTLP_ENDPOINT: ""
+    OTEL_SERVICE_NAME: "qa-centralhub-worker"
+
+  envSecret:
+    DATABASE_URL: "qa-centralhub-database-url"
+    REDIS_URL: "qa-centralhub-redis-url"
+    ENCRYPTION_KEY: "qa-centralhub-encryption-key"
+    GITHUB_TOKEN: "qa-centralhub-github-token"
+    JIRA_API_TOKEN: "qa-centralhub-jira-api-token"
+
+  keyvault:
+    name: "pagopa-d-itn-qa-kv"
+    tenantId: "7788edaf-0346-4068-9d79-c868aed15b3d"
+
+  nodeSelector: {}
+  tolerations: []
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node_type
+                operator: In
+                values:
+                  - user
+
+  canaryDelivery:
+    create: false
+    deployment:
+      image:
+        tag: "0.0.0"
+
+

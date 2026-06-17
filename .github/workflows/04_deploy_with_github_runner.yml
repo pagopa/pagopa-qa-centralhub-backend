@@ -1,0 +1,146 @@
+name: Deploy on AKS
+
+# Reusable workflow invoked by 04_release_and_deploy.yml.
+# Aligned with the PagoPA standard pattern:
+#   - self-hosted runner per environment
+#   - secrets: CLIENT_ID, TENANT_ID, SUBSCRIPTION_ID
+#   - vars:    NAMESPACE, CLUSTER_NAME, CLUSTER_RESOURCE_GROUP, WORKLOAD_IDENTITY_ID
+#
+# Difference from the reference template (which uses pagopa/.../aks-deploy for a
+# single release): we deploy 3 Helm releases (API, Celery worker, Celery beat)
+# from the same chart and image, with different values files.
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        description: The name of the environment where to deploy
+        type: string
+      image_tag:
+        required: true
+        description: Docker image tag (release version) pushed to GHCR
+        type: string
+      branch:
+        required: false
+        default: ${{ github.ref_name }}
+        type: string
+      # uninstall:
+      #   description: 'true if you want to uninstall instead of install'
+      #   required: false
+      #   type: boolean
+      #   default: false
+
+env:
+  APP_NAME: pagopa-qa-centralhub-backend
+  IMAGE_REPO: ghcr.io/pagopa/pagopa-qa-centralhub-backend
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted-job, '${{ inputs.environment }}']
+    name: Deploy on AKS
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1f9a0c22da41e6ebfa534300ef656657ea2c6707 # v4
+        with:
+          ref: ${{ inputs.branch }}
+          persist-credentials: false
+
+      - name: Azure login (OIDC)
+        uses: azure/login@92a5484dfaf04ca78a94597f4f19fea633851fa2 # v2
+        with:
+          client-id: ${{ secrets.CLIENT_ID }}
+          tenant-id: ${{ secrets.TENANT_ID }}
+          subscription-id: ${{ secrets.SUBSCRIPTION_ID }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.15.4"
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Get AKS credentials
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.CLUSTER_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.CLUSTER_NAME }}
+
+      - name: Helm dependency build
+        working-directory: helm
+        run: |
+          helm repo add pagopa-microservice https://pagopa.github.io/aks-microservice-chart-blueprint
+          helm repo update pagopa-microservice
+          helm dependency build
+
+      - name: Helm upgrade — backend (API)
+        run: |
+          helm upgrade --install ${APP_NAME}-${{ inputs.environment }} ./helm \
+            --namespace "${{ vars.NAMESPACE }}" \
+            --values "./helm/values-${{ inputs.environment }}.yaml" \
+            --set microservice-chart.image.repository="${IMAGE_REPO}" \
+            --set microservice-chart.image.tag="${{ inputs.image_tag }}" \
+            --set microservice-chart.azure.workloadIdentityClientId="${{ vars.WORKLOAD_IDENTITY_ID }}" \
+            --debug --atomic --timeout 10m0s
+
+      - name: Helm upgrade — Celery worker
+        run: |
+          helm upgrade --install ${APP_NAME}-worker-${{ inputs.environment }} ./helm \
+            --namespace "${{ vars.NAMESPACE }}" \
+            --values "./helm/values-worker-${{ inputs.environment }}.yaml" \
+            --set microservice-chart.image.repository="${IMAGE_REPO}" \
+            --set microservice-chart.image.tag="${{ inputs.image_tag }}" \
+            --set microservice-chart.azure.workloadIdentityClientId="${{ vars.WORKLOAD_IDENTITY_ID }}" \
+            --debug --atomic --timeout 10m0s
+
+      - name: Helm upgrade — Celery beat (scheduler)
+        run: |
+          helm upgrade --install ${APP_NAME}-beat-${{ inputs.environment }} ./helm \
+            --namespace "${{ vars.NAMESPACE }}" \
+            --values "./helm/values-beat-${{ inputs.environment }}.yaml" \
+            --set microservice-chart.image.repository="${IMAGE_REPO}" \
+            --set microservice-chart.image.tag="${{ inputs.image_tag }}" \
+            --set microservice-chart.azure.workloadIdentityClientId="${{ vars.WORKLOAD_IDENTITY_ID }}" \
+            --debug --atomic --timeout 10m0s
+
+  # Optional second job — kept commented until we add ./infra (APIM Terraform).
+  # Mirrors the `update_openapi` step from the PagoPA standard template.
+  #
+  # update_openapi:
+  #   needs: [deploy]
+  #   runs-on: ubuntu-latest
+  #   name: Update OpenAPI
+  #   environment: ${{ inputs.environment }}
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@1f9a0c22da41e6ebfa534300ef656657ea2c6707
+  #       with:
+  #         persist-credentials: false
+  #     - name: Setup Terraform
+  #       uses: hashicorp/setup-terraform@8feba2b913ea459066180f9cb177f58a881cf146
+  #       with:
+  #         terraform_version: ${{ vars.TERRAFORM_VERSION }}
+  #     - name: Azure login
+  #       uses: azure/login@92a5484dfaf04ca78a94597f4f19fea633851fa2
+  #       with:
+  #         client-id: ${{ secrets.CLIENT_ID }}
+  #         tenant-id: ${{ secrets.TENANT_ID }}
+  #         subscription-id: ${{ secrets.SUBSCRIPTION_ID }}
+  #     - name: Terraform Apply
+  #       shell: bash
+  #       run: |
+  #         cd ./infra
+  #         export ARM_CLIENT_ID="${{ secrets.CLIENT_ID }}"
+  #         export ARM_SUBSCRIPTION_ID=$(az account show --query id --output tsv)
+  #         export ARM_TENANT_ID=$(az account show --query tenantId --output tsv)
+  #         export ARM_USE_OIDC=true
+  #         bash ./terraform.sh init weu-${{ inputs.environment }}
+  #         bash ./terraform.sh apply weu-${{ inputs.environment }} -auto-approve
+
+
