@@ -66,11 +66,19 @@ jobs:
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
 
+      - name: Set up kubelogin
+        uses: azure/use-kubelogin@v1
+        with:
+          kubelogin-version: "v0.1.3"
+
       - name: Get AKS credentials
         uses: azure/aks-set-context@v4
         with:
           resource-group: ${{ vars.CLUSTER_RESOURCE_GROUP }}
           cluster-name: ${{ vars.CLUSTER_NAME }}
+
+      - name: Convert kubeconfig to use Azure CLI credentials
+        run: kubelogin convert-kubeconfig -l azurecli
 
       - name: Helm dependency build
         working-directory: helm
