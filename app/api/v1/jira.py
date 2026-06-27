@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.schemas.jira import JiraOverview, JiraTrend
-from app.services.jira import BOARD_TESTING, JiraClient, compute_overview, compute_trend
+from app.schemas.jira import JiraOverview, JiraTrend, JiraEstimateDrift
+from app.services.jira import BOARD_TESTING, JiraClient, compute_overview, compute_trend, compute_estimate_drift
 
 router = APIRouter()
 
@@ -35,6 +35,13 @@ async def get_trend() -> JiraTrend:
     return JiraTrend(weeks=compute_trend(issues, weeks=12))
 
 
+@router.get("/estimate-drift", response_model=JiraEstimateDrift)
+async def get_estimate_drift() -> JiraEstimateDrift:
+    client = await _require_client()
+    issues = await client.get_board_issues(BOARD_TESTING)
+    return JiraEstimateDrift(**compute_estimate_drift(issues))
+
+
 # ── Supporto SANP / SACI ──────────────────────────────────────────────────────
 
 @router.get("/sanp/overview", response_model=JiraOverview)
@@ -51,6 +58,13 @@ async def get_sanp_trend() -> JiraTrend:
     return JiraTrend(weeks=compute_trend(issues, weeks=12))
 
 
+@router.get("/sanp/estimate-drift", response_model=JiraEstimateDrift)
+async def get_sanp_estimate_drift() -> JiraEstimateDrift:
+    client = await _require_client()
+    issues = await client.get_issues_by_jql(BASE_JQL_SANP)
+    return JiraEstimateDrift(**compute_estimate_drift(issues))
+
+
 # ── Supporto Data ─────────────────────────────────────────────────────────────
 
 @router.get("/data/overview", response_model=JiraOverview)
@@ -65,3 +79,10 @@ async def get_data_trend() -> JiraTrend:
     client = await _require_client()
     issues = await client.get_issues_by_jql(BASE_JQL_DATA)
     return JiraTrend(weeks=compute_trend(issues, weeks=12))
+
+
+@router.get("/data/estimate-drift", response_model=JiraEstimateDrift)
+async def get_data_estimate_drift() -> JiraEstimateDrift:
+    client = await _require_client()
+    issues = await client.get_issues_by_jql(BASE_JQL_DATA)
+    return JiraEstimateDrift(**compute_estimate_drift(issues))
