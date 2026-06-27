@@ -20,6 +20,7 @@ from app.api.v1 import (
     releases,
     roles,
     runs,
+    tm,
     users,
 )
 
@@ -43,3 +44,4 @@ router.include_router(integrations.router, prefix="/integrations", tags=["integr
 router.include_router(users.router, prefix="/users", tags=["users"])
 router.include_router(roles.router, prefix="/roles", tags=["roles"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+router.include_router(tm.router, prefix="/tm", tags=["tm"])

@@ -50,7 +50,7 @@ class JiraClient:
         issues: list[dict] = []
         fields = [
             "summary", "status", "issuetype", "priority", "assignee",
-            "created", "updated", "components", "timeoriginalestimate", "resolutiondate",
+            "created", "updated", "components", "timeoriginalestimate", "timespent", "resolutiondate",
         ]
         next_page_token: str | None = None
         async with httpx.AsyncClient(timeout=30) as c:
@@ -78,7 +78,7 @@ class JiraClient:
         start = 0
         fields = (
             "summary,status,issuetype,priority,assignee,"
-            "created,updated,components,timeoriginalestimate,resolutiondate"
+            "created,updated,components,timeoriginalestimate,timespent,resolutiondate"
         )
         async with httpx.AsyncClient(timeout=30) as c:
             while True:
@@ -179,6 +179,71 @@ def _week_label(iso_key: str) -> str:
     months = ["gen", "feb", "mar", "apr", "mag", "giu",
               "lug", "ago", "set", "ott", "nov", "dic"]
     return f"{d.day} {months[d.month - 1]}"
+
+
+def compute_estimate_drift(issues: list[dict]) -> dict:
+    """Compute drift between original estimate and time spent for issues with an estimate."""
+    items: list[dict] = []
+    by_assignee: dict[str, dict] = {}
+    by_type: dict[str, dict] = {}
+
+    for issue in issues:
+        f = issue["fields"]
+        original = f.get("timeoriginalestimate") or 0
+        if original == 0:
+            continue  # only issues with a stima originaria
+
+        spent = f.get("timespent") or 0
+        drift = spent - original
+        drift_pct = round((drift / original) * 100, 1)
+
+        key = issue["key"]
+        summary = f["summary"]
+        itype = f["issuetype"]["name"]
+        assignee_info = f.get("assignee")
+        assignee = assignee_info["displayName"] if assignee_info else "Unassigned"
+
+        items.append({
+            "key": key,
+            "summary": summary,
+            "issue_type": itype,
+            "assignee": assignee,
+            "original_estimate_sec": original,
+            "time_spent_sec": spent,
+            "drift_sec": drift,
+            "drift_pct": drift_pct,
+        })
+
+        if assignee not in by_assignee:
+            by_assignee[assignee] = {"name": assignee, "original_estimate_sec": 0, "time_spent_sec": 0}
+        by_assignee[assignee]["original_estimate_sec"] += original
+        by_assignee[assignee]["time_spent_sec"] += spent
+
+        if itype not in by_type:
+            by_type[itype] = {"name": itype, "original_estimate_sec": 0, "time_spent_sec": 0}
+        by_type[itype]["original_estimate_sec"] += original
+        by_type[itype]["time_spent_sec"] += spent
+
+    total_original = sum(i["original_estimate_sec"] for i in items)
+    total_spent = sum(i["time_spent_sec"] for i in items)
+
+    return {
+        "issues_with_estimate": len(items),
+        "total_original_sec": total_original,
+        "total_spent_sec": total_spent,
+        "drift_sec": total_spent - total_original,
+        "by_assignee": sorted(
+            by_assignee.values(),
+            key=lambda x: x["time_spent_sec"] - x["original_estimate_sec"],
+            reverse=True,
+        ),
+        "by_type": sorted(
+            by_type.values(),
+            key=lambda x: x["time_spent_sec"] - x["original_estimate_sec"],
+            reverse=True,
+        ),
+        "items": sorted(items, key=lambda x: x["drift_sec"], reverse=True),
+    }
 
 
 def compute_trend(issues: list[dict], weeks: int = 12) -> list[dict]:

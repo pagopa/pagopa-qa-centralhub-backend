@@ -17,6 +17,8 @@ from app.models.run import Run, RunStep
 from app.models.suite import Suite
 from app.models.user import User
 
+from app.models.tm import ExternalResource, ResourceAbsence  # noqa: F401
+
 __all__ = [
     "User",
     "Integration",
@@ -41,4 +43,6 @@ __all__ = [
     "GpdPositionSnapshot",
     "GpdPositionSyncStatus",
     "Role",
+    "ExternalResource",
+    "ResourceAbsence",
 ]

@@ -43,3 +43,30 @@ class TrendWeek(BaseModel):
 
 class JiraTrend(BaseModel):
     weeks: list[TrendWeek]
+
+
+class EstimateDriftGroup(BaseModel):
+    name: str
+    original_estimate_sec: int
+    time_spent_sec: int
+
+
+class EstimateDriftItem(BaseModel):
+    key: str
+    summary: str
+    issue_type: str
+    assignee: str
+    original_estimate_sec: int
+    time_spent_sec: int
+    drift_sec: int
+    drift_pct: float
+
+
+class JiraEstimateDrift(BaseModel):
+    issues_with_estimate: int
+    total_original_sec: int
+    total_spent_sec: int
+    drift_sec: int
+    by_assignee: list[EstimateDriftGroup]
+    by_type: list[EstimateDriftGroup]
+    items: list[EstimateDriftItem]
