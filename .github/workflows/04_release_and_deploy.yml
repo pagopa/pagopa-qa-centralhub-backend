@@ -106,7 +106,7 @@ jobs:
       version: ${{ steps.export.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0    # full history + all tags, needed by github-tag-action
           token: ${{ secrets.BOT_TOKEN_GITHUB }}
@@ -118,7 +118,7 @@ jobs:
       - name: Bump tag (release branch)
         if: ${{ github.ref_name == 'main' }}
         id: bump_main
-        uses: mathieudutour/github-tag-action@v6.2
+        uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
         with:
           github_token: ${{ secrets.BOT_TOKEN_GITHUB }}
           default_bump: ${{ needs.setup.outputs.semver }}
@@ -127,7 +127,7 @@ jobs:
       - name: Bump tag (feature branch — prerelease)
         if: ${{ github.ref_name != 'main' }}
         id: bump_feature
-        uses: mathieudutour/github-tag-action@v6.2
+        uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
         with:
           github_token: ${{ secrets.BOT_TOKEN_GITHUB }}
           default_bump: patch
@@ -137,7 +137,7 @@ jobs:
 
       - name: Create GitHub Release
         if: ${{ github.ref_name == 'main' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ steps.bump_main.outputs.new_tag }}
           name: ${{ steps.bump_main.outputs.new_tag }}
