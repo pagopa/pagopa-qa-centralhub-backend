@@ -45,7 +45,7 @@ microservice-chart:
   ingress:
     create: true
     host: "qa-central-hub.itn.internal.dev.platform.pagopa.it"
-    path: /pagopa-pagopa-qa-central-hub-backend-service/(.*)
+    path: /pagopa-qa-central-hub-backend-service/(.*)
     servicePort: 8080
 
   serviceAccount:
