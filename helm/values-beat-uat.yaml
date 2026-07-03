@@ -15,6 +15,7 @@ microservice-chart:
       - "app.tasks.schedule"
       - "beat"
       - "--loglevel=info"
+      - "--schedule=/tmp/celerybeat-schedule"
 
   livenessProbe:
     create: false
