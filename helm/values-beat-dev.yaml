@@ -28,6 +28,7 @@ microservice-chart:
       - "app.tasks.schedule"
       - "beat"
       - "--loglevel=info"
+      - "--schedule=/tmp/celerybeat-schedule"
 
   # Beat doesn't serve HTTP and has no useful health endpoint.
   livenessProbe:
