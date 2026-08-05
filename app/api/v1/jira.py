@@ -8,8 +8,8 @@ from app.services.jira import BOARD_TESTING, JiraClient, compute_overview, compu
 router = APIRouter()
 
 BASE_JQL_TESTING = 'project = PQ AND labels = "testing"'
-BASE_JQL_SANP = 'project = PIDM AND "request type" = "SANP/SACI Support (PIDM)"'
-BASE_JQL_DATA = 'project = PIDM AND "request type" = "Data Quality Support (PIDM)"'
+BASE_JQL_SANP = 'project = PIDM AND "request type" in ("SR5 - SANP / SACI Support (PIDM)" , "SANP/SACI Support (PIDM)")'
+BASE_JQL_DATA = 'project = PIDM AND "request type" IN ("Data Quality Support (PIDM)", "SR6 - Data Quality Support (PIDM)")'
 
 
 async def _require_client() -> JiraClient:
