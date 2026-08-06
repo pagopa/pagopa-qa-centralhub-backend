@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from fastapi.routing import APIRoute
+
 from app.main import app
 
 logger = logging.getLogger(__name__)
@@ -78,6 +80,13 @@ def main(argv: list[str] | None = None) -> int:
 
     output: Path = args.output or DEFAULT_OUTPUT
     fmt = _infer_format(output, args.format)
+
+    for route in app.routes:
+            # Verifichiamo che la rotta sia di tipo APIRoute
+            if isinstance(route, APIRoute):
+                # Ora VS Code sa che "route" ha sicuramente l'attributo "path" e "include_in_schema"
+                if route.path in (app.openapi_url, app.docs_url, app.redoc_url):
+                    route.include_in_schema = True
 
     schema = app.openapi()
     payload = _dump(schema, fmt, args.indent)

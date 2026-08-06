@@ -1302,6 +1302,27 @@
         }
       }
     },
+    "/api/v1/jira/estimate-drift": {
+      "get": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Get Estimate Drift",
+        "operationId": "get_estimate_drift_api_v1_jira_estimate_drift_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraEstimateDrift"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/jira/sanp/overview": {
       "get": {
         "tags": [
@@ -1344,6 +1365,27 @@
         }
       }
     },
+    "/api/v1/jira/sanp/estimate-drift": {
+      "get": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Get Sanp Estimate Drift",
+        "operationId": "get_sanp_estimate_drift_api_v1_jira_sanp_estimate_drift_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraEstimateDrift"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/jira/data/overview": {
       "get": {
         "tags": [
@@ -1379,6 +1421,27 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/JiraTrend"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jira/data/estimate-drift": {
+      "get": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Get Data Estimate Drift",
+        "operationId": "get_data_estimate_drift_api_v1_jira_data_estimate_drift_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraEstimateDrift"
                 }
               }
             }
@@ -2529,6 +2592,483 @@
           }
         }
       }
+    },
+    "/api/v1/tm/resources": {
+      "get": {
+        "tags": [
+          "tm"
+        ],
+        "summary": "List Resources",
+        "operationId": "list_resources_api_v1_tm_resources_get",
+        "parameters": [
+          {
+            "name": "include_inactive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Inactive"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExternalResourceOut"
+                  },
+                  "title": "Response List Resources Api V1 Tm Resources Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "tm"
+        ],
+        "summary": "Create Resource",
+        "operationId": "create_resource_api_v1_tm_resources_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalResourceCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalResourceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tm/resources/{resource_id}": {
+      "patch": {
+        "tags": [
+          "tm"
+        ],
+        "summary": "Update Resource",
+        "operationId": "update_resource_api_v1_tm_resources__resource_id__patch",
+        "parameters": [
+          {
+            "name": "resource_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Resource Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalResourceUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalResourceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "tm"
+        ],
+        "summary": "Deactivate Resource",
+        "operationId": "deactivate_resource_api_v1_tm_resources__resource_id__delete",
+        "parameters": [
+          {
+            "name": "resource_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Resource Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tm/absences": {
+      "get": {
+        "tags": [
+          "tm"
+        ],
+        "summary": "List Absences",
+        "operationId": "list_absences_api_v1_tm_absences_get",
+        "parameters": [
+          {
+            "name": "resource_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Resource Id"
+            }
+          },
+          {
+            "name": "year",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Year"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ResourceAbsenceOut"
+                  },
+                  "title": "Response List Absences Api V1 Tm Absences Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "tm"
+        ],
+        "summary": "Create Absence",
+        "operationId": "create_absence_api_v1_tm_absences_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResourceAbsenceCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceAbsenceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tm/absences/{absence_id}": {
+      "delete": {
+        "tags": [
+          "tm"
+        ],
+        "summary": "Delete Absence",
+        "operationId": "delete_absence_api_v1_tm_absences__absence_id__delete",
+        "parameters": [
+          {
+            "name": "absence_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Absence Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tm/absences/import-csv": {
+      "post": {
+        "tags": [
+          "tm"
+        ],
+        "summary": "Import Absences Csv",
+        "operationId": "import_absences_csv_api_v1_tm_absences_import_csv_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CsvAbsenceImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CsvAbsenceImportResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tm/absences/sync-confluence": {
+      "post": {
+        "tags": [
+          "tm"
+        ],
+        "summary": "Sync Confluence",
+        "operationId": "sync_confluence_api_v1_tm_absences_sync_confluence_post",
+        "parameters": [
+          {
+            "name": "year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Year"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Month"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tm/costs": {
+      "get": {
+        "tags": [
+          "tm"
+        ],
+        "summary": "Get Cost Report",
+        "operationId": "get_cost_report_api_v1_tm_costs_get",
+        "parameters": [
+          {
+            "name": "year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Year"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Month"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2591,6 +3131,115 @@
           "ids"
         ],
         "title": "BulkDeleteRequest"
+      },
+      "CostReport": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "month": {
+            "type": "integer",
+            "title": "Month"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceCostRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "grand_total": {
+            "type": "number",
+            "title": "Grand Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "month",
+          "rows",
+          "grand_total"
+        ],
+        "title": "CostReport"
+      },
+      "CsvAbsenceImportRequest": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/CsvAbsenceRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows"
+        ],
+        "title": "CsvAbsenceImportRequest"
+      },
+      "CsvAbsenceImportResult": {
+        "properties": {
+          "imported": {
+            "type": "integer",
+            "title": "Imported"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "imported",
+          "skipped",
+          "errors"
+        ],
+        "title": "CsvAbsenceImportResult"
+      },
+      "CsvAbsenceRow": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "absence_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Absence Date"
+          },
+          "absence_type": {
+            "type": "string",
+            "title": "Absence Type",
+            "default": "ferie"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "absence_date"
+        ],
+        "title": "CsvAbsenceRow"
       },
       "DocItemCreate": {
         "properties": {
@@ -3379,6 +4028,374 @@
         "type": "object",
         "title": "DqDomainUpdate"
       },
+      "EstimateDriftGroup": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "original_estimate_sec": {
+            "type": "integer",
+            "title": "Original Estimate Sec"
+          },
+          "time_spent_sec": {
+            "type": "integer",
+            "title": "Time Spent Sec"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "original_estimate_sec",
+          "time_spent_sec"
+        ],
+        "title": "EstimateDriftGroup"
+      },
+      "EstimateDriftItem": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "issue_type": {
+            "type": "string",
+            "title": "Issue Type"
+          },
+          "assignee": {
+            "type": "string",
+            "title": "Assignee"
+          },
+          "original_estimate_sec": {
+            "type": "integer",
+            "title": "Original Estimate Sec"
+          },
+          "time_spent_sec": {
+            "type": "integer",
+            "title": "Time Spent Sec"
+          },
+          "drift_sec": {
+            "type": "integer",
+            "title": "Drift Sec"
+          },
+          "drift_pct": {
+            "type": "number",
+            "title": "Drift Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "summary",
+          "issue_type",
+          "assignee",
+          "original_estimate_sec",
+          "time_spent_sec",
+          "drift_sec",
+          "drift_pct"
+        ],
+        "title": "EstimateDriftItem"
+      },
+      "ExternalResourceCreate": {
+        "properties": {
+          "first_name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "First Name"
+          },
+          "last_name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Last Name"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "company": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Company"
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Role"
+          },
+          "daily_rate": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Daily Rate"
+          },
+          "contract_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Contract Start"
+          },
+          "contract_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract End"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "first_name",
+          "last_name",
+          "email",
+          "company",
+          "role",
+          "daily_rate",
+          "contract_start"
+        ],
+        "title": "ExternalResourceCreate"
+      },
+      "ExternalResourceOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "first_name": {
+            "type": "string",
+            "title": "First Name"
+          },
+          "last_name": {
+            "type": "string",
+            "title": "Last Name"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "company": {
+            "type": "string",
+            "title": "Company"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "daily_rate": {
+            "type": "number",
+            "title": "Daily Rate"
+          },
+          "contract_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Contract Start"
+          },
+          "contract_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract End"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "first_name",
+          "last_name",
+          "email",
+          "company",
+          "role",
+          "daily_rate",
+          "contract_start",
+          "contract_end",
+          "notes",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ExternalResourceOut"
+      },
+      "ExternalResourceUpdate": {
+        "properties": {
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "email"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "daily_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Rate"
+          },
+          "contract_start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Start"
+          },
+          "contract_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract End"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "title": "ExternalResourceUpdate"
+      },
       "GenerateRequest": {
         "properties": {
           "requirement": {
@@ -3567,6 +4584,58 @@
           "days"
         ],
         "title": "JiraAlert"
+      },
+      "JiraEstimateDrift": {
+        "properties": {
+          "issues_with_estimate": {
+            "type": "integer",
+            "title": "Issues With Estimate"
+          },
+          "total_original_sec": {
+            "type": "integer",
+            "title": "Total Original Sec"
+          },
+          "total_spent_sec": {
+            "type": "integer",
+            "title": "Total Spent Sec"
+          },
+          "drift_sec": {
+            "type": "integer",
+            "title": "Drift Sec"
+          },
+          "by_assignee": {
+            "items": {
+              "$ref": "#/components/schemas/EstimateDriftGroup"
+            },
+            "type": "array",
+            "title": "By Assignee"
+          },
+          "by_type": {
+            "items": {
+              "$ref": "#/components/schemas/EstimateDriftGroup"
+            },
+            "type": "array",
+            "title": "By Type"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EstimateDriftItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "issues_with_estimate",
+          "total_original_sec",
+          "total_spent_sec",
+          "drift_sec",
+          "by_assignee",
+          "by_type",
+          "items"
+        ],
+        "title": "JiraEstimateDrift"
       },
       "JiraOverview": {
         "properties": {
@@ -4158,6 +5227,162 @@
           "synced_at"
         ],
         "title": "PspFeeSyncStatusOut"
+      },
+      "ResourceAbsenceCreate": {
+        "properties": {
+          "resource_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Resource Id"
+          },
+          "absence_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Absence Date"
+          },
+          "absence_type": {
+            "type": "string",
+            "title": "Absence Type",
+            "default": "ferie"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "resource_id",
+          "absence_date"
+        ],
+        "title": "ResourceAbsenceCreate"
+      },
+      "ResourceAbsenceOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "resource_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Resource Id"
+          },
+          "absence_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Absence Date"
+          },
+          "absence_type": {
+            "type": "string",
+            "title": "Absence Type"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "confluence_event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confluence Event Id"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "resource_id",
+          "absence_date",
+          "absence_type",
+          "source",
+          "confluence_event_id",
+          "note",
+          "created_at"
+        ],
+        "title": "ResourceAbsenceOut"
+      },
+      "ResourceCostRow": {
+        "properties": {
+          "resource_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Resource Id"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          },
+          "company": {
+            "type": "string",
+            "title": "Company"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "working_days": {
+            "type": "integer",
+            "title": "Working Days"
+          },
+          "absence_days": {
+            "type": "integer",
+            "title": "Absence Days"
+          },
+          "billable_days": {
+            "type": "integer",
+            "title": "Billable Days"
+          },
+          "daily_rate": {
+            "type": "number",
+            "title": "Daily Rate"
+          },
+          "total_cost": {
+            "type": "number",
+            "title": "Total Cost"
+          }
+        },
+        "type": "object",
+        "required": [
+          "resource_id",
+          "full_name",
+          "company",
+          "role",
+          "working_days",
+          "absence_days",
+          "billable_days",
+          "daily_rate",
+          "total_cost"
+        ],
+        "title": "ResourceCostRow"
       },
       "RoleMatrixResponse": {
         "properties": {
@@ -5027,6 +6252,27 @@
           "message"
         ],
         "title": "SyncResponse"
+      },
+      "SyncResult": {
+        "properties": {
+          "synced": {
+            "type": "integer",
+            "title": "Synced"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "synced",
+          "errors"
+        ],
+        "title": "SyncResult"
       },
       "TrendWeek": {
         "properties": {

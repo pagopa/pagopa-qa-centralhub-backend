@@ -26,9 +26,10 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="QA Hub API",
         version=settings.app_version,
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        openapi_version="3.0.3",
+        docs_url="/api/v1/docs",
+        redoc_url="/api/v1/redoc",
+        openapi_url="/api/v1/openapi.json",
         lifespan=lifespan,
     )
 
