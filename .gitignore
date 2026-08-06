@@ -33,3 +33,5 @@ helm/charts/
 
 # env
 .env, .env.local
+
+**/.DS_Store

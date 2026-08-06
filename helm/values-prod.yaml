@@ -87,7 +87,7 @@ microservice-chart:
     OIDC_ISSUER: ""
     OIDC_AUDIENCE: "qa-hub-backend"
     JIRA_BASE_URL: "https://pagopa.atlassian.net"
-    JIRA_EMAIL: ""
+    JIRA_EMAIL: "cristiano.sticca@pagopa.it"
     PSP_FEE_JSON_URL: "https://pagopa-afm-p-st-fee.s3.eu-central-1.amazonaws.com/output_elenco_servizi.json"
     OTEL_EXPORTER_OTLP_ENDPOINT: ""
     OTEL_SERVICE_NAME: "qa-centralhub-backend"
