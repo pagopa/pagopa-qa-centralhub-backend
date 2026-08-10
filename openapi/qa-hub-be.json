@@ -5,6 +5,29 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/openapi.json": {
+      "get": {
+        "tags": [
+          "openapi"
+        ],
+        "summary": "Openapi",
+        "operationId": "openapi_api_v1_openapi_json_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Openapi Api V1 Openapi Json Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "tags": [

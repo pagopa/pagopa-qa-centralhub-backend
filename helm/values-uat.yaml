@@ -39,7 +39,7 @@ microservice-chart:
   ingress:
     create: true
     host: "qa-central-hub.itn.internal.uat.platform.pagopa.it"
-    path: /pagopa-pagopa-qa-central-hub-backend-service/(.*)
+    path: /pagopa-qa-central-hub-backend-service/(.*)
     servicePort: 8080
 
   serviceAccount:
@@ -83,7 +83,7 @@ microservice-chart:
   envConfig:
     APP_VERSION: "0.1.0"
     DEBUG: "false"
-    CORS_ORIGINS: '["https://qa-central-hub.uat.platform.pagopa.it"]'   # TODO confirm frontend host
+    CORS_ORIGINS: '["https://qa-central-hub.uat.platform.pagopa.it"]'
     OIDC_ISSUER: ""
     OIDC_AUDIENCE: "qa-hub-backend"
     JIRA_BASE_URL: "https://pagopa.atlassian.net"
@@ -102,7 +102,7 @@ microservice-chart:
     JIRA_API_TOKEN: "qa-centralhub-jira-api-token"
 
   keyvault:
-    name: "pagopa-u-itn-qa-kv"   # TODO confirm
+    name: "pagopa-u-itn-qa-kv"
     tenantId: "7788edaf-0346-4068-9d79-c868aed15b3d"
 
   nodeSelector: {}
