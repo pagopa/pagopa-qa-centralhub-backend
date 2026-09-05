@@ -21,7 +21,7 @@ def _redis_url_with_ssl(url: str) -> str:
 _broker_url = _redis_url_with_ssl(settings.redis_url)
 
 celery_app = Celery(
-    "qa_hub",
+    "qachub",
     broker=_broker_url,
     backend=_broker_url,
 )
