@@ -17,7 +17,7 @@ Only `dev` is currently configured — copy and adapt for `uat`/`prod` when need
 1. **AKS cluster** with the namespace already provisioned (value of `vars.NAMESPACE`, e.g. `qa`).
 2. **ServiceAccount** for workload identity already created in the namespace and bound to a Managed Identity that has `get`/`list` on the Key Vault. The chart wires the SA via `--set microservice-chart.azure.workloadIdentityClientId=<vars.WORKLOAD_IDENTITY_ID>` injected by the workflow.
 3. **Azure Key Vault** `pagopa-d-itn-qa-kv` (dev) populated with the secrets listed in `envSecret:` of `values-dev.yaml`:
-   - `qa-centralhub-database-url` — full async DSN, e.g. `postgresql+asyncpg://user:pwd@host:5432/qa_hub?ssl=require`
+   - `qa-centralhub-database-url` — full async DSN, e.g. `postgresql+asyncpg://qachub:changeme@localhost:5432/qachub?ssl=require`
    - `qa-centralhub-redis-url` — e.g. `rediss://:<key>@<cache>.redis.cache.windows.net:6380/0`
    - `qa-centralhub-jwt-secret` — random hex (`openssl rand -hex 32`)
    - `qa-centralhub-encryption-key` — Fernet key (`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`)

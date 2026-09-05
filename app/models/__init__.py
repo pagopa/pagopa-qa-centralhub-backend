@@ -16,6 +16,7 @@ from app.models.role import Role  # noqa: F401
 from app.models.run import Run, RunStep
 from app.models.suite import Suite
 from app.models.user import User
+from .test_metrics import TestSuite, TestRun, TestExecution
 
 from app.models.tm import ExternalResource, ResourceAbsence  # noqa: F401
 
@@ -45,4 +46,7 @@ __all__ = [
     "Role",
     "ExternalResource",
     "ResourceAbsence",
+    "TestSuite",
+    "TestRun",
+    "TestExecution",
 ]
