@@ -1,0 +1,76 @@
+name: Database migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        required: true
+        type: choice
+        description: Environment where to run the migration
+        options:
+          - dev
+          - uat
+          - prod
+        default: dev
+      action:
+        required: true
+        type: choice
+        description: Alembic action to execute
+        options:
+          - upgrade
+          - downgrade
+        default: upgrade
+      version:
+        required: true
+        type: string
+        description: Alembic revision, for example 0010, or head
+        default: head
+      dry-run:
+        required: true
+        type: boolean
+        description: Print the database configuration without running Alembic
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    name: Run Alembic migration
+    runs-on: [self-hosted-job, '${{ inputs.env }}']
+    environment: ${{ inputs.env }}
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1f9a0c22da41e6ebfa534300ef656657ea2c6707 # v4
+        with:
+          persist-credentials: false
+
+      - name: Validate migration inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${DATABASE_URL}" ]]; then
+            echo "DATABASE_URL is not configured in the '${{ inputs.env }}' GitHub Environment"
+            exit 1
+          fi
+
+          if [[ "${{ inputs.action }}" == "downgrade" && "${{ inputs.version }}" == "head" ]]; then
+            echo "The 'downgrade head' operation is not allowed"
+            exit 1
+          fi
+
+      - name: Trace database configuration
+        if: ${{ inputs.dry-run }}
+        shell: bash
+        run: |
+          echo "DATABASE_URL length: ${#DATABASE_URL}"
+          echo "DATABASE_URL (password masked):"
+          printf '%s\n' "$DATABASE_URL" | sed -E 's#(://[^:/@]+:)[^@]*@#\1***@#'
+
+      - name: Run Alembic migration
+        if: ${{ !inputs.dry-run }}
+        shell: bash
+        run: alembic "${{ inputs.action }}" "${{ inputs.version }}"
