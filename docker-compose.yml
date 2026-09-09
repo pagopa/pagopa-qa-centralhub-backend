@@ -2,15 +2,16 @@ services:
   postgres:
     image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
     environment:
-      POSTGRES_USER: qa_hub
+      POSTGRES_USER: qachub
       POSTGRES_PASSWORD: changeme
-      POSTGRES_DB: qa_hub
+      POSTGRES_DB: qachub
+      POSTGRES_SCHEMA: qachub
     ports:
       - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U qa_hub"]
+      test: ["CMD-SHELL", "pg_isready -U qachub"]
       interval: 5s
       timeout: 5s
       retries: 5

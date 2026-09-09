@@ -40,6 +40,7 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations() -> None:
+    print(f"Running async migrations... Database URL: {settings.database_url}")
     engine = create_async_engine(settings.database_url)
     async with engine.connect() as connection:
         await connection.run_sync(do_run_migrations)
