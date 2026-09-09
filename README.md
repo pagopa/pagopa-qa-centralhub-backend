@@ -93,7 +93,7 @@ docker-compose.yml
 See `.env.example` for the full list. Key variables:
 
 ```env
-DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/qa_hub
+DATABASE_URL=postgresql+asyncpg://qachub:changeme@localhost:5432/qachub
 SECRET_KEY=<genera con: openssl rand -hex 32>   # usato per cifrare API key BDD in DB
 GITHUB_TOKEN=ghp_xxxxxxxxxxxx
 CORS_ORIGINS=["http://localhost:3000"]

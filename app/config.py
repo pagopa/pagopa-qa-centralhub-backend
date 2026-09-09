@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Database
-    database_url: str = "postgresql+asyncpg://qa_hub:changeme@localhost:5432/qa_hub"
+    database_url: str = "postgresql+asyncpg://qachub:changeme@localhost:5432/qachub"
 
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"
