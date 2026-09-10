@@ -40,6 +40,7 @@ def upgrade() -> None:
     sa.Column('passed_scenario', sa.Integer(), nullable=True),
     sa.Column('failed_scenario', sa.Integer(), nullable=True),
     sa.Column('broken_scenario', sa.Integer(), nullable=True),
+    sa.Column('skipped_scenario', sa.Integer(), nullable=True),
     sa.Column('timestamp_start', postgresql.TIMESTAMP(timezone=True), nullable=True),
     sa.Column('timestamp_end', postgresql.TIMESTAMP(timezone=True), nullable=True),
     sa.Column('duration_ms', sa.BigInteger(), nullable=True),
