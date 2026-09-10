@@ -60,6 +60,7 @@ class TestRun(Base):
     passed_scenario = Column(Integer)
     failed_scenario = Column(Integer)
     broken_scenario = Column(Integer)
+    skipped_scenario = Column(Integer)
 
     # timestamptz in Postgres
     timestamp_start = Column(TIMESTAMP(timezone=True)) 

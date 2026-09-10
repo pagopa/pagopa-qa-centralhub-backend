@@ -1,21 +1,24 @@
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError, DatabaseError
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timedelta
+
 
 # to import models
-# from app.models.test_metrics import TestSuite, TestRun, TestExecution
+from app.models.test_metrics import TestSuite, TestRun, TestExecution
 
 async def create_test_suite(db: AsyncSession, test_suite: TestSuite):
     db.add(test_suite)
     await db.commit()
     await db.refresh(test_suite)
     return test_suite
-
+    
 
 async def get_latest_test_suite_version(db: AsyncSession, test_object_in: str) -> TestSuite:
     result = await db.execute(
-        select(TestSuite).filter_by(test_object=test_object_in).order_by(TestSuite.version.desc()).limit(1)
+        select(TestSuite).filter_by(test_object=test_object_in).order_by(TestSuite.suite_version.desc()).limit(1)
     )
     return result.scalar_one_or_none()
 

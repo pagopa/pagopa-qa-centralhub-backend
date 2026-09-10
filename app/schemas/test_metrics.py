@@ -43,6 +43,21 @@ class TestSuiteCreate(BaseModel):
     suite_version: str
     owner_team: str | None = None
 
+class TestRunCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    suite_id: str
+    scenario_qty: int | None = None
+    passed_scenario: int | None = None
+    failed_scenario: int | None = None
+    broken_scenario: int | None = None
+    skipped_scenario: int | None = None
+    timestamp_start: datetime | None = None
+    timestamp_end: datetime | None = None
+    duration_ms: int | None = None
+    env: str | None = None
+    trigger_type: str | None = None
+    test_version: str | None = None
 
 class TestRunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -53,20 +68,7 @@ class TestRunOut(BaseModel):
     passed_scenario: int | None = None
     failed_scenario: int | None = None
     broken_scenario: int | None = None
-    timestamp_start: datetime | None = None
-    timestamp_end: datetime | None = None
-    duration_ms: int | None = None
-    env: EnvEnum | None = None
-    trigger_type: TriggerTypeEnum | None = None
-    test_version: str | None = None
-
-
-class TestRunCreate(BaseModel):
-    suite_id: uuid.UUID
-    scenario_qty: int | None = None
-    passed_scenario: int | None = None
-    failed_scenario: int | None = None
-    broken_scenario: int | None = None
+    skipped_scenario: int | None = None
     timestamp_start: datetime | None = None
     timestamp_end: datetime | None = None
     duration_ms: int | None = None
@@ -88,14 +90,16 @@ class TestExecutionOut(BaseModel):
     error_message: str | None = None
     retries: int | None = None
 
-
 class TestExecutionCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     run_id: uuid.UUID
     allure_id: str | None = None
-    status: ScenarioStatusEnum | None = None
+    status: str | None = None
     scenario_name: str | None = None
     allure_report: dict[str, Any] | None = None
     duration_ms: int | None = None
     error_message: str | None = None
     retries: int | None = None
+
 
