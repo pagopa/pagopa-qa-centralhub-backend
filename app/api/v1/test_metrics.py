@@ -19,7 +19,7 @@ async def create_test_suite(
     body: TestSuiteCreate,
     db: DbDep,
 ) -> TestSuiteOut:
-    if body is None or (body.test_type is "" or body.test_object is "" or body.suite_version is ""):
+    if body is None or (body.test_type == "" or body.test_object == "" or body.suite_version == ""):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Request body cannot be None",
@@ -95,7 +95,7 @@ async def create_test_execution(
             detail="Request body cannot be None",
         )
     models = [TestExecution(**te.model_dump()) for te in body]
-    
+
     try:
         test_executions_out = await test_metrics_svc.create_test_execution(db, models)
     except Exception as e:
