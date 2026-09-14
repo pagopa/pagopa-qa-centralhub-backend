@@ -25,7 +25,15 @@ async def create_test_suite(
             detail="Request body cannot be None",
         )
     model = TestSuite(**body.model_dump())
-    test_suite = await test_metrics_svc.create_test_suite(db, model)
+
+    try:
+        test_suite = await test_metrics_svc.create_test_suite(db, model)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{str(e)}",
+        )
+    
     if test_suite is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -62,7 +70,13 @@ async def create_test_run(
             detail="Request body cannot be None",
         )
     model = TestRun(**body.model_dump())
-    test_run_out = await test_metrics_svc.create_test_run(db, model)
+    try:
+        test_run_out = await test_metrics_svc.create_test_run(db, model)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{str(e)}",
+        )
     if test_run_out is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -81,7 +95,14 @@ async def create_test_execution(
             detail="Request body cannot be None",
         )
     models = [TestExecution(**te.model_dump()) for te in body]
-    test_executions_out = await test_metrics_svc.create_test_execution(db, models)
+    
+    try:
+        test_executions_out = await test_metrics_svc.create_test_execution(db, models)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{str(e)}",
+        )
     if test_executions_out is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
