@@ -2204,6 +2204,38 @@
               ],
               "title": "Category"
             }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DqControlStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "table_ref",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Table Ref"
+            }
           }
         ],
         "responses": {
@@ -2256,6 +2288,69 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DqControlInstanceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dq/instances/tables": {
+      "get": {
+        "tags": [
+          "dq"
+        ],
+        "summary": "List Control Instance Tables",
+        "operationId": "list_control_instance_tables_api_v1_dq_instances_tables_get",
+        "parameters": [
+          {
+            "name": "domain_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Domain Id"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DqCategory"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response List Control Instance Tables Api V1 Dq Instances Tables Get"
                 }
               }
             }
@@ -4048,6 +4143,17 @@
         },
         "type": "object",
         "title": "DqControlInstanceUpdate"
+      },
+      "DqControlStatus": {
+        "type": "string",
+        "enum": [
+          "da_implementare",
+          "in_sviluppo",
+          "attivo",
+          "non_attivo",
+          "eliminato"
+        ],
+        "title": "DqControlStatus"
       },
       "DqDimensionCreate": {
         "properties": {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -142,6 +142,8 @@ async def list_control_instances(
     db: AsyncSession,
     domain_id: uuid.UUID | None = None,
     category: DqCategory | None = None,
+    status: DqControlStatus | None = None,
+    table_ref: str | None = None,
 ) -> list[DqControlInstance]:
     q = select(DqControlInstance).options(
         selectinload(DqControlInstance.catalog_control).selectinload(DqCatalogControl.dimension)
@@ -150,8 +152,27 @@ async def list_control_instances(
         q = q.where(DqControlInstance.domain_id == domain_id)
     if category is not None:
         q = q.join(DqCatalogControl).where(DqCatalogControl.category == category)
+    if status is not None:
+        q = q.where(DqControlInstance.status == status)
+    if table_ref is not None:
+        q = q.where(DqControlInstance.table_ref == table_ref)
     q = q.order_by(DqControlInstance.table_ref, DqControlInstance.field_ref)
     result = await db.execute(q)
+    return list(result.scalars())
+
+
+async def list_control_instance_tables(
+    db: AsyncSession,
+    domain_id: uuid.UUID,
+    category: DqCategory | None = None,
+) -> list[str]:
+    q = select(distinct(DqControlInstance.table_ref)).where(
+        DqControlInstance.domain_id == domain_id,
+        DqControlInstance.table_ref != "",
+    )
+    if category is not None:
+        q = q.join(DqCatalogControl).where(DqCatalogControl.category == category)
+    result = await db.execute(q.order_by(DqControlInstance.table_ref))
     return list(result.scalars())
 
 
@@ -208,5 +229,5 @@ async def update_control_instance(
 
 
 async def delete_control_instance(db: AsyncSession, instance: DqControlInstance) -> None:
-    await db.delete(instance)
+    instance.status = DqControlStatus.ELIMINATO
     await db.commit()

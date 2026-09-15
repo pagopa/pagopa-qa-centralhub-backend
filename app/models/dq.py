@@ -28,6 +28,7 @@ class DqControlStatus(str, enum.Enum):
     IN_SVILUPPO = "in_sviluppo"
     ATTIVO = "attivo"
     NON_ATTIVO = "non_attivo"
+    ELIMINATO = "eliminato"
 
 
 dq_category_enum = ENUM(

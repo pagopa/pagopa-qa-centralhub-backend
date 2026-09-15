@@ -41,6 +41,7 @@ def test_dq_control_status_enum_values() -> None:
         "in_sviluppo",
         "attivo",
         "non_attivo",
+        "eliminato",
     }
 
 

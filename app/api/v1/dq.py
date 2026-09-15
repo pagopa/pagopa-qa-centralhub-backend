@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.deps import DbDep
-from app.models.dq import DqCategory
+from app.models.dq import DqCategory, DqControlStatus
 from app.schemas.dq import (
     DqCatalogControlCreate,
     DqCatalogControlOut,
@@ -150,8 +150,16 @@ async def list_control_instances(
     db: DbDep,
     domain_id: Annotated[uuid.UUID | None, Query()] = None,
     category: Annotated[DqCategory | None, Query()] = None,
+    status: Annotated[DqControlStatus | None, Query()] = None,
+    table_ref: Annotated[str | None, Query()] = None,
 ) -> list[DqControlInstanceOut]:
-    instances = await dq_svc.list_control_instances(db, domain_id=domain_id, category=category)
+    instances = await dq_svc.list_control_instances(
+        db,
+        domain_id=domain_id,
+        category=category,
+        status=status,
+        table_ref=table_ref,
+    )
     return [DqControlInstanceOut.model_validate(i) for i in instances]
 
 
@@ -170,6 +178,15 @@ async def create_control_instance(body: DqControlInstanceCreate, db: DbDep) -> D
         notes=body.notes,
     )
     return DqControlInstanceOut.model_validate(instance)
+
+
+@router.get("/instances/tables", response_model=list[str])
+async def list_control_instance_tables(
+    db: DbDep,
+    domain_id: uuid.UUID,
+    category: Annotated[DqCategory | None, Query()] = None,
+) -> list[str]:
+    return await dq_svc.list_control_instance_tables(db, domain_id=domain_id, category=category)
 
 
 @router.get("/instances/{instance_id}", response_model=DqControlInstanceOut)

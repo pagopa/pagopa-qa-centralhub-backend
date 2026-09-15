@@ -189,12 +189,36 @@ async def test_list_control_instances_with_filters(client: AsyncClient) -> None:
     with patch(
         "app.api.v1.dq.dq_svc.list_control_instances", new_callable=AsyncMock, return_value=[instance]
     ) as mock_list:
-        response = await client.get(f"/api/v1/dq/instances?domain_id={domain.id}&category=puntuale")
+        response = await client.get(
+            f"/api/v1/dq/instances?domain_id={domain.id}&category=puntuale"
+            "&status=da_implementare&table_ref=pagopa.bronze_gpd_payment_position"
+        )
 
     assert response.status_code == 200
     body = response.json()
     assert body[0]["table_ref"] == "pagopa.bronze_gpd_payment_position"
     assert body[0]["catalog_control"]["name"] == "Check not null"
+    mock_list.assert_awaited_once()
+    assert mock_list.call_args.kwargs["domain_id"] == domain.id
+    assert mock_list.call_args.kwargs["category"] == DqCategory.PUNTUALE
+    assert mock_list.call_args.kwargs["status"] == DqControlStatus.DA_IMPLEMENTARE
+    assert mock_list.call_args.kwargs["table_ref"] == "pagopa.bronze_gpd_payment_position"
+
+
+@pytest.mark.anyio
+async def test_list_control_instance_tables(client: AsyncClient) -> None:
+    domain = _domain()
+    with patch(
+        "app.api.v1.dq.dq_svc.list_control_instance_tables",
+        new_callable=AsyncMock,
+        return_value=["pagopa.bronze_a", "pagopa.bronze_b"],
+    ) as mock_list:
+        response = await client.get(
+            f"/api/v1/dq/instances/tables?domain_id={domain.id}&category=puntuale"
+        )
+
+    assert response.status_code == 200
+    assert response.json() == ["pagopa.bronze_a", "pagopa.bronze_b"]
     mock_list.assert_awaited_once()
     assert mock_list.call_args.kwargs["domain_id"] == domain.id
     assert mock_list.call_args.kwargs["category"] == DqCategory.PUNTUALE
