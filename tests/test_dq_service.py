@@ -130,9 +130,23 @@ async def test_create_and_filter_control_instances(db) -> None:
     by_other_domain = await dq_svc.list_control_instances(db, domain_id=uuid.uuid4())
     assert all(i.id != instance.id for i in by_other_domain)
 
+    by_status = await dq_svc.list_control_instances(db, domain_id=gec.id, status=DqControlStatus.DA_IMPLEMENTARE)
+    assert instance.id in {i.id for i in by_status}
+    assert all(i.status == DqControlStatus.DA_IMPLEMENTARE for i in by_status)
+
+    by_table = await dq_svc.list_control_instances(db, domain_id=gec.id, table_ref=instance.table_ref)
+    assert instance.id in {i.id for i in by_table}
+    assert all(i.table_ref == instance.table_ref for i in by_table)
+
+    table_refs = await dq_svc.list_control_instance_tables(db, domain_id=gec.id, category=DqCategory.PUNTUALE)
+    assert instance.table_ref in table_refs
+    assert table_refs == sorted(set(table_refs))
+
     updated = await dq_svc.update_control_instance(db, instance, {"status": DqControlStatus.ATTIVO})
     assert updated.status == DqControlStatus.ATTIVO
     assert updated.updated_at is not None
 
     await dq_svc.delete_control_instance(db, updated)
-    await dq_svc.delete_catalog_control(db, control)
+    deleted = await dq_svc.get_control_instance(db, instance.id)
+    assert deleted is not None
+    assert deleted.status == DqControlStatus.ELIMINATO
