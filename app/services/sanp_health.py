@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -43,6 +44,7 @@ from app.services.sanp_health_artifacts import (
 REPOSITORY = "pagopa/pagopa-api"
 WORKFLOW_FILE = "daily_api_spec_drift_detector.yaml"
 RETENTION_DAYS = 7
+ARTIFACT_RETRY_HOURS = 24
 SYNC_LOCK_ID = 669
 PAGE_SIZE = 100
 
@@ -91,6 +93,31 @@ def _parse_timestamp(value: str) -> datetime:
 def _artifact_is_relevant(name: str) -> bool:
     normalized = name.lower()
     return normalized.startswith(ARTIFACT_PREFIXES) and not normalized.startswith("drift-main-")
+
+
+def _summarize_errors(errors: list[str] | tuple[str, ...]) -> list[str]:
+    expired_runs: Counter[str] = Counter()
+    other_errors: list[str] = []
+    expired_pattern = re.compile(r"^run (\d+), artifact .+: artifact expired$")
+
+    for error in errors:
+        match = expired_pattern.match(error)
+        if match:
+            expired_runs[match.group(1)] += 1
+        else:
+            other_errors.append(error)
+
+    summaries = [
+        f"run {run_id}: {count} artifacts expired"
+        for run_id, count in expired_runs.items()
+    ]
+    summaries.extend(other_errors)
+    max_summaries = 10
+    if len(summaries) > max_summaries:
+        omitted = len(summaries) - (max_summaries - 1)
+        summaries = summaries[: max_summaries - 1]
+        summaries.append(f"{omitted} additional errors omitted")
+    return summaries
 
 
 async def _set_sync_status(
@@ -364,7 +391,7 @@ async def _persist_run(
         run.import_status = SanpImportStatus.PARTIAL
     else:
         run.import_status = SanpImportStatus.COMPLETE
-    run.error_message = "; ".join(collected.errors) or None
+    run.error_message = "; ".join(_summarize_errors(collected.errors)) or None
     await _refresh_run_counts(db, run)
     return run.import_status
 
@@ -389,6 +416,8 @@ async def sync_from_source(db: AsyncSession) -> SanpHealthSyncResult:
             for source in runs
             if (item := _collect_run_metadata(source, attempted_at)).completed_at >= cutoff
         ]
+        artifact_retry_cutoff = attempted_at - timedelta(hours=ARTIFACT_RETRY_HOURS)
+        metadata = [item for item in metadata if item.completed_at >= artifact_retry_cutoff]
 
         complete_run_ids: set[int] = set()
         if metadata:
@@ -458,7 +487,9 @@ async def sync_from_source(db: AsyncSession) -> SanpHealthSyncResult:
                     if collected.metadata.github_run_id not in completed_run_ids
                 ]
 
-            errors = [error for collected in collected_runs for error in collected.errors]
+            errors = _summarize_errors(
+                [error for collected in collected_runs for error in collected.errors]
+            )
             for collected in collected_runs:
                 try:
                     async with db.begin_nested():
@@ -469,6 +500,8 @@ async def sync_from_source(db: AsyncSession) -> SanpHealthSyncResult:
                 else:
                     run_statuses.append(run_status)
                     imported_run_count += 1
+
+            errors = _summarize_errors(errors)
 
             if not run_statuses or any(
                 status is not SanpImportStatus.FAILED for status in run_statuses
@@ -589,12 +622,23 @@ async def get_latest_report(db: AsyncSession) -> SanpHealthLatestResponse:
         select(SanpHealthRun).order_by(SanpHealthRun.completed_at.desc()).limit(1)
     )
 
-    stale_reason = sync_status.last_error if sync_status is not None else None
+    sync_failed = bool(
+        sync_status is not None
+        and sync_status.last_error
+        and (
+            sync_status.last_success_at is None
+            or sync_status.last_attempt_at > sync_status.last_success_at
+        )
+    )
+    stale_reason = sync_status.last_error if sync_failed and sync_status is not None else None
     if (
         stale_reason is None
         and report is not None
         and newest is not None
         and newest.completed_at > report.report.completed_at
+        and newest.completed_at
+        >= (sync_status.last_attempt_at if sync_status is not None else _utcnow())
+        - timedelta(hours=ARTIFACT_RETRY_HOURS)
         and newest.import_status is not SanpImportStatus.COMPLETE
     ):
         stale_reason = newest.error_message or "Latest report is incomplete"

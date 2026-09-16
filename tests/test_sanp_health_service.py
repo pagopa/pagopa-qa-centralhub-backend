@@ -27,12 +27,14 @@ from app.models.sanp_health import (
 from app.schemas.sanp_health import SanpHealthSyncResult
 from app.services import sanp_health as sanp_health_service
 from app.services.sanp_health import (
+    ARTIFACT_RETRY_HOURS,
     REPOSITORY,
     RETENTION_DAYS,
     SYNC_LOCK_ID,
     WORKFLOW_FILE,
     SanpHealthSyncInProgressError,
     _collect_run,
+    _summarize_errors,
     get_latest_report,
     get_report_detail,
     get_sync_status,
@@ -243,6 +245,29 @@ async def test_sync_imports_completed_success_and_failure_runs_within_cutoff(
 
 
 @pytest.mark.anyio
+async def test_sync_does_not_retry_runs_past_artifact_retention(db: AsyncSession) -> None:
+    expired_run = _run(
+        12,
+        completed_at=NOW - timedelta(hours=ARTIFACT_RETRY_HOURS, seconds=1),
+    )
+    client = _client(
+        [expired_run],
+        {12: [_artifact(121, "drift-d-payments")]},
+        {},
+    )
+
+    result = await _sync(db, client)
+
+    assert result.status is SanpImportStatus.COMPLETE
+    assert result.imported_run_count == 0
+    assert result.errors == []
+    client.list_run_artifacts.assert_not_awaited()
+    status = await db.get(SanpHealthSyncStatus, 1)
+    assert status is not None
+    assert status.last_error is None
+
+
+@pytest.mark.anyio
 async def test_sync_skips_complete_run_and_retries_partial_run(db: AsyncSession) -> None:
     complete = SanpHealthRun(
         id=uuid.uuid4(),
@@ -371,6 +396,35 @@ async def test_bad_artifact_marks_partial_but_persists_valid_result(db: AsyncSes
     assert run.error_message and "drift-d-bad" in run.error_message
     environments = list(await db.scalars(select(SanpHealthResult.environment)))
     assert environments == [SanpEnvironment.COLLAUDO]
+
+
+@pytest.mark.anyio
+async def test_expired_artifact_errors_are_compacted(db: AsyncSession) -> None:
+    artifacts = [
+        {**_artifact(550 + index, f"drift-d-spec-{index}"), "expired": True}
+        for index in range(5)
+    ]
+    client = _client([_run(55)], {55: artifacts}, {})
+
+    result = await _sync(db, client)
+
+    assert result.status is SanpImportStatus.FAILED
+    assert result.errors == ["run 55: 5 artifacts expired"]
+    run = await db.scalar(select(SanpHealthRun).where(SanpHealthRun.github_run_id == 55))
+    assert run is not None
+    assert run.error_message == "run 55: 5 artifacts expired"
+
+
+def test_error_summary_has_an_absolute_limit() -> None:
+    errors = [
+        f"run {run_id}, artifact drift-d-api: artifact expired"
+        for run_id in range(12)
+    ]
+
+    summary = _summarize_errors(errors)
+
+    assert len(summary) == 10
+    assert summary[-1] == "3 additional errors omitted"
 
 
 @pytest.mark.anyio
@@ -993,5 +1047,70 @@ async def test_latest_without_complete_report_returns_empty_response(db: AsyncSe
     latest = await get_latest_report(db)
 
     assert latest.report is None
+    assert latest.is_stale is False
+    assert latest.stale_reason is None
+
+
+@pytest.mark.anyio
+async def test_latest_is_not_stale_when_partial_sync_completed_after_report(
+    db: AsyncSession,
+) -> None:
+    run = await _add_query_report(db)
+    db.add(
+        SanpHealthSyncStatus(
+            id=1,
+            last_attempt_at=NOW + timedelta(minutes=10),
+            last_success_at=NOW + timedelta(minutes=10),
+            last_error="2 artifact scaduti in run storici",
+            imported_run_count=1,
+        )
+    )
+    await db.commit()
+
+    latest = await get_latest_report(db)
+
+    assert latest.report is not None
+    assert latest.report.report.id == run.id
+    assert latest.is_stale is False
+    assert latest.stale_reason is None
+
+
+@pytest.mark.anyio
+async def test_latest_ignores_incomplete_runs_past_artifact_retention(
+    db: AsyncSession,
+) -> None:
+    run = await _add_query_report(db)
+    run.completed_at = NOW - timedelta(days=2)
+    db.add(
+        SanpHealthRun(
+            id=uuid.uuid4(),
+            github_run_id=92,
+            run_number=92,
+            head_sha="2" * 40,
+            workflow_branch="master",
+            conclusion="failure",
+            html_url="https://example.test/92",
+            started_at=NOW - timedelta(hours=26),
+            completed_at=NOW - timedelta(hours=25),
+            synced_at=NOW - timedelta(hours=25),
+            import_status=SanpImportStatus.PARTIAL,
+            error_message="artifact expired",
+        )
+    )
+    db.add(
+        SanpHealthSyncStatus(
+            id=1,
+            last_attempt_at=NOW,
+            last_success_at=NOW,
+            last_error=None,
+            imported_run_count=0,
+        )
+    )
+    await db.commit()
+
+    latest = await get_latest_report(db)
+
+    assert latest.report is not None
+    assert latest.report.report.id == run.id
     assert latest.is_stale is False
     assert latest.stale_reason is None
