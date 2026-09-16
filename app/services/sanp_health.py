@@ -77,6 +77,7 @@ class _CollectedRun:
     metadata: _RunMetadata
     payloads: tuple[DriftArtifactPayload, ...]
     errors: tuple[str, ...]
+    artifact_listing_error: httpx.HTTPError | None = None
 
 
 def _utcnow() -> datetime:
@@ -163,20 +164,30 @@ async def _collect_pages(
         page += 1
 
 
-async def _list_workflow_runs(client: GitHubClient) -> list[dict[str, Any]]:
-    return await _collect_pages(
-        lambda page, per_page: client.list_workflow_runs(
+async def _list_workflow_runs(
+    client: GitHubClient,
+    cutoff: datetime,
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    page = 1
+    while True:
+        current = await client.list_workflow_runs(
             WORKFLOW_FILE,
             status="completed",
-            per_page=per_page,
+            per_page=PAGE_SIZE,
             page=page,
         )
-    )
+        for source in current:
+            completed_value = source.get("updated_at") or source.get("completed_at")
+            if completed_value and _parse_timestamp(str(completed_value)) < cutoff:
+                return items
+            items.append(source)
+        if len(current) < PAGE_SIZE:
+            return items
+        page += 1
 
 
-async def _list_run_artifacts(
-    client: GitHubClient, github_run_id: int
-) -> list[dict[str, Any]]:
+async def _list_run_artifacts(client: GitHubClient, github_run_id: int) -> list[dict[str, Any]]:
     return await _collect_pages(
         lambda page, per_page: client.list_run_artifacts(
             github_run_id,
@@ -189,16 +200,19 @@ async def _list_run_artifacts(
 async def _collect_run(client: GitHubClient, metadata: _RunMetadata) -> _CollectedRun:
     errors: list[str] = []
     payloads: list[DriftArtifactPayload] = []
+    artifact_listing_error: httpx.HTTPError | None = None
     try:
         artifacts = await _list_run_artifacts(client, metadata.github_run_id)
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError as exc:
+        artifacts = []
+        artifact_listing_error = exc
+        errors.append(f"run {metadata.github_run_id}: artifact listing failed")
+    except ValueError:
         artifacts = []
         errors.append(f"run {metadata.github_run_id}: artifact listing failed")
 
     relevant_artifacts = [
-        artifact
-        for artifact in artifacts
-        if _artifact_is_relevant(str(artifact.get("name", "")))
+        artifact for artifact in artifacts if _artifact_is_relevant(str(artifact.get("name", "")))
     ]
     if not relevant_artifacts and not errors:
         errors.append(f"run {metadata.github_run_id}: no drift artifacts found")
@@ -223,7 +237,12 @@ async def _collect_run(client: GitHubClient, metadata: _RunMetadata) -> _Collect
         if payload is not None:
             payloads.append(payload)
 
-    return _CollectedRun(metadata=metadata, payloads=tuple(payloads), errors=tuple(errors))
+    return _CollectedRun(
+        metadata=metadata,
+        payloads=tuple(payloads),
+        errors=tuple(errors),
+        artifact_listing_error=artifact_listing_error,
+    )
 
 
 async def _upsert_result(
@@ -308,9 +327,7 @@ async def _persist_run(
 ) -> SanpImportStatus:
     metadata = collected.metadata
     run = await db.scalar(
-        select(SanpHealthRun).where(
-            SanpHealthRun.github_run_id == metadata.github_run_id
-        )
+        select(SanpHealthRun).where(SanpHealthRun.github_run_id == metadata.github_run_id)
     )
     if run is None:
         run = SanpHealthRun(
@@ -365,8 +382,8 @@ async def sync_from_source(db: AsyncSession) -> SanpHealthSyncResult:
 
     client = GitHubClient(token=settings.github_token, repo=REPOSITORY)
     try:
-        runs = await _list_workflow_runs(client)
         cutoff = attempted_at - timedelta(days=RETENTION_DAYS)
+        runs = await _list_workflow_runs(client, cutoff)
         metadata = [
             item
             for source in runs
@@ -378,9 +395,7 @@ async def sync_from_source(db: AsyncSession) -> SanpHealthSyncResult:
             complete_run_ids = set(
                 await db.scalars(
                     select(SanpHealthRun.github_run_id).where(
-                        SanpHealthRun.github_run_id.in_(
-                            item.github_run_id for item in metadata
-                        ),
+                        SanpHealthRun.github_run_id.in_(item.github_run_id for item in metadata),
                         SanpHealthRun.import_status == SanpImportStatus.COMPLETE,
                     )
                 )
@@ -392,6 +407,12 @@ async def sync_from_source(db: AsyncSession) -> SanpHealthSyncResult:
             for item in metadata
             if item.github_run_id not in complete_run_ids
         ]
+        if collected_runs and all(
+            collected.artifact_listing_error is not None for collected in collected_runs
+        ):
+            artifact_listing_error = collected_runs[0].artifact_listing_error
+            if artifact_listing_error is not None:
+                raise artifact_listing_error
     except (httpx.HTTPError, ValueError):
         await _record_failed_sync_status(
             db,
@@ -409,6 +430,7 @@ async def sync_from_source(db: AsyncSession) -> SanpHealthSyncResult:
 
     run_statuses: list[SanpImportStatus] = []
     errors: list[str] = []
+    imported_run_count = 0
     try:
         async with db.begin():
             lock_acquired = bool(
@@ -424,8 +446,7 @@ async def sync_from_source(db: AsyncSession) -> SanpHealthSyncResult:
                     await db.scalars(
                         select(SanpHealthRun.github_run_id).where(
                             SanpHealthRun.github_run_id.in_(
-                                collected.metadata.github_run_id
-                                for collected in collected_runs
+                                collected.metadata.github_run_id for collected in collected_runs
                             ),
                             SanpHealthRun.import_status == SanpImportStatus.COMPLETE,
                         )
@@ -439,18 +460,22 @@ async def sync_from_source(db: AsyncSession) -> SanpHealthSyncResult:
 
             errors = [error for collected in collected_runs for error in collected.errors]
             for collected in collected_runs:
-                run_statuses.append(await _persist_run(db, collected))
+                try:
+                    async with db.begin_nested():
+                        run_status = await _persist_run(db, collected)
+                except Exception:
+                    run_statuses.append(SanpImportStatus.FAILED)
+                    errors.append(f"run {collected.metadata.github_run_id}: persistence failed")
+                else:
+                    run_statuses.append(run_status)
+                    imported_run_count += 1
 
             if not run_statuses or any(
                 status is not SanpImportStatus.FAILED for status in run_statuses
             ):
-                await db.execute(
-                    delete(SanpHealthRun).where(SanpHealthRun.completed_at < cutoff)
-                )
+                await db.execute(delete(SanpHealthRun).where(SanpHealthRun.completed_at < cutoff))
 
-            if run_statuses and all(
-                status is SanpImportStatus.FAILED for status in run_statuses
-            ):
+            if run_statuses and all(status is SanpImportStatus.FAILED for status in run_statuses):
                 status = SanpImportStatus.FAILED
             elif any(status is not SanpImportStatus.COMPLETE for status in run_statuses):
                 status = SanpImportStatus.PARTIAL
@@ -462,7 +487,7 @@ async def sync_from_source(db: AsyncSession) -> SanpHealthSyncResult:
                 attempted_at=attempted_at,
                 succeeded_at=attempted_at if status is not SanpImportStatus.FAILED else None,
                 error="; ".join(errors) or None,
-                imported_run_count=len(collected_runs),
+                imported_run_count=imported_run_count,
             )
     except SanpHealthSyncInProgressError:
         raise
@@ -476,15 +501,13 @@ async def sync_from_source(db: AsyncSession) -> SanpHealthSyncResult:
 
     return SanpHealthSyncResult(
         status=status,
-        imported_run_count=len(collected_runs),
+        imported_run_count=imported_run_count,
         errors=errors,
     )
 
 
 async def list_reports(db: AsyncSession) -> list[SanpHealthRun]:
-    reports = await db.scalars(
-        select(SanpHealthRun).order_by(SanpHealthRun.completed_at.desc())
-    )
+    reports = await db.scalars(select(SanpHealthRun).order_by(SanpHealthRun.completed_at.desc()))
     return list(reports)
 
 
@@ -559,9 +582,7 @@ async def get_latest_report(db: AsyncSession) -> SanpHealthLatestResponse:
         .limit(1)
     )
     report = (
-        await get_report_detail(db, latest_complete_id)
-        if latest_complete_id is not None
-        else None
+        await get_report_detail(db, latest_complete_id) if latest_complete_id is not None else None
     )
     sync_status = await get_sync_status(db)
     newest = await db.scalar(

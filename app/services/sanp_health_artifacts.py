@@ -11,17 +11,29 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_fie
 MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
 MAX_RESULT_JSON_BYTES = 2 * 1024 * 1024
 
-ENVIRONMENT_MAP = MappingProxyType({
-    "DEV": "SANP",
-    "UAT": "COLLAUDO",
-    "PROD": "PRODUZIONE",
-})
+ENVIRONMENT_MAP = MappingProxyType(
+    {
+        "DEV": "SANP",
+        "UAT": "COLLAUDO",
+        "PROD": "PRODUZIONE",
+    }
+)
 
-LEVEL_MAP = MappingProxyType({
-    3: "error",
-    2: "warning",
-    1: "info",
-})
+ARTIFACT_PREFIX_ENVIRONMENT_MAP = MappingProxyType(
+    {
+        "drift-d-": "DEV",
+        "drift-u-": "UAT",
+        "drift-p-": "PROD",
+    }
+)
+
+LEVEL_MAP = MappingProxyType(
+    {
+        3: "error",
+        2: "warning",
+        1: "info",
+    }
+)
 
 
 class DriftArtifactError(Exception):
@@ -92,6 +104,20 @@ def parse_drift_artifact(name: str, payload: bytes) -> DriftArtifactPayload | No
 
     if result.env == "MAIN":
         return None
+
+    normalized_name = name.lower()
+    expected_environment = next(
+        (
+            environment
+            for prefix, environment in ARTIFACT_PREFIX_ENVIRONMENT_MAP.items()
+            if normalized_name.startswith(prefix)
+        ),
+        None,
+    )
+    if expected_environment is not None and result.env != expected_environment:
+        raise DriftArtifactError(
+            f"artifact prefix requires {expected_environment} environment, got {result.env}"
+        )
 
     environment = ENVIRONMENT_MAP.get(result.env)
     if environment is None:

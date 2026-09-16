@@ -197,6 +197,24 @@ def test_parse_rejects_unknown_environment() -> None:
         parse_drift_artifact("drift-q-gpd", _result_zip(payload))
 
 
+@pytest.mark.parametrize(
+    ("artifact_name", "payload_env"),
+    [
+        ("drift-d-gpd", "UAT"),
+        ("drift-u-gpd", "PROD"),
+        ("drift-p-gpd", "DEV"),
+    ],
+)
+def test_parse_rejects_artifact_prefix_environment_mismatch(
+    artifact_name: str,
+    payload_env: str,
+) -> None:
+    payload = {**VALID_RESULT, "env": payload_env}
+
+    with pytest.raises(DriftArtifactError, match="prefix.*environment"):
+        parse_drift_artifact(artifact_name, _result_zip(payload))
+
+
 def test_parse_skips_drift_main_artifact() -> None:
     assert parse_drift_artifact("drift-main-gpd", b"not even a zip") is None
 

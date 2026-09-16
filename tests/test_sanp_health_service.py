@@ -25,6 +25,7 @@ from app.models.sanp_health import (
     SanpResultStatus,
 )
 from app.schemas.sanp_health import SanpHealthSyncResult
+from app.services import sanp_health as sanp_health_service
 from app.services.sanp_health import (
     REPOSITORY,
     RETENTION_DAYS,
@@ -130,12 +131,12 @@ def _client(
     payloads: dict[int, bytes],
 ) -> AsyncMock:
     client = AsyncMock()
-    client.list_workflow_runs.side_effect = (
-        lambda _workflow_file, **kwargs: runs if kwargs.get("page", 1) == 1 else []
+    client.list_workflow_runs.side_effect = lambda _workflow_file, **kwargs: (
+        runs if kwargs.get("page", 1) == 1 else []
     )
     client.list_run_artifacts.side_effect = lambda run_id, **kwargs: artifacts.get(run_id, [])[
-        (kwargs.get("page", 1) - 1) * kwargs.get("per_page", 100) :
-        kwargs.get("page", 1) * kwargs.get("per_page", 100)
+        (kwargs.get("page", 1) - 1) * kwargs.get("per_page", 100) : kwargs.get("page", 1)
+        * kwargs.get("per_page", 100)
     ]
     client.download_artifact.side_effect = lambda artifact_id, **_: payloads[artifact_id]
     return client
@@ -171,31 +172,23 @@ async def test_sync_rejects_missing_github_token(db: AsyncSession) -> None:
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("last_page", [[], [_run(201)]])
-async def test_sync_paginates_workflow_runs_until_empty_or_short_page(
+async def test_sync_stops_workflow_pagination_when_ordered_page_crosses_cutoff(
     db: AsyncSession,
-    last_page: list[dict[str, Any]],
 ) -> None:
+    current_runs = [_run(201), _run(200)]
     old_runs = [
-        _run(run_id, completed_at=NOW - timedelta(days=RETENTION_DAYS + 1))
-        for run_id in range(1, 201)
+        _run(run_id, completed_at=NOW - timedelta(days=RETENTION_DAYS, seconds=1))
+        for run_id in range(1, 99)
     ]
-    pages = {1: old_runs[:100], 2: old_runs[100:], 3: last_page}
+    pages = {1: current_runs + old_runs, 2: []}
     client = AsyncMock()
     client.list_workflow_runs.side_effect = lambda _workflow, **kwargs: pages[kwargs["page"]]
     client.list_run_artifacts.return_value = []
 
     await _sync(db, client)
 
-    assert [call.kwargs["page"] for call in client.list_workflow_runs.await_args_list] == [
-        1,
-        2,
-        3,
-    ]
-    assert all(
-        call.kwargs["per_page"] == 100
-        for call in client.list_workflow_runs.await_args_list
-    )
+    assert [call.kwargs["page"] for call in client.list_workflow_runs.await_args_list] == [1]
+    assert all(call.kwargs["per_page"] == 100 for call in client.list_workflow_runs.await_args_list)
 
 
 @pytest.mark.anyio
@@ -381,6 +374,30 @@ async def test_bad_artifact_marks_partial_but_persists_valid_result(db: AsyncSes
 
 
 @pytest.mark.anyio
+async def test_prefix_environment_mismatch_marks_partial_but_persists_valid_result(
+    db: AsyncSession,
+) -> None:
+    client = _client(
+        [_run(52)],
+        {52: [_artifact(521, "drift-d-mismatch"), _artifact(522, "drift-u-valid")]},
+        {
+            521: _zip_payload(spec_name="mismatch.json", env="UAT"),
+            522: _zip_payload(spec_name="valid.json", env="UAT"),
+        },
+    )
+
+    result = await _sync(db, client)
+
+    assert result.status is SanpImportStatus.PARTIAL
+    assert result.imported_run_count == 1
+    assert result.errors == ["run 52, artifact drift-d-mismatch: invalid artifact"]
+    stored = list(await db.scalars(select(SanpHealthResult)))
+    assert [(item.spec_name, item.environment) for item in stored] == [
+        ("valid.json", SanpEnvironment.COLLAUDO)
+    ]
+
+
+@pytest.mark.anyio
 async def test_overlong_artifact_marks_partial_but_persists_valid_result(
     db: AsyncSession,
 ) -> None:
@@ -456,33 +473,143 @@ async def test_global_github_failure_preserves_reports_and_updates_sync_status(
 
 
 @pytest.mark.anyio
-async def test_unexpected_error_rolls_back_all_runs_updates_status_and_reraises(
+async def test_all_artifact_listing_http_failures_are_global_github_failure(
+    db: AsyncSession,
+) -> None:
+    client = _client([_run(74), _run(73)], {}, {})
+    client.list_run_artifacts.side_effect = httpx.ConnectError("GitHub unavailable")
+
+    with pytest.raises(httpx.ConnectError, match="GitHub unavailable"):
+        await _sync(db, client)
+
+    assert await db.scalar(select(func.count()).select_from(SanpHealthRun)) == 0
+    status = await db.get(SanpHealthSyncStatus, 1)
+    assert status is not None
+    assert status.last_attempt_at == NOW
+    assert status.last_success_at is None
+    assert status.last_error == "GitHub request failed"
+    assert status.imported_run_count == 0
+
+
+@pytest.mark.anyio
+async def test_single_artifact_listing_http_failure_remains_partial(
+    db: AsyncSession,
+) -> None:
+    client = _client(
+        [_run(76), _run(75)],
+        {75: [_artifact(751, "drift-d-valid")]},
+        {751: _zip_payload()},
+    )
+
+    async def list_artifacts(run_id: int, **_kwargs: Any) -> list[dict[str, Any]]:
+        if run_id == 76:
+            raise httpx.ConnectError("one listing failed")
+        return [_artifact(751, "drift-d-valid")]
+
+    client.list_run_artifacts.side_effect = list_artifacts
+
+    result = await _sync(db, client)
+
+    assert result.status is SanpImportStatus.PARTIAL
+    assert result.imported_run_count == 2
+    assert result.errors == ["run 76: artifact listing failed"]
+    statuses = dict(
+        (await db.execute(select(SanpHealthRun.github_run_id, SanpHealthRun.import_status))).all()
+    )
+    assert statuses == {
+        75: SanpImportStatus.COMPLETE,
+        76: SanpImportStatus.FAILED,
+    }
+
+
+@pytest.mark.anyio
+async def test_persistence_error_rolls_back_only_failed_run_and_marks_sync_partial(
     db: AsyncSession,
 ) -> None:
     client = _client(
         [_run(72), _run(71)],
         {
             72: [_artifact(721, "drift-d-first")],
-            71: [_artifact(711, "drift-u-second")],
+            71: [
+                _artifact(711, "drift-u-second"),
+                _artifact(712, "drift-p-third"),
+            ],
         },
         {
             721: _zip_payload(spec_name="first.json"),
             711: _zip_payload(spec_name="second.json", env="UAT"),
+            712: _zip_payload(spec_name="third.json", env="PROD"),
         },
     )
+    original_upsert_result = sanp_health_service._upsert_result
+
+    async def fail_on_later_artifact(
+        session: AsyncSession,
+        run: SanpHealthRun,
+        payload: DriftArtifactPayload,
+    ) -> None:
+        if payload.file == "third.json":
+            raise RuntimeError("database detail must stay private")
+        await original_upsert_result(session, run, payload)
 
     with patch(
         "app.services.sanp_health._upsert_result",
-        new=AsyncMock(side_effect=[None, RuntimeError("database detail must stay private")]),
+        side_effect=fail_on_later_artifact,
     ):
-        with pytest.raises(RuntimeError, match="database detail must stay private"):
-            await _sync(db, client)
+        result = await _sync(db, client)
 
+    assert result.status is SanpImportStatus.PARTIAL
+    assert result.imported_run_count == 1
+    assert result.errors == ["run 71: persistence failed"]
+    runs = list(await db.scalars(select(SanpHealthRun)))
+    assert [run.github_run_id for run in runs] == [72]
+    stored_results = list(await db.scalars(select(SanpHealthResult)))
+    assert [item.spec_name for item in stored_results] == ["first.json"]
+    status = await db.get(SanpHealthSyncStatus, 1)
+    assert status is not None
+    assert status.last_success_at == NOW
+    assert status.last_error == "run 71: persistence failed"
+    assert "database detail" not in status.last_error
+    assert status.imported_run_count == 1
+
+
+@pytest.mark.anyio
+async def test_later_artifact_persistence_error_rolls_back_run_and_marks_sync_failed(
+    db: AsyncSession,
+) -> None:
+    client = _client(
+        [_run(77)],
+        {77: [_artifact(771, "drift-d-first"), _artifact(772, "drift-u-second")]},
+        {
+            771: _zip_payload(spec_name="first.json"),
+            772: _zip_payload(spec_name="second.json", env="UAT"),
+        },
+    )
+    original_upsert_result = sanp_health_service._upsert_result
+
+    async def fail_on_second_artifact(
+        session: AsyncSession,
+        run: SanpHealthRun,
+        payload: DriftArtifactPayload,
+    ) -> None:
+        if payload.file == "second.json":
+            raise RuntimeError("database detail must stay private")
+        await original_upsert_result(session, run, payload)
+
+    with patch(
+        "app.services.sanp_health._upsert_result",
+        side_effect=fail_on_second_artifact,
+    ):
+        result = await _sync(db, client)
+
+    assert result.status is SanpImportStatus.FAILED
+    assert result.imported_run_count == 0
+    assert result.errors == ["run 77: persistence failed"]
     assert await db.scalar(select(func.count()).select_from(SanpHealthRun)) == 0
     status = await db.get(SanpHealthSyncStatus, 1)
     assert status is not None
-    assert status.last_error == "SANP Health synchronization failed"
-    assert "database detail" not in status.last_error
+    assert status.last_success_at is None
+    assert status.last_error == "run 77: persistence failed"
     assert status.imported_run_count == 0
 
 
@@ -603,9 +730,8 @@ async def test_all_github_network_and_parsing_finishes_before_database_persisten
     client.download_artifact.side_effect = lambda *_args, **_kwargs: assert_outside_transaction(
         _zip_payload()
     )
-    def parse_outside_transaction(
-        name: str, content: bytes
-    ) -> DriftArtifactPayload | None:
+
+    def parse_outside_transaction(name: str, content: bytes) -> DriftArtifactPayload | None:
         assert db.in_transaction() is False
         return parse_drift_artifact(name, content)
 
