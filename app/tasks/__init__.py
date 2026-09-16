@@ -32,3 +32,5 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
+
+from app.tasks import sync_sanp_health  # noqa: E402, F401
