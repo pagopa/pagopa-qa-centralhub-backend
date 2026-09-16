@@ -122,6 +122,20 @@ Snapshot giornalieri delle posizioni debitorie GPD, sincronizzati dai run del wo
 
 Vedi `../README.md` per il dettaglio dell'algoritmo di sync.
 
+### SANP Health
+
+SANP Health importa dal repository `pagopa/pagopa-api` i report del workflow GitHub Actions `daily_api_spec_drift_detector.yaml`. Il deployment deve fornire `GITHUB_TOKEN` con permesso repository **Actions: Read**. Il polling Celery Beat viene eseguito ogni ora e conserva i run completati negli ultimi sette giorni; i risultati MAIN sono esclusi.
+
+Endpoint disponibili sotto `/api/v1/sanp-health`:
+
+- `GET /reports`: storico dei run conservati;
+- `GET /reports/latest`: ultimo report completo, con eventuale stato stale;
+- `GET /reports/{run_id}`: matrice e dettaglio di un run;
+- `GET /sync-status`: esito dell'ultimo tentativo di sincronizzazione;
+- `POST /sync`: sincronizzazione manuale, usata dal pulsante **Sincronizza ora** del frontend.
+
+Il sync manuale e quello schedulato condividono lo stesso servizio e sono serializzati. Un errore GitHub o di un artifact non elimina l'ultimo report completo; i run parziali vengono ritentati finché gli artifact restano disponibili.
+
 ### Auth & RBAC
 
 L'autenticazione (Google SSO) e l'enforcement dei permessi avvengono lato `qa-hub-frontend`; il backend espone i dati su cui si basa la RBAC e resta volutamente "open" (nessun middleware di auth sulle route API).
