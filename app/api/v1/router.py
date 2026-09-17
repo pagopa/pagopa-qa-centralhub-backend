@@ -20,9 +20,10 @@ from app.api.v1 import (
     releases,
     roles,
     runs,
+    sanp_health,
+    test_metrics,
     tm,
     users,
-    test_metrics
 )
 
 router = APIRouter()
@@ -34,6 +35,7 @@ router.include_router(runs.router, prefix="/runs", tags=["runs"])
 router.include_router(e2e.router, prefix="/e2e", tags=["e2e"])
 router.include_router(psp_fee.router, prefix="/psp-fees", tags=["psp-fees"])
 router.include_router(gpd_position.router, prefix="/gpd-position", tags=["gpd-position"])
+router.include_router(sanp_health.router, prefix="/sanp-health", tags=["sanp-health"])
 router.include_router(coverage.router, prefix="/coverage", tags=["coverage"])
 router.include_router(jira.router, prefix="/jira", tags=["jira"])
 router.include_router(releases.router, prefix="/releases", tags=["releases"])

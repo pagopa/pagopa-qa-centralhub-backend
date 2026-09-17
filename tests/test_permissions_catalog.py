@@ -8,8 +8,8 @@ def test_action_keys_match_catalog() -> None:
     assert ACTION_KEYS == {entry["key"] for entry in ACTION_CATALOG}
 
 
-def test_action_catalog_has_twelve_entries() -> None:
-    assert len(ACTION_CATALOG) == 12
+def test_action_catalog_has_thirteen_entries() -> None:
+    assert len(ACTION_CATALOG) == 13
 
 
 def test_action_catalog_has_data_quality_entries() -> None:

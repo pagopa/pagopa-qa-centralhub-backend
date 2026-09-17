@@ -38,18 +38,62 @@ class GitHubClient:
             data = resp.json()
             return base64.b64decode(data["content"].replace("\n", ""))
 
-    async def list_workflow_runs(self, workflow_file: str, per_page: int = 100, page: int = 1) -> list[dict]:
+    async def list_workflow_runs(
+        self,
+        workflow_file: str,
+        *,
+        status: str = "success",
+        per_page: int = 100,
+        page: int = 1,
+    ) -> list[dict]:
         url = f"{self.BASE_URL}/repos/{self.repo}/actions/workflows/{workflow_file}/runs"
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 url,
-                params={"status": "success", "per_page": per_page, "page": page},
+                params={"status": status, "per_page": per_page, "page": page},
                 headers=self._headers(),
                 timeout=30.0,
             )
             resp.raise_for_status()
             data = resp.json()
             return data.get("workflow_runs", [])
+
+    async def list_run_artifacts(
+        self, run_id: int, *, per_page: int = 100, page: int = 1
+    ) -> list[dict]:
+        url = f"{self.BASE_URL}/repos/{self.repo}/actions/runs/{run_id}/artifacts"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                url,
+                params={"per_page": per_page, "page": page},
+                headers=self._headers(),
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("artifacts", [])
+
+    async def download_artifact(self, artifact_id: int, *, max_bytes: int) -> bytes:
+        url = f"{self.BASE_URL}/repos/{self.repo}/actions/artifacts/{artifact_id}/zip"
+        async with httpx.AsyncClient() as client:
+            async with client.stream(
+                "GET",
+                url,
+                headers=self._headers(),
+                timeout=30.0,
+                follow_redirects=True,
+            ) as resp:
+                resp.raise_for_status()
+                content_length = resp.headers.get("Content-Length")
+                if content_length is not None and int(content_length) > max_bytes:
+                    raise ValueError("Artifact exceeds maximum size")
+
+                content = bytearray()
+                async for chunk in resp.aiter_bytes():
+                    if len(content) + len(chunk) > max_bytes:
+                        raise ValueError("Artifact exceeds maximum size")
+                    content.extend(chunk)
+                return bytes(content)
 
     async def get_job_log(self, run_id: int) -> str:
         async with httpx.AsyncClient() as client:

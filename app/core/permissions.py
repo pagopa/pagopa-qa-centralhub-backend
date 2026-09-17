@@ -50,6 +50,12 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
     },
     {
+        "key": "view:sanp_health",
+        "label": "SANP Health",
+        "category": "Test Results",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
+    },
+    {
         "key": "view:docs",
         "label": "Docs & Decks",
         "category": "Knowledge Base",
