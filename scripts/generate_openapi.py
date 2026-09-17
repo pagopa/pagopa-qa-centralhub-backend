@@ -94,6 +94,15 @@ def _make_apim_compatible(value: Any) -> Any:
         return value
 
     value = {key: _make_apim_compatible(item) for key, item in value.items()}
+    for exclusive_key, limit_key in (
+        ("exclusiveMinimum", "minimum"),
+        ("exclusiveMaximum", "maximum"),
+    ):
+        exclusive_value = value.get(exclusive_key)
+        if isinstance(exclusive_value, int | float) and not isinstance(exclusive_value, bool):
+            value[limit_key] = exclusive_value
+            value[exclusive_key] = True
+
     any_of = value.get("anyOf")
     if not isinstance(any_of, list) or len(any_of) != 2:
         return value

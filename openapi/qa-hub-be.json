@@ -1355,15 +1355,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SanpHealthSyncStatusOut"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Get Sync Status Api V1 Sanp Health Sync Status Get"
+                  "title": "Response Get Sync Status Api V1 Sanp Health Sync Status Get",
+                  "$ref": "#/components/schemas/SanpHealthSyncStatusOut",
+                  "nullable": true
                 }
               }
             }
@@ -4285,8 +4279,9 @@
           },
           "daily_rate": {
             "type": "number",
-            "exclusiveMinimum": 0.0,
-            "title": "Daily Rate"
+            "exclusiveMinimum": true,
+            "title": "Daily Rate",
+            "minimum": 0.0
           },
           "contract_start": {
             "type": "string",
@@ -4436,7 +4431,8 @@
           "daily_rate": {
             "title": "Daily Rate",
             "type": "number",
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": true,
+            "minimum": 0.0,
             "nullable": true
           },
           "contract_start": {
@@ -5591,48 +5587,24 @@
             "title": "Message"
           },
           "path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Path"
+            "title": "Path",
+            "type": "string",
+            "nullable": true
           },
           "operation": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Operation"
+            "title": "Operation",
+            "type": "string",
+            "nullable": true
           },
           "section": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Section"
+            "title": "Section",
+            "type": "string",
+            "nullable": true
           },
           "comment": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Comment"
+            "title": "Comment",
+            "type": "string",
+            "nullable": true
           },
           "change_order": {
             "type": "integer",
@@ -5657,29 +5629,17 @@
       "SanpHealthLatestResponse": {
         "properties": {
           "report": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SanpHealthReportDetailOut"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/SanpHealthReportDetailOut",
+            "nullable": true
           },
           "is_stale": {
             "type": "boolean",
             "title": "Is Stale"
           },
           "stale_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stale Reason"
+            "title": "Stale Reason",
+            "type": "string",
+            "nullable": true
           }
         },
         "type": "object",
@@ -5693,16 +5653,10 @@
       "SanpHealthMatrixCellOut": {
         "properties": {
           "id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
+            "title": "Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           },
           "environment": {
             "$ref": "#/components/schemas/SanpEnvironment"
@@ -5711,48 +5665,24 @@
             "$ref": "#/components/schemas/SanpResultStatus"
           },
           "source_branch": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Branch"
+            "title": "Source Branch",
+            "type": "string",
+            "nullable": true
           },
           "target_apim": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target Apim"
+            "title": "Target Apim",
+            "type": "string",
+            "nullable": true
           },
           "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
+            "title": "Display Name",
+            "type": "string",
+            "nullable": true
           },
           "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
+            "title": "Description",
+            "type": "string",
+            "nullable": true
           },
           "error_count": {
             "type": "integer",
@@ -5831,15 +5761,9 @@
             "$ref": "#/components/schemas/SanpHealthRunOut"
           },
           "sanp_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sanp Version"
+            "title": "Sanp Version",
+            "type": "string",
+            "nullable": true
           },
           "items": {
             "items": {
@@ -5923,15 +5847,9 @@
             "$ref": "#/components/schemas/SanpImportStatus"
           },
           "error_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Message"
+            "title": "Error Message",
+            "type": "string",
+            "nullable": true
           },
           "error_count": {
             "type": "integer",
@@ -5999,27 +5917,15 @@
             "title": "Last Attempt At"
           },
           "last_success_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Success At"
+            "title": "Last Success At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "last_error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Error"
+            "title": "Last Error",
+            "type": "string",
+            "nullable": true
           },
           "imported_run_count": {
             "type": "integer",
