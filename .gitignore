@@ -15,6 +15,7 @@ venv/
 htmlcov/
 .coverage
 *.log
+.python-version
 
 #Intellij
 .idea/
