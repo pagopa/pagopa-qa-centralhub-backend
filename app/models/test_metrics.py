@@ -17,6 +17,8 @@ class TriggerTypeEnum(enum.Enum):
     MANUAL = "MANUAL"
     CRON = "CRON"
     CI_PIPELINE = "CI_PIPELINE"
+    TAS = "TAS"
+    QA_GATE = "QA_GATE"
 
 class ScenarioStatusEnum(enum.Enum):
     PASSED = "PASSED"
@@ -72,6 +74,7 @@ class TestRun(Base):
     trigger_type = Column(Enum(TriggerTypeEnum, name="trigger_type_enum", schema="qachub"))
     
     test_version = Column(String)
+    test_origin = Column(String)
 
 class TestExecution(Base):
     __tablename__ = 'test_executions'
