@@ -18,6 +18,8 @@ class TriggerTypeEnum(str, Enum):
     MANUAL = "MANUAL"
     CRON = "CRON"
     CI_PIPELINE = "CI_PIPELINE"
+    TAS = "TAS"
+    QA_GATE = "QA_GATE"
 
 
 class ScenarioStatusEnum(str, Enum):
@@ -58,6 +60,7 @@ class TestRunCreate(BaseModel):
     env: str | None = None
     trigger_type: str | None = None
     test_version: str | None = None
+    test_origin: str | None = None
 
 class TestRunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -75,6 +78,7 @@ class TestRunOut(BaseModel):
     env: EnvEnum | None = None
     trigger_type: TriggerTypeEnum | None = None
     test_version: str | None = None
+    test_origin: str | None = None
 
 
 class TestExecutionOut(BaseModel):
