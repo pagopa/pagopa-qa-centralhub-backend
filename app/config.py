@@ -44,10 +44,10 @@ class Settings(BaseSettings):
 
     superset_main_dashboard_id: str = "1" 
     superset_url: str = "http://localhost:8088"
-    superset_guest_username: str = "service"
-    superset_guest_first_name: str = "service"
-    superset_guest_last_name: str = "service"
-    superset_username: str = "admin"
-    superset_password: str = "admin"
+    superset_guest_username: str = ""
+    superset_guest_first_name: str = ""
+    superset_guest_last_name: str = ""
+    superset_username: str = ""
+    superset_password: str = ""
 
 settings = Settings()
