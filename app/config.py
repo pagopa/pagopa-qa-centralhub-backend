@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Database
-    database_url: str = "postgresql+asyncpg://qachub:changeme@localhost:5432/qachub"
+    database_url: str = "postgresql+asyncpg://qachub:changeme@localhost:5400/qachub"
 
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"
@@ -42,10 +42,12 @@ class Settings(BaseSettings):
     # PSP Fee catalog (Data Hub)
     psp_fee_json_url: str = "https://pagopa-afm-p-st-fee.s3.eu-central-1.amazonaws.com/output_elenco_servizi.json"
 
-    superset_main_dashboard_id: str = "2" # default dashboard for UAT env 
+    superset_main_dashboard_id: str = "1" 
     superset_url: str = "http://localhost:8088"
     superset_guest_username: str = "service"
     superset_guest_first_name: str = "service"
     superset_guest_last_name: str = "service"
+    superset_username: str = "admin"
+    superset_password: str = "admin"
 
 settings = Settings()
