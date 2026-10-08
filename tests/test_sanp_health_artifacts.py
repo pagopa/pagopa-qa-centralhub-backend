@@ -61,6 +61,21 @@ def test_parse_valid_artifact() -> None:
     assert result.changes[0].id == "oasdiff-rule"
 
 
+def test_parse_ignores_unknown_change_fields() -> None:
+    change = {
+        **VALID_RESULT["changes"][0],
+        "operationId": "get-debt-positions-upload-report",
+        "fingerprint": "52f4ae5d77ab",
+        "futureMetadata": {"version": 2},
+    }
+    payload = {**VALID_RESULT, "env": "PROD", "changes": [change]}
+
+    result = parse_drift_artifact("drift-p-gpd_massive.json", _result_zip(payload))
+
+    assert result is not None
+    assert result.changes[0].id == "oasdiff-rule"
+
+
 @pytest.mark.parametrize(
     ("source_env", "expected_env"),
     [("DEV", "SANP"), ("UAT", "COLLAUDO"), ("PROD", "PRODUZIONE")],

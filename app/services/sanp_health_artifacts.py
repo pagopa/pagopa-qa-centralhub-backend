@@ -41,7 +41,7 @@ class DriftArtifactError(Exception):
 
 
 class DriftArtifactChange(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
 
     level: Literal[1, 2, 3]
     id: Annotated[str, Field(max_length=255)]
