@@ -24,6 +24,7 @@ from app.api.v1 import (
     test_metrics,
     tm,
     users,
+    metrics,
 )
 
 router = APIRouter()
@@ -49,3 +50,4 @@ router.include_router(roles.router, prefix="/roles", tags=["roles"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 router.include_router(tm.router, prefix="/tm", tags=["tm"])
 router.include_router(test_metrics.router, prefix="/test-metrics", tags=["test-metrics"])
+router.include_router(metrics.router, prefix="/metrics", tags=["metrics"])
