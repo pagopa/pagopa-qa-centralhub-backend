@@ -91,7 +91,12 @@ microservice-chart:
     PSP_FEE_JSON_URL: "https://pagopa-afm-p-st-fee.s3.eu-central-1.amazonaws.com/output_elenco_servizi.json"
     OTEL_EXPORTER_OTLP_ENDPOINT: ""
     OTEL_SERVICE_NAME: "qa-centralhub-backend"
-
+    SUPERSET_MAIN_DASHBOARD_ID: 2
+    SUPERSET_URL: "https://qa-superset.itn.internal.uat.platform.pagopa.it"
+    SUPERSET_USERNAME: "admin"
+    SUPERSET_GUEST_USERNAME: "service"
+    SUPERSET_GUEST_FIRST_NAME: "service"
+    SUPERSET_GUEST_LAST_NAME: "service"
   # TODO: confirm UAT Key Vault name and that the secrets are populated there.
   envSecret:
     DATABASE_URL: "qa-centralhub-database-url"
@@ -100,6 +105,8 @@ microservice-chart:
     ENCRYPTION_KEY: "qa-centralhub-encryption-key"
     GITHUB_TOKEN: "qa-centralhub-github-token"
     JIRA_API_TOKEN: "qa-centralhub-jira-api-token"
+    SUPERSET_PASSWORD: "qa-superset-password"
+   
 
   keyvault:
     name: "pagopa-u-itn-qa-kv"
