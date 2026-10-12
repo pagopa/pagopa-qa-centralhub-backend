@@ -6,9 +6,14 @@ from app.config import settings
 
 
 async def obtain_guest_token() -> str:
-    refresh_token = redis_client.get("superset:refresh-token").decode()
+    refresh_token = redis_client.get("superset:refresh-token")
+    if refresh_token:
+        refresh_token = refresh_token.decode()
     if refresh_token:
         session, access_token = await refresh_access(refresh_token)
+        if not access_token:
+            # silent login if the refresh token is invalid
+            session, access_token = await get_access_token()
     else:
         session, access_token = await get_access_token()
     if access_token == '':
@@ -42,7 +47,7 @@ async def get_access_token() -> tuple[Session, str]:
         # save refresh token on redis
         if refresh_token:
             print("[INFO][get_access_token] saved refresh token")
-            redis_client.set("superset:refresh-token", refresh_token)
+            redis_client.set("superset:refresh-token", refresh_token, ex= 3600 * 24)
 
         print("[INFO][get_access_token] obtained access token")
         response.raise_for_status()
@@ -124,7 +129,7 @@ async def refresh_access(refresh_token: str) -> tuple[Session, str]:
         new_refresh_token = data.get("refresh_token")
 
         if new_refresh_token:
-            redis_client.set("superset:refresh-token", new_refresh_token)
+            redis_client.set("superset:refresh-token", new_refresh_token, ex=3600 * 24)
             print("[INFO][refresh_access] saved new refresh token")
 
         print("[INFO][refresh_access] obtained new access token")
