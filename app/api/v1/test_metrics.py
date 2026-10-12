@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from app.deps import DbDep
 from app.models.test_metrics import TestSuite, TestExecution, TestRun
-from app.schemas.test_metrics import TestExecutionCreate, TestExecutionOut, TestSuiteOut, TestSuiteCreate, TestRunCreate, TestRunOut
+from app.schemas.test_metrics import TestExecutionCreate, TestExecutionOut, TestSuiteOut, TestSuiteCreate, TestRunCreate, TestRunOut, NrtListObject
 from app.services import test_metrics as test_metrics_svc
 
 router = APIRouter()
@@ -109,3 +109,19 @@ async def create_test_execution(
             detail="Failed to create test execution",
         )
     return test_executions_out
+
+@router.get("/nrts", response_model=list[NrtListObject])
+async def get_nrts(db: DbDep, test_object: str | None = Query(default=None)):
+    try:
+        nrts = await test_metrics_svc.get_nrts(db, test_object)
+        if nrts is None or len(nrts) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No NRTs found",
+            )
+        return nrts
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{str(e)}",
+        )

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from enum import Enum
 from typing import Any
 
@@ -107,3 +107,16 @@ class TestExecutionCreate(BaseModel):
     retries: int | None = None
 
 
+class NrtListObject(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    run_id: uuid.UUID
+    date: date | None 
+    test_object: str
+    total_scenarios: int | None = None
+    passed_scenarios: int | None = None
+    failed_scenarios: int | None = None
+    broken_scenarios: int | None = None
+    skipped_scenarios: int | None = None
+    trigger_type: str | None = None
+    origin: str | None = None
