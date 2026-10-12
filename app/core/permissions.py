@@ -93,7 +93,7 @@ ACTION_CATALOG: list[CatalogEntry] = [
     },
     {
         "key": "view:metrics",
-        "label": "Metrics (visualizza)",
+        "label": "Metriche",
         "category": "Data Quality",
         "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
     },
