@@ -94,7 +94,7 @@ microservice-chart:
     PSP_FEE_JSON_URL: "https://pagopa-afm-p-st-fee.s3.eu-central-1.amazonaws.com/output_elenco_servizi.json"
     OTEL_EXPORTER_OTLP_ENDPOINT: ""
     OTEL_SERVICE_NAME: "qa-centralhub-backend"
-    SUPERSET_MAIN_DASHBOARD_ID: 11
+    SUPERSET_MAIN_DASHBOARD_ID: "11"
     SUPERSET_URL: "https://qa-superset.itn.internal.dev.platform.pagopa.it"
     SUPERSET_USERNAME: "admin"
     SUPERSET_GUEST_USERNAME: "service"
