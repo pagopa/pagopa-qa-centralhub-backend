@@ -147,6 +147,15 @@ L'autenticazione (Google SSO) e l'enforcement dei permessi avvengono lato `qa-hu
 - **`GET /api/v1/roles`**: restituisce `RoleMatrixResponse` (catalogo azioni, ruoli, matrice permessi) usato da `usePermissions`/`useRoleMatrix` nel frontend.
 - **`PATCH /api/v1/roles/{role}`**: aggiorna i permessi di un ruolo non di sistema (usato dalla tab "Ruoli & Permessi").
 
+### Feature visibility
+
+Il catalogo delle pagine controllabili vive in `app/core/features.py`; include le pagine operative, API Docs e Settings E2E/Gherkin. Gli override globali sono persistiti nella tabella `feature_visibility` introdotta dalla migration `0015`. Una feature senza override è abilitata per default, incluse le voci aggiunte in seguito al catalogo.
+
+- `GET /api/v1/features`: restituisce catalogo, route, permesso RBAC associato e stato effettivo;
+- `PATCH /api/v1/features/{feature_key}` con `{ "enabled": boolean }`: salva un override per l'ambiente corrente.
+
+Il frontend richiede sia la feature abilitata sia il permesso RBAC del ruolo. In linea con l'architettura corrente, gli endpoint backend restano aperti; disabilitare API Docs nasconde il link dal portale, ma non blocca l'URL Swagger diretto.
+
 ### Docs HTML proxy
 
 `GET /api/v1/docs/proxy?url=<url>` fetches the page server-side, converts GitHub blob URLs to raw.githubusercontent.com, injects `<base href>`, strips `X-Frame-Options`, and returns an `HTMLResponse`. Used to embed external HTML pages as iframes without CSP/CORS issues.
