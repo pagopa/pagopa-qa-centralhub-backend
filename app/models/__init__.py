@@ -7,6 +7,7 @@ from app.models.coverage import Coverage
 from app.models.dashboard import Dashboard, DashboardWidget
 from app.models.docs import DocItem  # noqa: F401
 from app.models.e2e import E2eRun, E2eSuite
+from app.models.feature_visibility import FeatureVisibility  # noqa: F401
 from app.models.gpd_position import GpdPositionSnapshot, GpdPositionSyncStatus  # noqa: F401
 from app.models.integration import Integration
 from app.models.notification_rule import NotificationRule
@@ -53,6 +54,7 @@ __all__ = [
     "AuditLog",
     "E2eSuite",
     "E2eRun",
+    "FeatureVisibility",
     "BddProject",
     "BddScenario",
     "BddSettings",
