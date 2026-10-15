@@ -91,6 +91,13 @@ FEATURE_CATALOG: tuple[FeatureDefinition, ...] = (
         "external": False,
     },
     {
+        "key": "ea_map",
+        "label": "EA Map",
+        "route": "/ea-map",
+        "action": "view:ea_map",
+        "external": False,
+    },
+    {
         "key": "docs",
         "label": "Docs & Decks",
         "route": "/docs",

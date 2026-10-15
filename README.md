@@ -136,6 +136,25 @@ Endpoint disponibili sotto `/api/v1/sanp-health`:
 
 Il sync manuale e quello schedulato condividono lo stesso servizio e sono serializzati. Un errore GitHub o di un artifact non elimina l'ultimo report completo; i run parziali vengono ritentati finché gli artifact restano disponibili.
 
+### EA Map
+
+Mappa di Enterprise Architecture della piattaforma pagoPA (Blueprint, Architettura, Matrice QA, Guida). Il design completo è in `docs/ea-map/DESIGN.md`.
+
+I dati vivono nelle tabelle `ea_*` (migrazione `0019`). Il primo caricamento importa la knowledge base prodotta dagli script di discovery:
+
+```bash
+uv run python -m scripts.ea_import                         # seed in scripts/data/ea_kb_seed.json
+uv run python -m scripts.ea_import path/to/kb.json --replace  # ricarica da zero
+```
+
+Endpoint disponibili sotto `/api/v1/ea`:
+
+- `GET /kb`: knowledge base completa nel formato usato dalle viste;
+- `GET /nodes/{id}`: dettaglio di un nodo con legami in ingresso e uscita, segnali QA e documentazione;
+- `GET /nodes/{id}/impact?depth=3`: elementi a monte e a valle (CTE ricorsiva).
+
+Ogni legame dichiara `origin` (`helm`, `infra_rule`, `curated`, `manual`) e `status`; solo i legami `active` e `verified` sono serviti alle viste.
+
 ### Auth & RBAC
 
 L'autenticazione (Google SSO) e l'enforcement dei permessi avvengono lato `qa-hub-frontend`; il backend espone i dati su cui si basa la RBAC e resta volutamente "open" (nessun middleware di auth sulle route API).
