@@ -97,6 +97,30 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "category": "Data Quality",
         "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
     },
+    {
+        "key": "view:ea_map",
+        "label": "EA Map (visualizza)",
+        "category": "Architettura",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": True},
+    },
+    {
+        "key": "edit:ea_map",
+        "label": "EA Map (modifica legami e nodi)",
+        "category": "Architettura",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False},
+    },
+    {
+        "key": "edit:ea_qa",
+        "label": "EA Map (modifica dati QA manuali)",
+        "category": "Architettura",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False},
+    },
+    {
+        "key": "review:ea_map",
+        "label": "EA Map (revisione variazioni della sync)",
+        "category": "Architettura",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": False, "guest": False},
+    },
 ]
 
 ACTION_KEYS: set[str] = {entry["key"] for entry in ACTION_CATALOG}

@@ -7,6 +7,17 @@ from app.models.coverage import Coverage
 from app.models.dashboard import Dashboard, DashboardWidget
 from app.models.docs import DocItem  # noqa: F401
 from app.models.e2e import E2eRun, E2eSuite
+from app.models.ea import (  # noqa: F401
+    EaChange,
+    EaDocLink,
+    EaEdge,
+    EaMeta,
+    EaNode,
+    EaQaSignal,
+    EaRepoSnapshot,
+    EaSyncRun,
+    EaSyncStatus,
+)
 from app.models.feature_visibility import FeatureVisibility  # noqa: F401
 from app.models.gpd_position import GpdPositionSnapshot, GpdPositionSyncStatus  # noqa: F401
 from app.models.integration import Integration

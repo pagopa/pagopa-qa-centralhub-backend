@@ -136,6 +136,44 @@ Endpoint disponibili sotto `/api/v1/sanp-health`:
 
 Il sync manuale e quello schedulato condividono lo stesso servizio e sono serializzati. Un errore GitHub o di un artifact non elimina l'ultimo report completo; i run parziali vengono ritentati finché gli artifact restano disponibili.
 
+### EA Map
+
+Mappa di Enterprise Architecture della piattaforma pagoPA (Blueprint, Architettura, Matrice QA, Guida). Il design completo è in `docs/ea-map/DESIGN.md`.
+
+I dati vivono nelle tabelle `ea_*` (migrazioni `0019` e `0020`). Il primo caricamento importa la knowledge base prodotta dagli script di discovery:
+
+```bash
+uv run python -m scripts.ea_import                         # seed in scripts/data/ea_kb_seed.json
+uv run python -m scripts.ea_import path/to/kb.json --replace  # ricarica da zero
+```
+
+Endpoint disponibili sotto `/api/v1/ea`:
+
+- `GET /kb`: knowledge base completa nel formato usato dalle viste;
+- `GET /nodes/{id}`: dettaglio di un nodo con legami in ingresso e uscita, segnali QA e documentazione;
+- `GET /nodes/{id}/impact?depth=3`: elementi a monte e a valle (CTE ricorsiva);
+- `GET /nodes/{id}/history`: storico delle modifiche manuali (tabella `ea_edit_log`).
+
+Endpoint di modifica (nel frontend dietro `edit:ea_map`, i dati QA dietro `edit:ea_qa`; l'attore viaggia nel body come negli altri moduli):
+
+- `POST /edges`, `PATCH /edges/{id}`, `POST /edges/{id}/verify`, `POST /edges/{id}/remove`: aggiunta, correzione, conferma e rimozione logica di un legame;
+- `POST /nodes`, `PATCH /nodes/{id}`: creazione (componente, sistema esterno, datastore) e correzione di un nodo;
+- `PATCH /nodes/{id}/qa`: campi QA manuali (`under_qa`, `tas_ci_override`, `qa_owner`, `qa_notes`).
+
+Sincronizzazione con GitHub e Confluence (settimanale via Celery beat, oppure `POST /sync` dal pulsante "Sincronizza ora"):
+
+- `POST /sync` (202, 409 se già in corso), `GET /sync-status`, `GET /sync-runs`;
+- `GET /changes?status=pending,conflict`, `POST /changes/{id}/approve` · `/reject`, `POST /changes/bulk`: coda di revisione (nel frontend dietro `review:ea_map`).
+
+Usa `GITHUB_TOKEN` (deve poter leggere anche il repo privato del Nodo) e, per Confluence, `JIRA_BASE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN`. Da riga di comando:
+
+```bash
+uv run python -m scripts.ea_sync --dry-run   # calcola tutto e mostra le proposte, senza scrivere
+uv run python -m scripts.ea_sync             # esecuzione reale
+```
+
+Ogni legame dichiara `origin` (`helm`, `infra_rule`, `curated`, `manual`) e `status`; solo i legami `active` e `verified` sono serviti alle viste.
+
 ### Auth & RBAC
 
 L'autenticazione (Google SSO) e l'enforcement dei permessi avvengono lato `qa-hub-frontend`; il backend espone i dati su cui si basa la RBAC e resta volutamente "open" (nessun middleware di auth sulle route API).
