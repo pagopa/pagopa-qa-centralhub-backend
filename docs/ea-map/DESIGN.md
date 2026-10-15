@@ -101,7 +101,7 @@ Il punteggio di maturità non si salva: si calcola nel servizio con la stessa fo
 
 **`ea_sync_status`**: riga singola con l'ultimo esito, sullo stesso schema di `SanpHealthSyncStatus`.
 
-Le modifiche manuali vanno anche in `audit_logs` (`action` = `ea.edge.create`, `ea.edge.verify`, `ea.node.update`, `ea.change.approve`…, `resource_type` = `ea_edge`/`ea_node`).
+Le modifiche manuali vanno anche in `ea_edit_log` (`action` = `ea.edge.create`, `ea.edge.verify`, `ea.node.update`, `ea.qa.update`, `ea.change.approve`…, `entity` = `edge`/`node`, `actor`, `detail` JSONB con before/after). La tabella generica `audit_logs` del modello Hub non è mai stata creata da una migrazione, per questo l'EA usa una tabella propria.
 
 ### 3.2 Regole di precedenza
 
@@ -218,7 +218,7 @@ Scelte:
 | PR | Backend | Frontend |
 |---|---|---|
 | **PR1 – Lettura** | Modelli, migrazione `0019`, import, `GET /ea/kb`, `/nodes/{id}`, `/impact`, permessi e feature | Pagina `ea-map` con Blueprint, Architettura, Matrice QA, Guida; voce di menu |
-| **PR2 – Editing** | Endpoint di scrittura, `require_action`, audit log | Dialoghi di modifica, badge di origine e stato, editing QA |
+| **PR2 – Editing** | Endpoint di scrittura, `ea_edit_log` (storico), attori come testo (migrazione 0020) | Dialoghi di modifica, badge di origine e stato, editing QA |
 | **PR3 – Sync** | Servizio e task di sync, diff, coda, `/changes`, `/sync`, schedulazione | Tab Revisione, pulsante "Sincronizza ora", stato della sync |
 | **PR4 – Rifinitura** | Notifiche, export, metriche della sync | Export, rifiniture UX |
 

@@ -15,6 +15,7 @@ from app.models.ea import (
     EaChange,
     EaDocLink,
     EaEdge,
+    EaEditLog,
     EaMeta,
     EaNode,
     EaQaSignal,
@@ -32,7 +33,16 @@ SEED = Path(__file__).resolve().parents[1] / "scripts" / "data" / "ea_kb_seed.js
 
 
 async def _wipe(session: AsyncSession) -> None:
-    for model in (EaChange, EaSyncStatus, EaSyncRun, EaRepoSnapshot, EaDocLink, EaQaSignal, EaEdge):
+    for model in (
+        EaEditLog,
+        EaChange,
+        EaSyncStatus,
+        EaSyncRun,
+        EaRepoSnapshot,
+        EaDocLink,
+        EaQaSignal,
+        EaEdge,
+    ):
         await session.execute(delete(model))
     await session.execute(delete(EaNode).where(EaNode.parent_id.is_not(None)))
     await session.execute(delete(EaNode))

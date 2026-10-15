@@ -64,6 +64,7 @@ def _qa_payload(sig: EaQaSignal | None) -> dict[str, Any]:
         "nrt": nrt,
         "tas": bool(central),
         "tas_ci": tas_ci,
+        "tas_ci_override": sig.tas_ci_override,
         "nodo_bdd": facts.nodo_bdd,
         "under_qa": sig.under_qa,
         "qa_owner": sig.qa_owner,
@@ -263,6 +264,9 @@ async def get_node_detail(db: AsyncSession, node_id: str) -> dict[str, Any] | No
             "confidence": e.confidence,
             "note": e.note,
             "evidence": e.evidence,
+            "created_by": e.created_by,
+            "verified_by": e.verified_by,
+            "verified_at": e.verified_at,
         }
 
     return {
@@ -275,6 +279,7 @@ async def get_node_detail(db: AsyncSession, node_id: str) -> dict[str, Any] | No
         "source": node.source,
         "status": node.status,
         "verified_at": node.verified_at,
+        "verified_by": node.verified_by,
         "qa": _qa_payload(sig) if node.kind == "component" else None,
         "docs": [_doc_payload(d) for d in docs],
         "out": [edge(e) for e in out_edges],

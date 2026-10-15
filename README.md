@@ -140,7 +140,7 @@ Il sync manuale e quello schedulato condividono lo stesso servizio e sono serial
 
 Mappa di Enterprise Architecture della piattaforma pagoPA (Blueprint, Architettura, Matrice QA, Guida). Il design completo è in `docs/ea-map/DESIGN.md`.
 
-I dati vivono nelle tabelle `ea_*` (migrazione `0019`). Il primo caricamento importa la knowledge base prodotta dagli script di discovery:
+I dati vivono nelle tabelle `ea_*` (migrazioni `0019` e `0020`). Il primo caricamento importa la knowledge base prodotta dagli script di discovery:
 
 ```bash
 uv run python -m scripts.ea_import                         # seed in scripts/data/ea_kb_seed.json
@@ -151,7 +151,14 @@ Endpoint disponibili sotto `/api/v1/ea`:
 
 - `GET /kb`: knowledge base completa nel formato usato dalle viste;
 - `GET /nodes/{id}`: dettaglio di un nodo con legami in ingresso e uscita, segnali QA e documentazione;
-- `GET /nodes/{id}/impact?depth=3`: elementi a monte e a valle (CTE ricorsiva).
+- `GET /nodes/{id}/impact?depth=3`: elementi a monte e a valle (CTE ricorsiva);
+- `GET /nodes/{id}/history`: storico delle modifiche manuali (tabella `ea_edit_log`).
+
+Endpoint di modifica (nel frontend dietro `edit:ea_map`, i dati QA dietro `edit:ea_qa`; l'attore viaggia nel body come negli altri moduli):
+
+- `POST /edges`, `PATCH /edges/{id}`, `POST /edges/{id}/verify`, `POST /edges/{id}/remove`: aggiunta, correzione, conferma e rimozione logica di un legame;
+- `POST /nodes`, `PATCH /nodes/{id}`: creazione (componente, sistema esterno, datastore) e correzione di un nodo;
+- `PATCH /nodes/{id}/qa`: campi QA manuali (`under_qa`, `tas_ci_override`, `qa_owner`, `qa_notes`).
 
 Ogni legame dichiara `origin` (`helm`, `infra_rule`, `curated`, `manual`) e `status`; solo i legami `active` e `verified` sono serviti alle viste.
 
