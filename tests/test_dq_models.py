@@ -27,6 +27,23 @@ def test_dq_control_instance_tablename() -> None:
     assert DqControlInstance.__tablename__ == "dq_control_instances"
 
 
+def test_dq_audit_columns_are_nullable() -> None:
+    for model in (DqCatalogControl, DqControlInstance):
+        columns = {column.name: column for column in model.__table__.columns}
+        assert {"created_by", "updated_by"} <= columns.keys()
+        assert columns["created_by"].nullable
+        assert columns["updated_by"].nullable
+
+
+def test_functional_identifiers_are_stored_only_on_control_instances() -> None:
+    catalog_columns = {column.name: column for column in DqCatalogControl.__table__.columns}
+    instance_columns = {column.name: column for column in DqControlInstance.__table__.columns}
+
+    assert "catalog_code" not in catalog_columns
+    assert instance_columns["check_name"].nullable
+    assert instance_columns["soda_url"].nullable
+
+
 def test_dq_category_enum_values() -> None:
     assert {c.value for c in DqCategory} == {"puntuale", "intra_entita", "cross_entita"}
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from sqlalchemy import delete
@@ -16,6 +17,77 @@ from app.models.dq import (
 )
 from app.services import dq as dq_svc
 from tests._db import TestSession
+
+
+@pytest.mark.anyio
+async def test_catalog_control_audit_users() -> None:
+    db = Mock(add=Mock(), commit=AsyncMock(), refresh=AsyncMock())
+    control = await dq_svc.create_catalog_control(
+        db,
+        category=DqCategory.PUNTUALE,
+        name="Test Audit Control",
+        description="description",
+        dimension_id=uuid.uuid4(),
+        created_by="creator@example.com",
+    )
+
+    assert control.created_by == "creator@example.com"
+    assert control.updated_by == "creator@example.com"
+
+    control = await dq_svc.update_catalog_control(
+        db, control, {"updated_by": "editor@example.com"}
+    )
+    assert control.created_by == "creator@example.com"
+    assert control.updated_by == "editor@example.com"
+
+
+@pytest.mark.anyio
+async def test_control_instance_audit_users() -> None:
+    db = Mock(add=Mock(), commit=AsyncMock(), refresh=AsyncMock())
+    instance = await dq_svc.create_control_instance(
+        db,
+        domain_id=uuid.uuid4(),
+        catalog_control_id=uuid.uuid4(),
+        table_ref="pagopa.test_table",
+        field_ref="test_field",
+        owner=None,
+        risk=DqRiskLevel.BASSO,
+        impact=DqRiskLevel.BASSO,
+        status=DqControlStatus.DA_IMPLEMENTARE,
+        notes=None,
+        check_name="fld__vld__test_field__not_null",
+        created_by="creator@example.com",
+    )
+
+    assert instance.created_by == "creator@example.com"
+    assert instance.updated_by == "creator@example.com"
+    assert instance.check_name == "fld__vld__test_field__not_null"
+
+    instance = await dq_svc.update_control_instance(
+        db, instance, {"updated_by": "editor@example.com"}
+    )
+    assert instance.created_by == "creator@example.com"
+    assert instance.updated_by == "editor@example.com"
+
+
+@pytest.mark.anyio
+async def test_soft_delete_records_updater() -> None:
+    db = Mock(commit=AsyncMock())
+    instance = DqControlInstance(
+        id=uuid.uuid4(),
+        domain_id=uuid.uuid4(),
+        catalog_control_id=uuid.uuid4(),
+        table_ref="pagopa.test_table",
+        field_ref="test_field",
+        risk=DqRiskLevel.BASSO,
+        impact=DqRiskLevel.BASSO,
+        status=DqControlStatus.ATTIVO,
+    )
+
+    await dq_svc.delete_control_instance(db, instance, updated_by="deleter@example.com")
+
+    assert instance.status == DqControlStatus.ELIMINATO
+    assert instance.updated_by == "deleter@example.com"
 
 
 @pytest.fixture
@@ -120,6 +192,7 @@ async def test_create_and_filter_control_instances(db) -> None:
         impact=DqRiskLevel.ALTO,
         status=DqControlStatus.DA_IMPLEMENTARE,
         notes=None,
+        check_name="fld__vld__test_field__not_null",
     )
     assert instance.id is not None
     assert instance.catalog_control.name == "Test Control For Instance"

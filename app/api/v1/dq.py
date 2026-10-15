@@ -20,10 +20,18 @@ from app.schemas.dq import (
     DqDomainCreate,
     DqDomainOut,
     DqDomainUpdate,
+    validate_dq_code,
 )
 from app.services import dq as dq_svc
 
 router = APIRouter()
+
+
+def _validate_dq_code(code: str, category: DqCategory, dimension_name: str) -> None:
+    try:
+        validate_dq_code(code, category, dimension_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 # ── Dimensions ────────────────────────────────────────────────────────────────
@@ -109,6 +117,7 @@ async def create_catalog_control(body: DqCatalogControlCreate, db: DbDep) -> DqC
         name=body.name,
         description=body.description,
         dimension_id=body.dimension_id,
+        created_by=body.created_by,
     )
     return DqCatalogControlOut.model_validate(control)
 
@@ -165,6 +174,10 @@ async def list_control_instances(
 
 @router.post("/instances", response_model=DqControlInstanceOut, status_code=status.HTTP_201_CREATED)
 async def create_control_instance(body: DqControlInstanceCreate, db: DbDep) -> DqControlInstanceOut:
+    control = await dq_svc.get_catalog_control(db, body.catalog_control_id)
+    if not control:
+        raise HTTPException(status_code=404, detail="Catalog control not found")
+    _validate_dq_code(body.check_name, control.category, control.dimension.name)
     instance = await dq_svc.create_control_instance(
         db,
         domain_id=body.domain_id,
@@ -174,8 +187,11 @@ async def create_control_instance(body: DqControlInstanceCreate, db: DbDep) -> D
         owner=body.owner,
         risk=body.risk,
         impact=body.impact,
-        status=body.status,
+        status=DqControlStatus(body.status),
         notes=body.notes,
+        check_name=body.check_name,
+        soda_url=body.soda_url,
+        created_by=body.created_by,
     )
     return DqControlInstanceOut.model_validate(instance)
 
@@ -204,13 +220,25 @@ async def update_control_instance(
     instance = await dq_svc.get_control_instance(db, instance_id)
     if not instance:
         raise HTTPException(status_code=404, detail="Control instance not found")
-    instance = await dq_svc.update_control_instance(db, instance, body.model_dump(exclude_unset=True))
+    fields = body.model_dump(exclude_unset=True)
+    next_status = fields.get("status", instance.status)
+    next_check_name = fields.get("check_name", instance.check_name)
+    next_soda_url = fields.get("soda_url", instance.soda_url)
+    if next_status == DqControlStatus.ATTIVO and (not next_check_name or not next_soda_url):
+        raise HTTPException(status_code=422, detail="An active control requires a SODA check name and URL")
+    if next_check_name:
+        _validate_dq_code(
+            next_check_name, instance.catalog_control.category, instance.catalog_control.dimension.name
+        )
+    instance = await dq_svc.update_control_instance(db, instance, fields)
     return DqControlInstanceOut.model_validate(instance)
 
 
 @router.delete("/instances/{instance_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_control_instance(instance_id: uuid.UUID, db: DbDep) -> None:
+async def delete_control_instance(
+    instance_id: uuid.UUID, db: DbDep, body: DqControlInstanceUpdate | None = None
+) -> None:
     instance = await dq_svc.get_control_instance(db, instance_id)
     if not instance:
         raise HTTPException(status_code=404, detail="Control instance not found")
-    await dq_svc.delete_control_instance(db, instance)
+    await dq_svc.delete_control_instance(db, instance, updated_by=body.updated_by if body else None)
