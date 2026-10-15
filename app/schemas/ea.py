@@ -139,3 +139,59 @@ class EaHistoryItem(BaseModel):
     actor: str | None
     at: datetime
     detail: dict[str, Any]
+
+
+# ---- sync and review queue (PR3) -------------------------------------------------------
+
+
+class EaSyncRequest(_Actor):
+    pass
+
+
+class EaSyncRunOut(BaseModel):
+    id: str
+    trigger: str
+    triggered_by: str | None
+    started_at: datetime
+    finished_at: datetime | None
+    status: str
+    stats: dict[str, Any]
+    error: str | None
+
+
+class EaSyncStatusOut(BaseModel):
+    running: EaSyncRunOut | None
+    last: EaSyncRunOut | None
+    last_success_at: datetime | None
+    last_error: str | None
+    open_changes: int
+
+
+class EaChangeOut(BaseModel):
+    id: str
+    run_id: str | None
+    entity: str
+    op: str
+    target_id: str
+    before: dict[str, Any] | None
+    after: dict[str, Any] | None
+    structural: bool
+    status: str
+    reviewed_by: str | None
+    reviewed_at: datetime | None
+    review_note: str | None
+    created_at: datetime
+
+
+class EaChangeDecision(_Actor):
+    note: str | None = None
+    # only for a new component: the reviewer can correct the proposal
+    parent_id: str | None = None
+    ctype: str | None = None
+    name: str | None = None
+
+
+class EaChangeBulk(_Actor):
+    ids: list[str] = Field(min_length=1, max_length=200)
+    decision: str = Field(pattern="^(approve|reject)$")
+    note: str | None = None

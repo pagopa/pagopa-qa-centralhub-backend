@@ -105,7 +105,7 @@ Le modifiche manuali vanno anche in `ea_edit_log` (`action` = `ea.edge.create`, 
 
 ### 3.2 Regole di precedenza
 
-1. Un record con `source = manual` o `status = verified` **non viene mai modificato dalla sync**.
+1. Un record con `source = manual` o `status = verified` **non viene mai modificato dalla sync** nei campi che appartengono alle persone: nome, descrizione, prodotto, tipo di componente, campi QA manuali, legami. Gli attributi osservati (linguaggi, framework, namespace, owner, API, pipeline, README, segnali QA osservati) appartengono invece alla sync e si aggiornano su tutti i componenti attivi.
 2. Se la sync non trova più un legame verificato o manuale, crea un `ea_change` con stato `conflict`: decide una persona.
 3. Un legame rifiutato (`rejected`) resta in tabella, così la sync non lo ripropone a ogni giro.
 4. Rimuovere un legame è una cancellazione logica (`status = removed`), per conservare lo storico.
@@ -150,9 +150,29 @@ Task Celery `app.tasks.sync_ea.sync_ea`, registrato in `beat_schedule`: **una vo
 | 8. Applicazione | Metadati, segnali QA osservati e link da regola si applicano subito (`auto_applied`); le modifiche strutturali vanno in coda (`pending`) | – |
 | 9. Notifica | Se ci sono modifiche in coda, avviso tramite il sistema di notifiche esistente | `notification_rules` |
 
-**Classificazione dei repo nuovi.** La sync propone il prodotto in base a namespace Helm, dominio `.identity` e prefisso del nome (le regole oggi in `catalog.py` diventano tabella di configurazione). Chi revisiona conferma o sceglie un altro prodotto.
+**Classificazione dei repo nuovi.** Un repo è candidato se ha un prefisso noto (`pagopa-`, `arc-`, `emd-`, `rtp-`…), non è fork né archiviato, ha avuto push nell'ultimo anno e il suo CODEOWNERS cita almeno un team che possiede già un componente della mappa. La sync propone il prodotto in base al prefisso del nome condiviso con i componenti noti, verificato con il namespace Helm / dominio `.identity`. Chi revisiona conferma o sceglie un altro prodotto, nome e tipo. Le regole sono in `app/services/ea/sync/rules.py`, portate dagli script di discovery (renderle editabili da UI è un'evoluzione possibile).
 
-**Costo.** Primo giro circa 185 repo × ~20 file. A regime solo i repo con SHA cambiato. Con token autenticato (5.000 richieste/ora) il margine è ampio.
+**Costo.** Per repo: una chiamata REST per l'albero e una GraphQL per tutti i file di metadati. Primo giro ≈ 190 + 190 chiamate; a regime si rileggono solo i repo con push successivi all'ultimo snapshot, e se lo SHA dell'albero è invariato si riusa l'estrazione salvata. Margine ampio rispetto alle 5.000 richieste/ora.
+
+### 5.1 Implementazione (PR3)
+
+| Modulo | Ruolo |
+|---|---|
+| `app/services/ea/sync/rules.py` | Regole di URL→legame, datastore, suite centrali/NRT, link Confluence, perimetro dei candidati |
+| `app/services/ea/sync/extract.py` | Fatti di un repo da albero + file (funzioni pure; parità verificata con l'estrazione originale su 185 repo) |
+| `app/services/ea/sync/derive.py` | Fatti → attributi, segnali QA, legami Helm, link Confluence, proposta di prodotto/tipo |
+| `app/services/ea/sync/sources.py` | Client GitHub (REST + GraphQL) e Confluence v2, dietro protocolli sostituibili nei test |
+| `app/services/ea/sync/engine.py` | Esecuzione: lettura stato → raccolta (solo rete) → applicazione in un'unica transazione; `dry_run` |
+| `app/services/ea/sync/review.py` | Approvazione/rifiuto (singolo e in blocco) e applicazione delle proposte |
+| `app/tasks/sync_ea.py` | Task Celery; beat ogni lunedì alle 04:17 UTC |
+| `scripts/ea_sync.py` | Esecuzione da riga di comando, anche `--dry-run` |
+
+- **Concorrenza**: una sola run alla volta (`409` sull'endpoint). Una run ferma da più di due ore viene chiusa come fallita alla run successiva.
+- **Avvio manuale**: `POST /sync` registra la run e la affida al worker Celery; se il broker non risponde (sviluppo locale) la esegue nel processo API in background.
+- **Esiti**: `success`; `partial` se qualche repo non è leggibile, se Confluence non risponde o non è configurato (i dati di quella fonte restano invariati); `failed` se non si riesce a fare il censimento GitHub.
+- **Deduplica**: una proposta già in coda o rifiutata non viene ricreata. Una proposta in coda che la run successiva non rileva più diventa `superseded`, ma solo se quella fonte è stata effettivamente riletta.
+- **Rifiuti con effetto**: rifiutare un nuovo legame lo salva come `rejected`; rifiutare la rimozione di un legame lo rende `verified` (una persona ha confermato che esiste).
+- **Verifica su dati reali**: eseguito il motore sui 185 repo clonati in discovery: prima sync 0 proposte e 0 modifiche dopo l'import, sync successive tutte "invariate".
 
 ## 6. Permessi e feature flag
 

@@ -1,22 +1,32 @@
 from __future__ import annotations
 
 # ruff: noqa: S101
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.deps import get_db
+from app.main import app
 from app.models.ea import EaEdge, EaEditLog, EaQaSignal
 from app.services.ea import edit
 from app.services.ea.edit import EaEditError
 from app.services.ea.importer import import_kb
 from app.services.ea.kb import build_kb
-from tests._db import TestSession
+from tests._db import TestSession, get_test_db
 from tests.test_ea_service import _mini_kb, _wipe
 
 ACTOR = "qa.manager@example.test"
+
+
+@pytest.fixture(autouse=True)
+def _test_engine_for_api() -> Iterator[None]:
+    """API calls use the NullPool test engine (no connections shared across event loops)."""
+    app.dependency_overrides[get_db] = get_test_db
+    yield
+    app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.fixture

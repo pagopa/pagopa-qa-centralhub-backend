@@ -160,6 +160,18 @@ Endpoint di modifica (nel frontend dietro `edit:ea_map`, i dati QA dietro `edit:
 - `POST /nodes`, `PATCH /nodes/{id}`: creazione (componente, sistema esterno, datastore) e correzione di un nodo;
 - `PATCH /nodes/{id}/qa`: campi QA manuali (`under_qa`, `tas_ci_override`, `qa_owner`, `qa_notes`).
 
+Sincronizzazione con GitHub e Confluence (settimanale via Celery beat, oppure `POST /sync` dal pulsante "Sincronizza ora"):
+
+- `POST /sync` (202, 409 se già in corso), `GET /sync-status`, `GET /sync-runs`;
+- `GET /changes?status=pending,conflict`, `POST /changes/{id}/approve` · `/reject`, `POST /changes/bulk`: coda di revisione (nel frontend dietro `review:ea_map`).
+
+Usa `GITHUB_TOKEN` (deve poter leggere anche il repo privato del Nodo) e, per Confluence, `JIRA_BASE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN`. Da riga di comando:
+
+```bash
+uv run python -m scripts.ea_sync --dry-run   # calcola tutto e mostra le proposte, senza scrivere
+uv run python -m scripts.ea_sync             # esecuzione reale
+```
+
 Ogni legame dichiara `origin` (`helm`, `infra_rule`, `curated`, `manual`) e `status`; solo i legami `active` e `verified` sono serviti alle viste.
 
 ### Auth & RBAC

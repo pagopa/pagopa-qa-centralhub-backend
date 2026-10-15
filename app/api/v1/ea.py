@@ -3,11 +3,16 @@ from __future__ import annotations
 import uuid
 from typing import NoReturn
 
-from fastapi import APIRouter, HTTPException, Query, status
+import structlog
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from sqlalchemy import select
 
 from app.deps import DbDep
-from app.models.ea import EaEdge, EaNode
+from app.models.ea import EaEdge, EaNode, EaSyncRun, EaSyncStatus
 from app.schemas.ea import (
+    EaChangeBulk,
+    EaChangeDecision,
+    EaChangeOut,
     EaEdgeCreate,
     EaEdgeNote,
     EaEdgeOut,
@@ -22,13 +27,19 @@ from app.schemas.ea import (
     EaNodeUpdate,
     EaQaOut,
     EaQaUpdate,
+    EaSyncRequest,
+    EaSyncRunOut,
+    EaSyncStatusOut,
 )
 from app.services.ea import edit as edit_svc
 from app.services.ea import impact as impact_svc
 from app.services.ea import kb as kb_svc
 from app.services.ea.edit import EaEditError
+from app.services.ea.sync import engine as sync_engine
+from app.services.ea.sync import review as review_svc
 
 router = APIRouter()
+logger = structlog.get_logger(__name__)
 
 
 @router.get("/kb", response_model=EaKbResponse)
@@ -190,3 +201,126 @@ async def node_history(node_id: str, db: DbDep) -> list[EaHistoryItem]:
     if await db.get(EaNode, node_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="EA node not found")
     return [EaHistoryItem(**h) for h in await edit_svc.node_history(db, node_id)]
+
+
+# ---- sync and review queue -------------------------------------------------------------
+
+
+def _run_out(run: EaSyncRun | None) -> EaSyncRunOut | None:
+    if run is None:
+        return None
+    return EaSyncRunOut(
+        id=str(run.id),
+        trigger=run.trigger,
+        triggered_by=run.triggered_by,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        status=run.status,
+        stats=run.stats or {},
+        error=run.error,
+    )
+
+
+def _dispatch(run_id: str, background: BackgroundTasks) -> None:
+    """Hand the run to the Celery worker; without a broker (local dev) run it in-process."""
+    try:
+        from app.tasks.sync_ea import sync_ea
+
+        sync_ea.apply_async(args=[run_id], retry=False)
+    except Exception:  # noqa: BLE001 - broker down: still let the user sync
+        logger.warning("ea_sync_dispatch_inprocess", run_id=run_id)
+        from app.services.ea.sync.runner import run_with_default_sources
+
+        background.add_task(run_with_default_sources, uuid.UUID(run_id))
+
+
+@router.post("/sync", response_model=EaSyncRunOut, status_code=status.HTTP_202_ACCEPTED)
+async def trigger_sync(body: EaSyncRequest, db: DbDep, background: BackgroundTasks) -> EaSyncRunOut:
+    try:
+        run = await sync_engine.create_run(db, trigger="manual", actor=body.actor)
+    except sync_engine.EaSyncBusyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    _dispatch(str(run.id), background)
+    out = _run_out(run)
+    assert out is not None  # noqa: S101
+    return out
+
+
+@router.get("/sync-status", response_model=EaSyncStatusOut)
+async def get_sync_status(db: DbDep) -> EaSyncStatusOut:
+    sync_status = await db.get(EaSyncStatus, 1)
+    last = await db.scalar(
+        select(EaSyncRun)
+        .where(EaSyncRun.status != "running", EaSyncRun.trigger != "import")
+        .order_by(EaSyncRun.started_at.desc())
+        .limit(1)
+    )
+    return EaSyncStatusOut(
+        running=_run_out(await sync_engine.running_run(db)),
+        last=_run_out(last),
+        last_success_at=sync_status.last_success_at if sync_status else None,
+        last_error=sync_status.last_error if sync_status else None,
+        open_changes=await review_svc.count_open(db),
+    )
+
+
+@router.get("/sync-runs", response_model=list[EaSyncRunOut])
+async def list_sync_runs(db: DbDep, limit: int = Query(10, ge=1, le=100)) -> list[EaSyncRunOut]:
+    runs = await db.scalars(select(EaSyncRun).order_by(EaSyncRun.started_at.desc()).limit(limit))
+    return [r for r in (_run_out(run) for run in runs) if r is not None]
+
+
+_CHANGE_STATUSES = {"pending", "conflict", "approved", "rejected", "auto_applied", "superseded"}
+
+
+@router.get("/changes", response_model=list[EaChangeOut])
+async def list_changes(
+    db: DbDep,
+    status_filter: str = Query("pending,conflict", alias="status"),
+    run_id: uuid.UUID | None = None,
+    limit: int = Query(500, ge=1, le=2000),
+) -> list[EaChangeOut]:
+    statuses = tuple(s for s in status_filter.split(",") if s in _CHANGE_STATUSES)
+    if not statuses:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Stato non valido"
+        )
+    changes = await review_svc.list_changes(db, statuses=statuses, run_id=run_id, limit=limit)
+    return [EaChangeOut(**review_svc.change_payload(c)) for c in changes]
+
+
+async def _decide(
+    change_id: uuid.UUID, body: EaChangeDecision, db: DbDep, *, approve: bool
+) -> EaChangeOut:
+    overrides = body.model_dump(include={"parent_id", "ctype", "name"}, exclude_none=True)
+    try:
+        change = await review_svc.decide(
+            db, change_id, approve=approve, actor=body.actor, note=body.note, overrides=overrides
+        )
+    except EaEditError as exc:
+        await db.rollback()
+        _raise(exc)
+    return EaChangeOut(**review_svc.change_payload(change))
+
+
+@router.post("/changes/{change_id}/approve", response_model=EaChangeOut)
+async def approve_change(change_id: uuid.UUID, body: EaChangeDecision, db: DbDep) -> EaChangeOut:
+    return await _decide(change_id, body, db, approve=True)
+
+
+@router.post("/changes/{change_id}/reject", response_model=EaChangeOut)
+async def reject_change(change_id: uuid.UUID, body: EaChangeDecision, db: DbDep) -> EaChangeOut:
+    return await _decide(change_id, body, db, approve=False)
+
+
+@router.post("/changes/bulk", response_model=dict[str, str])
+async def bulk_decide(body: EaChangeBulk, db: DbDep) -> dict[str, str]:
+    try:
+        ids = [uuid.UUID(i) for i in body.ids]
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Id non valido"
+        ) from exc
+    return await review_svc.decide_many(
+        db, ids, approve=body.decision == "approve", actor=body.actor, note=body.note
+    )
