@@ -105,6 +105,8 @@ class CostReport(BaseModel):
 class SyncResult(BaseModel):
     synced: int
     errors: list[str]
+    period_start: str | None = None
+    period_end: str | None = None
 
 
 # ── CSV import ───────────────────────────────────────────────────────────────

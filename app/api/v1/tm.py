@@ -107,6 +107,16 @@ async def create_absence(
     return ResourceAbsenceOut.model_validate(absence)
 
 
+@router.delete("/absences")
+async def delete_all_absences(
+    db: DbDep,
+    confirm: bool = Query(False, description="Must be true: wipes every absence"),
+) -> dict[str, int]:
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Pass confirm=true to delete all absences")
+    return {"deleted": await tm_svc.delete_all_absences(db)}
+
+
 @router.delete("/absences/{absence_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_absence(
     absence_id: uuid.UUID,
@@ -132,10 +142,13 @@ async def import_absences_csv(
 @router.post("/absences/sync-confluence", response_model=SyncResult)
 async def sync_confluence(
     db: DbDep,
-    year: int = Query(...),
-    month: int = Query(...),
+    year: int | None = Query(None, description="With month: sync one month only"),
+    month: int | None = Query(None, description="With year: sync one month only"),
 ) -> SyncResult:
-    if not (1 <= month <= 12):
+    """Without year/month syncs the whole window (last year → next year)."""
+    if (year is None) != (month is None):
+        raise HTTPException(status_code=400, detail="pass both year and month, or neither")
+    if month is not None and not (1 <= month <= 12):
         raise HTTPException(status_code=400, detail="month must be between 1 and 12")
     result = await tm_svc.sync_from_confluence(db, year=year, month=month)
     return SyncResult(**result)
