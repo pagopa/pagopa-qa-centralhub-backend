@@ -54,7 +54,7 @@ async def test_list_feature_visibility_defaults_all_features_to_enabled(
     items = response.json()["items"]
     enabled_by_key = {item["key"]: item["enabled"] for item in items}
 
-    assert enabled_by_key["metrics"] is True
+    assert enabled_by_key["nrt_metrics"] is True
     assert enabled_by_key["psp_fees"] is True
     assert enabled_by_key["gpd_positions"] is True
     assert enabled_by_key["api_docs"] is True
@@ -66,14 +66,14 @@ async def test_list_feature_visibility_defaults_all_features_to_enabled(
 async def test_update_feature_visibility_persists_the_override(
     feature_client: AsyncClient,
 ) -> None:
-    response = await feature_client.patch("/api/v1/features/metrics", json={"enabled": False})
+    response = await feature_client.patch("/api/v1/features/nrt_metrics", json={"enabled": False})
 
     assert response.status_code == 200
-    assert response.json() == {"key": "metrics", "enabled": False}
+    assert response.json() == {"key": "nrt_metrics", "enabled": False}
 
     listing = await feature_client.get("/api/v1/features")
     enabled_by_key = {item["key"]: item["enabled"] for item in listing.json()["items"]}
-    assert enabled_by_key["metrics"] is False
+    assert enabled_by_key["nrt_metrics"] is False
 
 
 @pytest.mark.anyio

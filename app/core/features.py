@@ -49,17 +49,17 @@ FEATURE_CATALOG: tuple[FeatureDefinition, ...] = (
         "external": False,
     },
     {
+        "key": "nrt_metrics",
+        "label": "NRT Metrics",
+        "route": "/nrt-metrics",
+        "action": "view:nrt_metrics",
+        "external": False,
+    },
+    {
         "key": "jira",
         "label": "KPI Jira",
         "route": "/jira",
         "action": "view:jira",
-        "external": False,
-    },
-    {
-        "key": "metrics",
-        "label": "Metriche",
-        "route": "/metrics",
-        "action": "view:metrics",
         "external": False,
     },
     {
