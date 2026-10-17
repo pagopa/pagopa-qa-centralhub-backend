@@ -56,6 +56,12 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
     },
     {
+        "key": "view:nrt_metrics",
+        "label": "NRT Metrics",
+        "category": "Test Results",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
+    },
+    {
         "key": "view:docs",
         "label": "Docs & Decks",
         "category": "Knowledge Base",
@@ -90,12 +96,6 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "label": "Data Quality (crea/modifica controlli e istanze)",
         "category": "Data Quality",
         "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False},
-    },
-    {
-        "key": "view:metrics",
-        "label": "Metriche",
-        "category": "Data Quality",
-        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
     },
     {
         "key": "view:ea_map",

@@ -23,7 +23,7 @@ async def db() -> AsyncIterator[AsyncSession]:
 async def test_feature_visibility_override_round_trips_through_database(
     db: AsyncSession,
 ) -> None:
-    key = "metrics"
+    key = "nrt_metrics"
     existing = await db.get(FeatureVisibility, key)
     previous_enabled = existing.enabled if existing is not None else None
 
