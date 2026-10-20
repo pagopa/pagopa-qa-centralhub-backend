@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import calendar
 import re
+import unicodedata
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from sqlalchemy import delete, select
@@ -45,10 +47,7 @@ def _italian_holidays(year: int, month: int) -> set[date]:
     easter_month = (h + l - 7 * m + 114) // 31
     easter_day = ((h + l - 7 * m + 114) % 31) + 1
     easter = date(year, easter_month, easter_day)
-    easter_monday = date(year, easter.month, easter.day + 1) if easter.day < 28 else date(
-        year, easter.month + (1 if easter.month < 12 else 0),
-        (easter.day + 1) if easter.day < 28 else 1
-    )
+    easter_monday = easter + timedelta(days=1)
 
     result: set[date] = set()
     for m_fixed, d_fixed in fixed:
@@ -149,6 +148,13 @@ async def delete_absence(db: AsyncSession, absence_id: uuid.UUID) -> None:
     await db.commit()
 
 
+async def delete_all_absences(db: AsyncSession) -> int:
+    """Remove every absence, whatever its source. Returns how many rows went."""
+    result = await db.execute(delete(ResourceAbsence))
+    await db.commit()
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
 async def import_absences_rows(db: AsyncSession, rows: list[dict]) -> dict:
     """Import absences from parsed rows: email, absence_date, absence_type, note."""
     resources = await list_resources(db, include_inactive=True)
@@ -203,306 +209,286 @@ async def import_absences_rows(db: AsyncSession, rows: list[dict]) -> dict:
 
 
 # ── Confluence Team Calendars sync ────────────────────────────────────────────
+#
+# The Events and Leaves sub-calendars of the QDP space calendar are absences; the
+# custom ones are role rotations (e.g. "NRT Review Approver") and are never read.
+# The sync is a snapshot over the whole window (previous, current and next year):
+# the Confluence-sourced absences in the window are replaced by what the calendar
+# shows now; manual and CSV absences are never touched.
+
+TM_CALENDAR_SPACE = "QDP"
+_CALENDAR_API = "/wiki/rest/calendar-services/1.0/calendar"
+_ROME = ZoneInfo("Europe/Rome")
+
+
+def _month_bounds(year: int, month: int) -> tuple[date, date]:
+    _, last_day = calendar.monthrange(year, month)
+    return date(year, month, 1), date(year, month, last_day)
+
+
+def sync_window(today: date | None = None) -> tuple[date, date]:
+    """Days the Confluence sync covers: 1 Jan of last year → 31 Dec of next year."""
+    year = (today or date.today()).year
+    return date(year - 1, 1, 1), date(year + 1, 12, 31)
+
+
+def _holidays_between(first: date, last: date) -> set[date]:
+    days: set[date] = set()
+    y, m = first.year, first.month
+    while (y, m) <= (last.year, last.month):
+        days |= _italian_holidays(y, m)
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return days
+
+
+def _utc_window(year: int, month: int) -> tuple[str, str]:
+    """Midnight Europe/Rome of the first day and of the day after the last, in UTC.
+
+    Team Calendars rejects plain dates with BAD_START_DATETIME: it wants ISO datetimes.
+    """
+    return _utc_range(*_month_bounds(year, month))
+
+
+def _utc_range(first: date, last: date) -> tuple[str, str]:
+    """Rome-midnight bounds of ``first``..``last`` (inclusive) as ISO UTC datetimes."""
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    midnight = datetime.min.time()
+    start = datetime.combine(first, midnight, _ROME).astimezone(UTC)
+    end = datetime.combine(last + timedelta(days=1), midnight, _ROME).astimezone(UTC)
+    return start.strftime(fmt), end.strftime(fmt)
+
+
+def _event_days(event: dict[str, Any], first: date, last: date) -> list[date]:
+    """Calendar days covered by an event, clipped to ``first``..``last``.
+
+    All-day events have an exclusive end (a one-day leave on the 3rd ends on the 4th).
+    """
+    try:
+        start = date.fromisoformat(str(event.get("start") or "")[:10])
+        end_raw = str(event.get("end") or "")[:10]
+        end = date.fromisoformat(end_raw) if end_raw else start
+    except ValueError:
+        return []
+    if event.get("allDay", True):
+        end = max(start, end - timedelta(days=1))
+    days = []
+    current = max(start, first)
+    while current <= min(end, last):
+        days.append(current)
+        current += timedelta(days=1)
+    return days
+
+
+def _event_absence(event: dict[str, Any]) -> tuple[str, str | None]:
+    """Whole days are ferie, events with a time range are permessi (note = the hours)."""
+    if event.get("allDay", True):
+        return "ferie", None
+    start, end = str(event.get("start") or ""), str(event.get("end") or "")
+    hours = f"{start[11:16]}–{end[11:16]}" if len(start) >= 16 and len(end) >= 16 else None
+    return "permesso", hours
+
+
+def _normalize_name(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value)
+    ascii_only = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return " ".join(re.sub(r"[^a-z0-9 ]", " ", ascii_only.lower()).split())
+
+
+def _resource_name_index(resources: list[ExternalResource]) -> dict[str, ExternalResource]:
+    index: dict[str, ExternalResource] = {}
+    for r in resources:
+        first, last = _normalize_name(r.first_name), _normalize_name(r.last_name)
+        index[f"{first} {last}"] = r
+        index[f"{last} {first}"] = r
+    return index
+
+
+# "other" is the Events sub-calendar, "leaves" the Leaves one; custom ones (PR Review
+# Coordinator, NRT Review Approver, ...) are rotations, not absences.
+_ABSENCE_CALENDAR_TYPES = {"leaves", "other"}
+
+
+def _event_people(
+    event: dict[str, Any], by_name: dict[str, ExternalResource]
+) -> tuple[list[ExternalResource], list[str]]:
+    """Resources an event is about, plus the names that matched no resource.
+
+    Leaves carry the person as invitee; plain events (e.g. "Permesso - Daniele Quero")
+    often have no invitees, so the name is looked up in the title instead.
+    """
+    found: list[ExternalResource] = []
+    unmatched: list[str] = []
+    invitees = event.get("invitees") or []
+    for invitee in invitees:
+        display = str(invitee.get("displayName") or invitee.get("name") or "").strip()
+        resource = by_name.get(_normalize_name(display))
+        if resource is not None:
+            found.append(resource)
+        elif display:
+            unmatched.append(display)
+    if invitees:
+        return found, unmatched
+    title = str(event.get("title") or "").strip()
+    padded = f" {_normalize_name(title)} "
+    seen: set[uuid.UUID] = set()
+    for name, resource in by_name.items():
+        if f" {name} " in padded and resource.id not in seen:
+            seen.add(resource.id)
+            found.append(resource)
+    if not found and title:
+        unmatched.append(title)
+    return found, unmatched
+
+
+async def _leave_calendars(
+    client: httpx.AsyncClient, base: str, auth: tuple[str, str]
+) -> list[dict[str, Any]]:
+    """The Events and Leaves sub-calendars of the QDP space calendar(s)."""
+    resp = await client.get(
+        f"{base}{_CALENDAR_API}/subcalendars.json",
+        auth=auth,
+        params={"calendarContext": "spaceCalendars", "viewingSpaceKey": TM_CALENDAR_SPACE},
+    )
+    if resp.status_code in (401, 403):
+        raise PermissionError(
+            "L'utenza configurata non può leggere i calendari dello spazio "
+            f"{TM_CALENDAR_SPACE} ({resp.status_code})."
+        )
+    resp.raise_for_status()
+    found: list[dict[str, Any]] = []
+    for item in (resp.json() or {}).get("payload") or []:
+        parent = item.get("subCalendar") or {}
+        children = [c.get("subCalendar") or {} for c in item.get("childSubCalendars") or []]
+        for sub in [parent, *children]:
+            if sub.get("type") in _ABSENCE_CALENDAR_TYPES and sub.get("id"):
+                name = sub.get("name") or parent.get("name") or sub["id"]
+                found.append({"id": sub["id"], "name": name})
+    return found
+
 
 async def sync_from_confluence(
     db: AsyncSession,
-    year: int,
-    month: int,
-) -> dict:
-    """Fetch absence events from Confluence Team Calendars for QDP space and upsert."""
-    if not settings.jira_api_token or not settings.jira_base_url:
-        return {"synced": 0, "errors": ["Confluence credentials not configured"]}
+    year: int | None = None,
+    month: int | None = None,
+) -> dict[str, Any]:
+    """Snapshot of the QDP team calendar (events + leaves) into ``resource_absences``.
 
-    # Confluence base is typically the same Atlassian domain as Jira
-    confluence_base = settings.jira_base_url.rstrip("/")
-    _, last_day = calendar.monthrange(year, month)
-    start_str = f"{year}-{month:02d}-01"
-    end_str = f"{year}-{month:02d}-{last_day:02d}"
+    Without ``year``/``month`` it covers the whole :func:`sync_window`. Whole-day
+    entries become ferie, entries with a time range become permessi; a day with both
+    counts as ferie.
+    """
+    if year is not None and month is not None:
+        first, last = _month_bounds(year, month)
+    else:
+        first, last = sync_window()
+    if not (settings.jira_api_token and settings.jira_base_url and settings.jira_email):
+        return {
+            "synced": 0,
+            "errors": ["Credenziali Atlassian non configurate (JIRA_BASE_URL/EMAIL/API_TOKEN)."],
+        }
 
+    base = settings.jira_base_url.rstrip("/")
     auth = (settings.jira_email, settings.jira_api_token)
-    synced = 0
-    errors: list[str] = []
+    # one request per calendar per year keeps each response a reasonable size
+    chunks = [
+        (max(first, date(y, 1, 1)), min(last, date(y, 12, 31)))
+        for y in range(first.year, last.year + 1)
+    ]
+
+    events: list[dict[str, Any]] = []
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            calendars = await _leave_calendars(client, base, auth)
+            if not calendars:
+                return {
+                    "synced": 0,
+                    "errors": [
+                        "Nessun calendario Eventi/Ferie nello spazio "
+                        f"{TM_CALENDAR_SPACE}: nulla da sincronizzare."
+                    ],
+                }
+            for cal in calendars:
+                for chunk_first, chunk_last in chunks:
+                    start_utc, end_utc = _utc_range(chunk_first, chunk_last)
+                    resp = await client.get(
+                        f"{base}{_CALENDAR_API}/events.json",
+                        auth=auth,
+                        params={
+                            "subCalendarId": cal["id"],
+                            "userTimeZoneId": "Europe/Rome",
+                            "start": start_utc,
+                            "end": end_utc,
+                        },
+                    )
+                    if resp.status_code != 200:
+                        # never replace the period with a partial picture
+                        return {
+                            "synced": 0,
+                            "errors": [
+                                f"Lettura del calendario '{cal['name']}' non riuscita "
+                                f"(HTTP {resp.status_code}): nessuna modifica applicata."
+                            ],
+                        }
+                    payload = (resp.json() or {}).get("events") or []
+                    events.extend(e for e in payload if isinstance(e, dict))
+    except PermissionError as exc:
+        return {"synced": 0, "errors": [str(exc)]}
+    except httpx.HTTPError as exc:
+        return {"synced": 0, "errors": [f"Confluence non raggiungibile: {exc}"]}
 
     resources = await list_resources(db, include_inactive=False)
-    resources_by_email = {r.email.lower().strip(): r for r in resources}
-    resources_by_name = {f"{r.first_name} {r.last_name}".lower().strip(): r for r in resources}
+    by_name = _resource_name_index(resources)
+    holidays = _holidays_between(first, last)
 
-    event_endpoints = [
-        f"{confluence_base}/wiki/rest/calendar-services/1.0/calendar/events.json",
-        f"{confluence_base}/wiki/rest/calendar-services/1.0/events.json",
-        f"{confluence_base}/rest/calendar-services/1.0/calendar/events.json",
-        f"{confluence_base}/rest/calendar-services/1.0/events.json",
-    ]
-    calendar_discovery_endpoints = [
-        f"{confluence_base}/wiki/rest/calendar-services/1.0/calendar/subcalendars.json",
-        f"{confluence_base}/wiki/rest/calendar-services/1.0/calendar/list.json",
-        f"{confluence_base}/wiki/rest/calendar-services/1.0/subcalendars.json",
-        f"{confluence_base}/rest/calendar-services/1.0/calendar/subcalendars.json",
-        f"{confluence_base}/rest/calendar-services/1.0/calendar/list.json",
-        f"{confluence_base}/rest/calendar-services/1.0/subcalendars.json",
-    ]
-
-    def _extract_events(payload: Any) -> list[dict]:
-        if isinstance(payload, dict):
-            nested = payload.get("payload")
-            if nested is not None:
-                nested_events = _extract_events(nested)
-                if nested_events:
-                    return nested_events
-            if isinstance(payload.get("events"), list):
-                return [e for e in payload["events"] if isinstance(e, dict)]
-            for key in ("results", "items"):
-                value = payload.get(key)
-                if isinstance(value, list):
-                    return [e for e in value if isinstance(e, dict)]
-        if isinstance(payload, list):
-            return [e for e in payload if isinstance(e, dict)]
-        return []
-
-    def _extract_calendar_ids(payload: Any) -> list[str]:
-        ids: set[str] = set()
-        candidates: list[Any] = []
-        if isinstance(payload, dict):
-            nested = payload.get("payload")
-            if nested is not None:
-                for cid in _extract_calendar_ids(nested):
-                    ids.add(cid)
-            for key in ("subCalendars", "subcalendars", "calendars", "results", "items"):
-                value = payload.get(key)
-                if isinstance(value, list):
-                    candidates.extend(value)
-            if payload.get("id") is not None:
-                ids.add(str(payload["id"]))
-        elif isinstance(payload, list):
-            candidates.extend(payload)
-
-        for item in candidates:
-            if not isinstance(item, dict):
-                continue
-            for key in ("id", "subCalendarId", "subcalendarId", "calendarId"):
-                if item.get(key) is not None:
-                    ids.add(str(item[key]))
-            sub = item.get("subCalendar")
-            if isinstance(sub, dict) and sub.get("id") is not None:
-                ids.add(str(sub["id"]))
-        return list(ids)
-
-    def _calendar_api_error(resp: httpx.Response) -> str | None:
-        if resp.status_code != 500:
-            return None
-        body = resp.text or ""
-        if "BAD_START_DATETIME" in body:
-            match = re.search(r"events of\s+(.+?)\s+\(([0-9a-fA-F\-]{8,})\)", body)
-            if match:
-                cal_name = match.group(1).strip()
-                return (
-                    f"Confluence calendar '{cal_name}' contains invalid event date/time (BAD_START_DATETIME). "
-                    "Fix malformed events in Team Calendars, then retry sync."
-                )
-            return (
-                "Confluence Team Calendars returned BAD_START_DATETIME (invalid event date/time in calendar data). "
-                "Fix malformed events, then retry sync."
-            )
-        return None
-
-    events_by_id: dict[str, dict] = {}
-    discovered_calendar_ids: set[str] = set()
-    last_exc: Exception | None = None
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        # Preflight: verify Confluence space visibility with current credentials.
-        try:
-            space_check = await client.get(
-                f"{confluence_base}/wiki/rest/api/space/QDP",
-                auth=auth,
-            )
-            if space_check.status_code in (401, 403):
-                return {
-                    "synced": 0,
-                    "errors": [
-                        "Configured account has no access to Confluence space QDP (401/403).",
-                    ],
-                }
-            if space_check.status_code == 404:
-                return {
-                    "synced": 0,
-                    "errors": [
-                        "Confluence space QDP not found or not visible to configured account.",
-                    ],
-                }
-            space_check.raise_for_status()
-        except Exception as exc:
-            return {
-                "synced": 0,
-                "errors": [f"Cannot reach Confluence space API: {exc}"],
-            }
-
-        # 1) Try direct fetch by space key (works on some tenants)
-        for endpoint in event_endpoints:
-            try:
-                r = await client.get(
-                    endpoint,
-                    auth=auth,
-                    params={
-                        "spaceKey": "QDP",
-                        "start": start_str,
-                        "end": end_str,
-                        "userTimeZoneId": "Europe/Rome",
-                    },
-                )
-                if r.status_code in (401, 403):
-                    errors.append(
-                        f"Permission denied on Team Calendars endpoint: {endpoint}"
-                    )
-                    continue
-                known = _calendar_api_error(r)
-                if known:
-                    errors.append(known)
-                    continue
-                if r.status_code == 404:
-                    continue
-                r.raise_for_status()
-                for evt in _extract_events(r.json()):
-                    eid = str(evt.get("id") or evt.get("eventId") or f"evt-{len(events_by_id)}")
-                    events_by_id[eid] = evt
-            except Exception as exc:  # pragma: no cover
-                last_exc = exc
-
-        # 2) If no events, discover calendars from /wiki/spaces/QDP/calendars context and fetch by calendar id
-        if not events_by_id:
-            for endpoint in calendar_discovery_endpoints:
-                try:
-                    r = await client.get(
-                        endpoint,
-                        auth=auth,
-                        params={"spaceKey": "QDP"},
-                    )
-                    if r.status_code in (401, 403):
-                        errors.append(
-                            f"Permission denied on calendar discovery endpoint: {endpoint}"
-                        )
-                        continue
-                    if r.status_code == 404:
-                        continue
-                    r.raise_for_status()
-                    for cid in _extract_calendar_ids(r.json()):
-                        discovered_calendar_ids.add(cid)
-                except Exception as exc:  # pragma: no cover
-                    last_exc = exc
-
-            for cid in discovered_calendar_ids:
-                for endpoint in event_endpoints:
-                    for id_param in ("subCalendarId", "calendarId"):
-                        try:
-                            r = await client.get(
-                                endpoint,
-                                auth=auth,
-                                params={
-                                    id_param: cid,
-                                    "start": start_str,
-                                    "end": end_str,
-                                    "userTimeZoneId": "Europe/Rome",
-                                },
-                            )
-                            if r.status_code in (401, 403):
-                                errors.append(
-                                    f"Permission denied on Team Calendars endpoint: {endpoint}"
-                                )
-                                continue
-                            known = _calendar_api_error(r)
-                            if known:
-                                errors.append(known)
-                                continue
-                            if r.status_code == 404:
-                                continue
-                            r.raise_for_status()
-                            for evt in _extract_events(r.json()):
-                                eid = str(evt.get("id") or evt.get("eventId") or f"evt-{len(events_by_id)}")
-                                events_by_id[eid] = evt
-                        except Exception as exc:  # pragma: no cover
-                            last_exc = exc
-
-    events = list(events_by_id.values())
-    if not events:
-        if errors:
-            # Keep diagnostics compact and deduplicated for UI readability.
-            errors = list(dict.fromkeys(errors))
-        if last_exc:
-            errors.append(str(last_exc))
-        errors.append(
-            "Team Calendars API not reachable for QDP space with this account. Verify app availability and API permissions on Confluence Cloud tenant."
-        )
-        return {"synced": 0, "errors": errors}
+    wanted: dict[tuple[uuid.UUID, date], tuple[str, str, str | None]] = {}
+    unmatched: set[str] = set()
     for event in events:
-        # Team Calendar event structure
-        invitees = event.get("invitees", [])
-        raw_start = event.get("start") or event.get("allDay", {}).get("startDate") or event.get("allDay", {}).get("start") or ""
-        raw_end = event.get("end") or event.get("allDay", {}).get("endDate") or event.get("allDay", {}).get("end") or raw_start
-        event_id = str(event.get("id", ""))
-        event_type = (event.get("className") or event.get("subCalendar", {}).get("type") or "ferie").lower()
-
-        # Map Confluence event type to our absence_type vocabulary
-        absence_type = "ferie"
-        if "malattia" in event_type or "sick" in event_type:
-            absence_type = "malattia"
-        elif "permesso" in event_type or "leave" in event_type:
-            absence_type = "permesso"
-
-        # Parse dates (ISO date strings like "2026-06-15")
-        try:
-            d_start = date.fromisoformat(raw_start[:10])
-            d_end = date.fromisoformat(raw_end[:10])
-        except (ValueError, TypeError):
-            errors.append(f"Cannot parse date for event {event_id}")
+        days = [
+            d for d in _event_days(event, first, last) if d.weekday() < 5 and d not in holidays
+        ]
+        if not days:
             continue
+        absence_type, note = _event_absence(event)
+        people, missing = _event_people(event, by_name)
+        unmatched.update(missing)
+        for resource in people:
+            for d in days:
+                current = wanted.get((resource.id, d))
+                if current and current[0] == "ferie":
+                    continue  # a whole day off already covers any permesso
+                wanted[(resource.id, d)] = (absence_type, str(event.get("id") or ""), note)
 
-        for invitee in invitees:
-            email = (
-                invitee.get("email")
-                or (invitee.get("person") or {}).get("email")
-                or ""
-            ).lower().strip()
-            display_name = (
-                invitee.get("displayName")
-                or invitee.get("name")
-                or (invitee.get("person") or {}).get("displayName")
-                or ""
-            ).lower().strip()
-
-            resource = None
-            if email and "@" in email:
-                resource = resources_by_email.get(email)
-            if not resource and display_name:
-                resource = resources_by_name.get(display_name)
-            if not resource:
-                continue
-
-            # Expand multi-day events into individual absence rows
-            current = d_start
-            while current <= d_end:
-                if current.weekday() < 5 and current not in _italian_holidays(current.year, current.month):
-                    # Upsert: delete existing confluence entry for same day+resource, then insert
-                    await db.execute(
-                        delete(ResourceAbsence).where(
-                            ResourceAbsence.resource_id == resource.id,
-                            ResourceAbsence.absence_date == current,
-                            ResourceAbsence.source == "confluence",
-                        )
-                    )
-                    absence = ResourceAbsence(
-                        id=uuid.uuid4(),
-                        resource_id=resource.id,
-                        absence_date=current,
-                        absence_type=absence_type,
-                        source="confluence",
-                        confluence_event_id=event_id,
-                    )
-                    db.add(absence)
-                    synced += 1
-                current = current + timedelta(days=1)
-
+    await db.execute(
+        delete(ResourceAbsence).where(
+            ResourceAbsence.source == "confluence",
+            ResourceAbsence.absence_date >= first,
+            ResourceAbsence.absence_date <= last,
+        )
+    )
+    for (resource_id, day), (absence_type, event_id, note) in wanted.items():
+        db.add(
+            ResourceAbsence(
+                id=uuid.uuid4(),
+                resource_id=resource_id,
+                absence_date=day,
+                absence_type=absence_type,
+                source="confluence",
+                confluence_event_id=event_id or None,
+                note=note,
+            )
+        )
     await db.commit()
-    return {"synced": synced, "errors": errors}
+
+    errors: list[str] = []
+    if unmatched:
+        names = ", ".join(sorted(unmatched))
+        errors.append(f"Persone nel calendario non presenti tra le risorse T&M attive: {names}")
+    return {
+        "synced": len(wanted),
+        "errors": errors,
+        "period_start": first.isoformat(),
+        "period_end": last.isoformat(),
+    }
 
 
 # ── Cost report ───────────────────────────────────────────────────────────────

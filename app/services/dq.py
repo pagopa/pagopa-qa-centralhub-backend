@@ -110,9 +110,15 @@ async def create_catalog_control(
     name: str,
     description: str,
     dimension_id: uuid.UUID,
+    created_by: str | None = None,
 ) -> DqCatalogControl:
     control = DqCatalogControl(
-        category=category, name=name, description=description, dimension_id=dimension_id
+        category=category,
+        name=name,
+        description=description,
+        dimension_id=dimension_id,
+        created_by=created_by,
+        updated_by=created_by,
     )
     db.add(control)
     await db.commit()
@@ -197,6 +203,9 @@ async def create_control_instance(
     impact: DqRiskLevel,
     status: DqControlStatus,
     notes: str | None,
+    check_name: str,
+    soda_url: str | None = None,
+    created_by: str | None = None,
 ) -> DqControlInstance:
     instance = DqControlInstance(
         domain_id=domain_id,
@@ -208,6 +217,10 @@ async def create_control_instance(
         impact=impact,
         status=status,
         notes=notes,
+        check_name=check_name,
+        soda_url=soda_url,
+        created_by=created_by,
+        updated_by=created_by,
     )
     db.add(instance)
     await db.commit()
@@ -228,6 +241,9 @@ async def update_control_instance(
     return instance
 
 
-async def delete_control_instance(db: AsyncSession, instance: DqControlInstance) -> None:
+async def delete_control_instance(
+    db: AsyncSession, instance: DqControlInstance, updated_by: str | None = None
+) -> None:
     instance.status = DqControlStatus.ELIMINATO
+    instance.updated_by = updated_by
     await db.commit()

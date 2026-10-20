@@ -42,5 +42,12 @@ class Settings(BaseSettings):
     # PSP Fee catalog (Data Hub)
     psp_fee_json_url: str = "https://pagopa-afm-p-st-fee.s3.eu-central-1.amazonaws.com/output_elenco_servizi.json"
 
+    superset_main_dashboard_id: str = "1" 
+    superset_url: str = "http://localhost:8088"
+    superset_guest_username: str = "service"
+    superset_guest_first_name: str = "service"
+    superset_guest_last_name: str = "service"
+    superset_username: str = "admin"
+    superset_password: str = ""
 
 settings = Settings()
