@@ -1,7 +1,7 @@
 """columns for NRT persistence
 
 Revision ID: 0016
-Revises: 0014
+Revises: 0015
 Create Date: 2026-10-14 10:19:32.774958
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = '0016'
-down_revision: Union[str, None] = '0014'
+down_revision: Union[str, None] = '0015'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
