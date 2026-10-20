@@ -180,7 +180,8 @@ async def _apply(
             if await db.get(EaNode, from_id) is None or await db.get(EaNode, to_id) is None:
                 raise EaEditError("Uno dei due nodi non esiste più", 409)
             if edge is None:
-                edge = EaEdge(from_id=from_id, to_id=to_id, type=edge_type, origin="helm")
+                origin = (change.after or {}).get("origin") or "helm"
+                edge = EaEdge(from_id=from_id, to_id=to_id, type=edge_type, origin=origin)
                 db.add(edge)
             edge.status = "verified"
             edge.confidence = 100
@@ -212,7 +213,7 @@ async def _apply_rejection(
                     from_id=from_id,
                     to_id=to_id,
                     type=edge_type,
-                    origin="helm",
+                    origin=(change.after or {}).get("origin") or "helm",
                     status="rejected",
                     evidence=(change.after or {}).get("evidence") or {},
                     verified_by=actor,

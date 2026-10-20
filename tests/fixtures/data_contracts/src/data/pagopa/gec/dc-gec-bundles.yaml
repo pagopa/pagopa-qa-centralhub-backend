@@ -1,0 +1,37 @@
+dataContractSpecification: 0.9.3
+id: urn:pagopa:gec:bundles
+info:
+  title: GEC Bundles
+  version: 0.0.1
+  description: Oggetto bundle utilizzato per la rappresentazione dei pacchetti commissionali dei PSP
+  owner: pagoPA QA-Team
+servers:
+  uat:
+    type: kafka
+    host: sb://pagopa-u-itn-observ-evh.servicebus.windows.net
+    topic: gec-ingestion-bundles-dl
+    format: json
+  production:
+    type: kafka
+    host: sb://pagopa-p-itn-observ-evh.servicebus.windows.net
+    topic: gec-ingestion-bundles-dl
+    format: json
+models:
+  bundles:
+    fields:
+      id: {type: string}
+      idPsp: {type: string}
+quality:
+  type: SodaCL
+  dataset: pagopa.silver_bundles
+  xref-dataset:
+    - silver_paymenttypes
+  specification: |-
+    checks for bundles:
+      - row_count > 0:
+          name: ent__cmp__dataset__is_not_empty
+      - missing_count(id) = 0:
+          name: fld__cmp__id__not_null
+          filter: ${INCREMENTAL_CONDITIONS}
+      - missing_count(idPsp) = 0:
+          name: fld__cmp__idpsp__not_null

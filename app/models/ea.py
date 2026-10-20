@@ -41,14 +41,18 @@ NODE_KINDS = (
     "function",
     "process",
     "infra",
+    "dataset",
 )
 NODE_SOURCES = ("sync", "curated", "manual")
 NODE_STATUSES = ("active", "proposed", "archived")
 
 TECH_EDGE_TYPES = ("api", "soap", "event", "data", "ui")
 BLUEPRINT_EDGE_TYPES = ("serves", "realizes", "groups", "uses", "runs_on")
-EDGE_TYPES = TECH_EDGE_TYPES + BLUEPRINT_EDGE_TYPES
-EDGE_ORIGINS = ("helm", "infra_rule", "curated", "manual")
+# Data Lake (docs/ea-map/DESIGN-data-lake.md): producer → dataset, dataset → dataset,
+# dataset → consumer
+DATA_EDGE_TYPES = ("produces", "derives", "feeds")
+EDGE_TYPES = TECH_EDGE_TYPES + BLUEPRINT_EDGE_TYPES + DATA_EDGE_TYPES
+EDGE_ORIGINS = ("helm", "infra_rule", "curated", "manual", "contract", "contract_rule")
 EDGE_STATUSES = ("proposed", "active", "verified", "rejected", "removed")
 VISIBLE_EDGE_STATUSES = ("active", "verified")
 

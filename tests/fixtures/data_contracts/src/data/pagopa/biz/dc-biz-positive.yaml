@@ -1,0 +1,25 @@
+dataContractSpecification: 0.9.3
+id: urn:pagopa:biz:positive
+info:
+  title: Biz Events Bronze Positivi
+  version: 0.0.1
+  description: Eventi di business positivi
+  owner: pagoPA QA-Team
+servers:
+  production:
+    type: kafka
+    host: sb://pagopa-p-weu-core-evh-ns03.servicebus.windows.net
+    topic: nodo-dei-pagamenti-biz-evt-enrich
+    format: json
+models:
+  biz_positive:
+    fields:
+      id: {type: string, required: true}
+      debtor_entity_unique_identifier_value: {type: string, pii: true}
+      amount: {type: string}
+schema:
+  type: avro
+  specification:
+    models:
+      - biz_positive: |-
+          {"name": "biz_positive", "type": "record", "fields": []}

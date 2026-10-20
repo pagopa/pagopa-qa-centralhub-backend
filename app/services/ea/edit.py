@@ -15,7 +15,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.ea import TECH_EDGE_TYPES, EaEdge, EaEditLog, EaNode, EaQaSignal
+from app.models.ea import DATA_EDGE_TYPES, TECH_EDGE_TYPES, EaEdge, EaEditLog, EaNode, EaQaSignal
+from app.services.ea.contracts import LAYERS
 
 EDITABLE_EDGE_STATUSES = ("active", "verified")
 # which node kinds may be the parent of which
@@ -97,7 +98,7 @@ async def _edge(db: AsyncSession, edge_id: uuid.UUID) -> EaEdge:
 
 
 def _check_type(edge_type: str) -> None:
-    if edge_type not in TECH_EDGE_TYPES:
+    if edge_type not in TECH_EDGE_TYPES + DATA_EDGE_TYPES:
         raise EaEditError(f"Tipo di legame non valido: {edge_type}")
 
 
@@ -240,6 +241,13 @@ async def remove_edge(
     return edge
 
 
+# links of a dataset that people can correct: request field -> (attribute, label)
+_DATASET_LINKS = {
+    "doc_url": ("doc_url_override", "alla documentazione"),
+    "slack_url": ("slack_url_override", "al canale Slack"),
+}
+
+
 async def update_node(
     db: AsyncSession, node_id: str, *, changes: dict[str, Any], actor: str | None
 ) -> EaNode:
@@ -267,8 +275,29 @@ async def update_node(
         node.parent_id = parent.id
     if "ctype" in changes and node.kind == "component":
         node.attrs = {**(node.attrs or {}), "ctype": changes["ctype"]}
-    node.verified_by = actor
-    node.verified_at = _now()
+    if "layer" in changes:
+        if node.kind != "dataset":
+            raise EaEditError("Il livello si può correggere solo sui dataset del Data Lake")
+        layer = changes["layer"]
+        if layer is not None and layer not in LAYERS:
+            raise EaEditError(f"Livello non valido: {layer}")
+        attrs = {k: v for k, v in (node.attrs or {}).items() if k != "layer_override"}
+        node.attrs = {**attrs, "layer_override": layer} if layer else attrs
+    for field, (attr, label) in _DATASET_LINKS.items():
+        if field not in changes:
+            continue
+        if node.kind != "dataset":
+            raise EaEditError(f"Il link {label} si può correggere solo sui dataset")
+        url = (changes[field] or "").strip()
+        if url and not url.lower().startswith(("https://", "http://")):
+            raise EaEditError(f"Il link {label} deve iniziare con https://")
+        attrs = {k: v for k, v in (node.attrs or {}).items() if k != attr}
+        node.attrs = {**attrs, attr: url} if url else attrs
+    if node.kind != "dataset" or set(changes) - {"layer", *_DATASET_LINKS}:
+        # a dataset's name and description come from its contract: correcting only the
+        # layer or the documentation link must not freeze them
+        node.verified_by = actor
+        node.verified_at = _now()
     _audit(
         db,
         "ea.node.update",

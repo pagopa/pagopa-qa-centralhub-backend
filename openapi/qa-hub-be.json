@@ -6163,6 +6163,12 @@
             },
             "type": "array",
             "title": "In"
+          },
+          "dq": {
+            "title": "Dq",
+            "additionalProperties": true,
+            "type": "object",
+            "nullable": true
           }
         },
         "type": "object",
@@ -6260,6 +6266,21 @@
           },
           "ctype": {
             "title": "Ctype",
+            "type": "string",
+            "nullable": true
+          },
+          "layer": {
+            "title": "Layer",
+            "type": "string",
+            "nullable": true
+          },
+          "doc_url": {
+            "title": "Doc Url",
+            "type": "string",
+            "nullable": true
+          },
+          "slack_url": {
+            "title": "Slack Url",
             "type": "string",
             "nullable": true
           }

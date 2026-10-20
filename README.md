@@ -138,9 +138,9 @@ Il sync manuale e quello schedulato condividono lo stesso servizio e sono serial
 
 ### EA Map
 
-Mappa di Enterprise Architecture della piattaforma pagoPA (Blueprint, Architettura, Matrice QA, Guida). Il design completo è in `docs/ea-map/DESIGN.md`.
+Mappa di Enterprise Architecture della piattaforma pagoPA (Blueprint, Architettura, Data Lake, Matrice QA, Guida). Il design completo è in `docs/ea-map/DESIGN.md`; la parte Data Lake in `docs/ea-map/DESIGN-data-lake.md`.
 
-I dati vivono nelle tabelle `ea_*` (migrazioni `0019` e `0020`). Il primo caricamento importa la knowledge base prodotta dagli script di discovery:
+I dati vivono nelle tabelle `ea_*` (migrazioni `0019`, `0020` e `0021`). Il primo caricamento importa la knowledge base prodotta dagli script di discovery:
 
 ```bash
 uv run python -m scripts.ea_import                         # seed in scripts/data/ea_kb_seed.json
@@ -172,7 +172,24 @@ uv run python -m scripts.ea_sync --dry-run   # calcola tutto e mostra le propost
 uv run python -m scripts.ea_sync             # esecuzione reale
 ```
 
-Ogni legame dichiara `origin` (`helm`, `infra_rule`, `curated`, `manual`) e `status`; solo i legami `active` e `verified` sono serviti alle viste.
+Ogni legame dichiara `origin` (`helm`, `infra_rule`, `curated`, `manual`, `contract`, `contract_rule`) e `status`; solo i legami `active` e `verified` sono serviti alle viste.
+
+#### Data Lake
+
+La sync legge anche i data contract di [`pagopa/pdnd-data-contracts`](https://github.com/pagopa/pdnd-data-contracts) (solo `src/data/pagopa`, formato datacontract.com 0.9.3) e li porta nella mappa (`app/services/ea/contracts.py`):
+
+- ogni contratto diventa un nodo `dataset` con id `dc:<urn senza "urn:">`; il livello è ricavato dal server (`kafka` → ingestion, file `s3`/`csv` → export) o dal nome della tabella (`silver_*`, `gold_*`);
+- le tabelle citate dai contratti ma senza un contratto proprio diventano dataset non contrattualizzati (`dl:<db.tabella>`);
+- i legami `derives` (lineage tra dataset, dalle descrizioni e da `quality.dataset`) e `feeds` (verso i consumer: BI per le gold, MEF e Banca d'Italia dove dichiarati) sono applicati in automatico con `origin = contract`;
+- i legami `produces` (componente → ingestion) non sono nei contratti: la sync li propone in Revisione confrontando il topic Event Hub con i componenti (`PRODUCER_RULES`, `origin = contract_rule`, con confidenza);
+- il repo viene riletto solo se ha un push più recente dell'ultimo snapshot; se non è leggibile la run è `partial` e i dataset restano com'erano;
+- un contratto rimosso genera una proposta di archiviazione; i legami verificati non più dichiarati diventano conflitti.
+
+Correzioni manuali sui dataset (`PATCH /nodes/{id}`, conservate dalle sync successive; `null` torna al valore del contratto): `layer` (→ `attrs.layer_override`), `doc_url` (→ `attrs.doc_url_override`), `slack_url` (→ `attrs.slack_url_override`). Non segnano il dataset come verificato, quindi nome e descrizione continuano ad arrivare dal contratto.
+
+Copertura Data Quality (`app/services/ea/dq_overlay.py`): i controlli del DQ Framework (`dq_control_instances`, esclusi gli eliminati) sono collegati ai dataset tramite `table_ref`; i controlli sulle tabelle bronze vanno all'ingestion che le alimenta (stesso nome senza prefisso di livello). `GET /kb` espone per ogni dataset `dq` (controlli) e `dqActive` (attivi); `GET /nodes/{id}` aggiunge `dq` con il riepilogo per dimensione, l'allineamento con i check del contratto e l'elenco dei controlli.
+
+Il `GITHUB_TOKEN` deve poter leggere `pagopa/pdnd-data-contracts`.
 
 ### Auth & RBAC
 
