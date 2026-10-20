@@ -1,6 +1,6 @@
 import uuid
 import enum
-from sqlalchemy import Column, String, Integer, BigInteger, ForeignKey, UniqueConstraint, Index, Enum
+from sqlalchemy import Column, String, Integer, BigInteger, ForeignKey, UniqueConstraint, Index, Enum, Boolean, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB, TIMESTAMP
 from app.core.db import Base
 
@@ -25,6 +25,11 @@ class ScenarioStatusEnum(enum.Enum):
     FAILED = "FAILED"
     BROKEN = "BROKEN"
     SKIPPED = "SKIPPED"
+
+class RevisionResultEnum(enum.Enum):
+    GO = "GO"
+    NO_GO = "NO_GO"
+    PENDING = "PENDING"
 
 # ==========================================
 # 2. Modelli delle Tabelle
@@ -75,6 +80,15 @@ class TestRun(Base):
     
     test_version = Column(String)
     test_origin = Column(String)
+    revisioned = Column(Boolean, default=False)
+    revision_date = Column(TIMESTAMP(timezone=True))
+    revisioned_by = Column(String)
+    revision_result = Column(Enum(RevisionResultEnum, name="revision_result_enum", schema="qachub"))
+    allure_url = Column(String)
+    product_issue = Column(String, nullable=True)
+    qa_issue = Column(String, nullable=True)
+    product_issue_status = Column(String, nullable=True)
+    qa_issue_status = Column(String, nullable=True)
 
 class TestExecution(Base):
     __tablename__ = 'test_executions'
@@ -95,3 +109,27 @@ class TestExecution(Base):
     duration_ms = Column(BigInteger)
     error_message = Column(String)
     retries = Column(Integer)
+    revision_note = Column(String)
+    allure_url = Column(String)
+
+class FlakyScenario(Base):
+    __tablename__ = 'flaky_scenarios'
+    __table_args__ = (
+
+            UniqueConstraint(
+                'suite_id', 'scenario_name', 'test_version',
+                name='uq_qachub_flaky_scenarios_versioned',
+            ),
+            Index('ix_qachub_flaky_scenarios_test_object', 'test_object'),
+            Index('ix_qachub_flaky_scenarios_suite_id', 'suite_id'),
+            {'schema': 'qachub'}
+    )
+
+    id = Column(UUID(as_uuid=True), default=uuid.uuid4)
+    suite_id = Column(UUID(as_uuid=True), ForeignKey('qachub.test_suites.id', ondelete="CASCADE"),  primary_key=True, nullable=False, index=True)
+    test_object = Column(String, nullable=False)
+    scenario_name = Column(String,  primary_key=True, nullable=False)
+    suite_version = Column(String,   nullable=False)
+    test_version = Column(String,  primary_key=True, nullable=False)
+    inserted_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    is_flaky = Column(Boolean, nullable=False, default=True, server_default='true')

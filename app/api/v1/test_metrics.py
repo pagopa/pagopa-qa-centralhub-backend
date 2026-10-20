@@ -5,12 +5,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
-
+from datetime import datetime, timezone
 
 from app.deps import DbDep
-from app.models.test_metrics import TestSuite, TestExecution, TestRun
-from app.schemas.test_metrics import TestExecutionCreate, TestExecutionOut, TestSuiteOut, TestSuiteCreate, TestRunCreate, TestRunOut
+from app.models.test_metrics import TestSuite, TestExecution, TestRun, FlakyScenario
+from app.schemas.test_metrics import NrtDetailsObject, TestExecutionCreate, TestExecutionOut, FlakyScenarioIn, FlakyScenarioOut
+from app.schemas.test_metrics import TestSuiteOut, TestSuiteCreate, TestRunCreate, TestRunOut, NrtListObject, UpdateNrtsObject
 from app.services import test_metrics as test_metrics_svc
+from app.schemas.common import PaginatedResponse
+
 
 router = APIRouter()
 
@@ -109,3 +112,106 @@ async def create_test_execution(
             detail="Failed to create test execution",
         )
     return test_executions_out
+
+@router.get("/nrts", response_model=PaginatedResponse[NrtListObject])
+async def get_nrts(db: DbDep, test_object: Annotated[str| None, Query()] = None,
+    trigger: Annotated[str | None, Query()] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 50,
+    ):
+    try:
+        nrts, total = await test_metrics_svc.get_nrts(db, test_object, trigger, page, page_size)
+        if nrts is None or len(nrts) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No NRTs found",
+            )
+        return PaginatedResponse(items=nrts, total=total, page=page, page_size=page_size)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{str(e)}",
+        )
+
+@router.get("/nrt/{id}", response_model=list[TestExecutionOut])
+async def get_nrt_by_id(db: DbDep, id: str ):
+    try:
+        nrt = await test_metrics_svc.get_nrt_by_id(db, id)
+        if nrt is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="NRT not found",
+            )
+        return nrt
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{str(e)}",
+        )
+
+@router.put("/nrts/update", response_model=UpdateNrtsObject)
+async def update_nrt(
+    body: UpdateNrtsObject,
+    db: DbDep,
+    ) -> UpdateNrtsObject:
+    try:
+        updated_nrt = await test_metrics_svc.update_nrt(db, body)
+        if updated_nrt is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="NRT not found",
+            )
+        return updated_nrt
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{str(e)}",
+        )
+
+
+@router.post("/flaky-scenarios/save", response_model=list[FlakyScenarioOut])
+async def save_flaky_scenarios(
+    db: DbDep,
+    flaky_scenarios: list[FlakyScenarioIn],
+) -> list[FlakyScenarioOut]:
+    try:
+        if flaky_scenarios is not None and len(flaky_scenarios) > 0:
+            saved_or_updated_scenarios = await test_metrics_svc.save_or_update_flaky_scenarios(db, flaky_scenarios)
+        if saved_or_updated_scenarios is None or len(saved_or_updated_scenarios) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No flaky scenarios saved or updated",
+            )
+        return saved_or_updated_scenarios
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{str(e)}",
+        )
+
+
+@router.get("/flaky-scenarios", response_model=list[FlakyScenarioOut])
+async def get_flaky_scenarios(
+    db: DbDep,
+    test_object: Annotated[uuid.UUID | None, Query()] = None,
+) -> list[FlakyScenarioOut]:
+    try:
+        scenarios = await test_metrics_svc.get_flaky_scenarios(db, test_object)
+        if scenarios is None or len(scenarios) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No flaky scenarios found",
+            )
+        return scenarios
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{str(e)}",
+        )
+
+@router.get("/origins", response_model=list[str])
+async def get_origins(db: DbDep) -> list[str]:
+    return await test_metrics_svc.get_origins(db)
+

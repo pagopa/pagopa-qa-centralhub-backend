@@ -98,6 +98,17 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False},
     },
     {
+        "key": "view:tas_nrts",
+        "label": "TAS NRTs (visualizza)",
+        "category": "Test automation service - Test Results",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
+    },
+    {
+        "key": "view:nrts",
+        "label": "NRTs (visualizza)",
+        "category": "Test Results",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
+    }
         "key": "view:ea_map",
         "label": "EA Map (visualizza)",
         "category": "Architettura",

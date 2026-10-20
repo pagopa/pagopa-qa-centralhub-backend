@@ -95,6 +95,19 @@ class JiraClient:
                     break
                 start += len(batch)
         return issues
+    
+    async def get_issue(self, issue_key: str) -> dict:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{self.base}/rest/api/3/issue/{issue_key}",
+                auth=self.auth,
+                headers={"Accept": "application/json"},
+                params={
+                    "fields": "summary,description,status,issuetype,assignee,priority",
+                },
+            )
+        response.raise_for_status()
+        return response.json()
 
 
 def compute_overview(issues: list[dict]) -> dict:
@@ -274,3 +287,4 @@ def compute_trend(issues: list[dict], weeks: int = 12) -> list[dict]:
                     buckets[wkey]["closed"] += 1
 
     return list(buckets.values())
+

@@ -86,3 +86,10 @@ async def get_data_estimate_drift() -> JiraEstimateDrift:
     client = await _require_client()
     issues = await client.get_issues_by_jql(BASE_JQL_DATA)
     return JiraEstimateDrift(**compute_estimate_drift(issues))
+
+
+@router.get("/issue/{issue_key}", response_model=dict)
+async def get_issue(issue_key: str) -> dict:
+    client = await _require_client()
+    issue = await client.get_issue(issue_key)
+    return issue
