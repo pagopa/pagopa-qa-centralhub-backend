@@ -24,7 +24,7 @@ from app.models.ea import (
 )
 from app.services.ea.scoring import KIND_LABELS, QaFacts, maturity_score
 
-_GRAPH_KINDS = ("area", "product", "component", "external", "datastore")
+_GRAPH_KINDS = ("area", "product", "component", "external", "datastore", "dataset")
 
 
 def _qa_payload(sig: EaQaSignal | None) -> dict[str, Any]:
@@ -81,6 +81,25 @@ def _doc_payload(d: EaDocLink) -> dict[str, Any]:
         "pages": d.pages,
         "url": d.url,
         "source": d.source,
+    }
+
+
+def _dataset_payload(a: dict[str, Any]) -> dict[str, Any]:
+    """Compact dataset card for the graph; the full contract is in the node detail."""
+    contract = a.get("contract") or {}
+    quality = a.get("quality") or {}
+    return {
+        "layer": a.get("layer_override") or a.get("layer") or "silver",
+        "domain": a.get("domain"),
+        "contracted": bool(a.get("contracted")),
+        "table": a.get("table"),
+        "topic": a.get("topic"),
+        "owner": contract.get("owner"),
+        "version": contract.get("version"),
+        "url": contract.get("url"),
+        "fields": a.get("fields") or 0,
+        "pii": a.get("pii_fields") or 0,
+        "checks": quality.get("checks") or 0,
     }
 
 
@@ -141,6 +160,8 @@ async def build_kb(db: AsyncSession) -> dict[str, Any]:
                 confRepo=[d.url for d in docs.get(n.id, []) if d.source == "readme"],
                 qa=_qa_payload(qa.get(n.id)),
             )
+        elif n.kind == "dataset":
+            base.update(_dataset_payload(a))
         out_nodes.append(base)
 
     visible = {n["id"] for n in out_nodes}

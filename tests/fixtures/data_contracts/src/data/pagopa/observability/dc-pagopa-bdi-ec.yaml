@@ -1,0 +1,16 @@
+dataContractSpecification: 0.9.3
+id: urn:pagopa:bdi:ec
+info:
+  title: KPI trimestrali per Banca d'Italia per ente creditore
+  version: 0.0.1
+  description: Transazioni aggregate per anno, mese, regione e categoria istat dell'ente creditore.
+  owner: Data Lake Team
+servers:
+  production:
+    type: impala
+    host: impala-proxy.example.test
+    table: pagopa.gold_bdi_ec
+models:
+  gold_bdi_ec:
+    fields:
+      anno: {type: int}

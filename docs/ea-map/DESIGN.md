@@ -16,6 +16,8 @@
 | 4 | Sync periodica da GitHub e Confluence con coda di revisione | PR3 |
 | 5 | Notifiche, export, hardening | PR4 |
 
+Evoluzione **Data Lake** (data contract, vista Data Lake, overlay DQ): vedi [DESIGN-data-lake.md](./DESIGN-data-lake.md).
+
 Fuori perimetro per ora: analisi del repo privato `pagopa-nodo4-nodo-dei-pagamenti`, metriche di esecuzione dei test (esiti, durate), che restano negli altri moduli del Hub.
 
 ## 2. Cosa ho trovato nel codice del Hub

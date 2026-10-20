@@ -37,6 +37,12 @@ from app.models.ea import (
     EaSyncRun,
     EaSyncStatus,
 )
+from app.services.ea.contracts import (
+    CONSUMER_NODES,
+    CONTRACTS_PATH,
+    CONTRACTS_REPO,
+    build_graph,
+)
 from app.services.ea.sync import derive
 from app.services.ea.sync.extract import extract_repo, wanted_files
 from app.services.ea.sync.rules import (
@@ -131,6 +137,11 @@ class _Collected:
     pages: dict[str, list[dict[str, str]]] | None = None
     confluence_error: str | None = None
     candidates: list[str] = field(default_factory=list)
+    # data contracts (docs/ea-map/DESIGN-data-lake.md §5): graph as stored in the snapshot
+    contracts: dict[str, Any] | None = None
+    contracts_fresh: tuple[str, str] | None = None  # (branch, sha) when read in this run
+    contracts_error: str | None = None
+    contracts_skipped: str | None = None
 
 
 async def _read_state(db: AsyncSession) -> _State:
@@ -214,6 +225,7 @@ async def _collect(
         col.fresh[name] = (info.default_branch, tree.sha, facts)
 
     await asyncio.gather(*(read(n) for n in targets))
+    await _collect_contracts(state, github, col)
 
     if confluence is not None:
         try:
@@ -221,6 +233,51 @@ async def _collect(
         except SourceError as exc:
             col.confluence_error = str(exc)
     return col
+
+
+def _graph_dict(files: dict[str, str]) -> dict[str, Any]:
+    g = build_graph(files)
+    return {
+        "nodes": g.nodes,
+        "edges": g.edges,
+        "quality_tables": g.quality_tables,
+        "errors": g.errors,
+        "files": len([p for p in files if p.endswith((".yaml", ".yml"))]),
+    }
+
+
+async def _collect_contracts(state: _State, github: GitHubSource, col: _Collected) -> None:
+    """Read the data contracts repository, unless nothing was pushed since the snapshot."""
+    info = col.listing.get(CONTRACTS_REPO)
+    snap = state.snapshots.get(CONTRACTS_REPO)
+    if info is None:
+        # the token does not see the repository: keep what we know, do not fail the run
+        col.contracts_skipped = "Repository dei data contract non visibile al token GitHub"
+        if snap is not None:
+            col.contracts = snap.extracted
+        return
+    if snap is not None and info.pushed_at is not None and snap.fetched_at >= info.pushed_at:
+        col.contracts = snap.extracted
+        return
+    try:
+        tree = await github.get_tree(CONTRACTS_REPO, info.default_branch)
+        if snap is not None and snap.head_sha == tree.sha:
+            col.contracts = snap.extracted
+            col.touched.add(CONTRACTS_REPO)
+            return
+        paths = [
+            p
+            for p in tree.paths
+            if p.startswith(CONTRACTS_PATH + "/") and p.endswith((".yaml", ".yml"))
+        ]
+        files = await github.get_files(CONTRACTS_REPO, info.default_branch, paths)
+    except SourceError as exc:
+        col.contracts_error = f"Data contract: {exc}"
+        if snap is not None:
+            col.contracts = snap.extracted  # keep the last known picture
+        return
+    col.contracts = _graph_dict(files)
+    col.contracts_fresh = (info.default_branch, tree.sha)
 
 
 # ---- apply -----------------------------------------------------------------------------
@@ -237,12 +294,19 @@ class _Applier:
         default_factory=lambda: {"auto_applied": 0, "pending": 0, "conflicts": 0}
     )
 
-    def auto(self, entity: str, target: str, before: dict[str, Any], after: dict[str, Any]) -> None:
+    def auto(
+        self,
+        entity: str,
+        target: str,
+        before: dict[str, Any] | None,
+        after: dict[str, Any] | None,
+        op: str = "update",
+    ) -> None:
         self.db.add(
             EaChange(
                 run_id=self.run.id,
                 entity=entity,
-                op="update",
+                op=op,
                 target_id=target,
                 before=before,
                 after=after,
@@ -442,6 +506,172 @@ async def _apply_product_docs(ap: _Applier, pages: dict[str, list[dict[str, str]
         )
 
 
+DATA_EDGE_CONFIDENCE = {"contract": 80, "curated": 60}
+# dataset attributes a person owns (the sync never overwrites them)
+DATASET_MANUAL_ATTRS = ("layer_override",)
+
+
+async def _ensure_consumers(ap: _Applier) -> None:
+    for node_id, spec in CONSUMER_NODES.items():
+        if await ap.db.get(EaNode, node_id) is not None:
+            continue
+        ap.db.add(
+            EaNode(
+                id=node_id,
+                kind="external",
+                name=spec["name"],
+                description=spec["description"],
+                source="curated",
+                status="active",
+                attrs={},
+            )
+        )
+        ap.auto("node", node_id, None, {"kind": "external", "name": spec["name"]}, op="add")
+
+
+async def _apply_data_lake(ap: _Applier, graph: dict[str, Any]) -> None:
+    """Datasets from the data contracts, and the derives/feeds edges among them.
+
+    Dataset content is a fact of the contract and is applied immediately; a dataset that
+    is no longer in the contracts goes to review. Contract edges no longer declared are
+    removed, unless a person verified them (conflict).
+    """
+    db = ap.db
+    await _ensure_consumers(ap)
+    wanted: dict[str, dict[str, Any]] = graph.get("nodes") or {}
+    existing = {n.id: n for n in await db.scalars(select(EaNode).where(EaNode.kind == "dataset"))}
+    for node_id, payload in wanted.items():
+        node = existing.get(node_id)
+        attrs = dict(payload.get("attrs") or {})
+        if node is None:
+            db.add(
+                EaNode(
+                    id=node_id,
+                    kind="dataset",
+                    name=payload["name"],
+                    description=payload.get("description") or None,
+                    attrs=attrs,
+                    source="sync",
+                    status="active",
+                )
+            )
+            ap.auto(
+                "node",
+                node_id,
+                None,
+                {"kind": "dataset", "name": payload["name"], "layer": attrs.get("layer")},
+                op="add",
+            )
+            continue
+        current = dict(node.attrs or {})
+        merged = {**attrs, **{k: current[k] for k in DATASET_MANUAL_ATTRS if k in current}}
+        before, after = _changed(current, merged)
+        removed = [k for k in current if k not in merged]
+        if removed:
+            before.update({k: current[k] for k in removed})
+            after.update({k: None for k in removed})
+        if node.source != "manual" and node.verified_at is None:
+            for key, value in (
+                ("name", payload["name"]),
+                ("description", payload.get("description") or None),
+            ):
+                if getattr(node, key) != value:
+                    before[key], after[key] = getattr(node, key), value
+                    setattr(node, key, value)
+        if node.status == "archived":
+            before["status"], after["status"] = "archived", "active"
+            node.status = "active"
+        if after:
+            node.attrs = merged
+            ap.auto("node", node_id, before, after)
+
+    ap.scopes.add("*census*")
+    for node_id, node in existing.items():
+        if node_id in wanted or node.status == "archived" or node.source == "manual":
+            continue
+        ap.propose(
+            "node",
+            "update",
+            node_id,
+            {"status": node.status},
+            {"status": "archived", "reason": "Data contract non più presente nel repository"},
+        )
+    await db.flush()
+
+    known = set((await db.scalars(select(EaNode.id).where(EaNode.status == "active"))).all())
+    want_edges = {
+        (e["from"], e["to"], e["type"]): e
+        for e in graph.get("edges") or []
+        if e["from"] in known and e["to"] in known
+    }
+    dataset_ids = set(wanted) | set(existing)
+    current_edges = list(
+        await db.scalars(
+            select(EaEdge).where(
+                EaEdge.type.in_(("derives", "feeds")),
+                (EaEdge.from_id.in_(dataset_ids)) | (EaEdge.to_id.in_(dataset_ids)),
+            )
+        )
+    )
+    by_key = {(e.from_id, e.to_id, e.type): e for e in current_edges}
+    for ekey, spec in want_edges.items():
+        if ekey in by_key:
+            continue  # present, or a person removed or rejected it: leave it alone
+        db.add(
+            EaEdge(
+                from_id=spec["from"],
+                to_id=spec["to"],
+                type=spec["type"],
+                origin=spec["origin"],
+                status="active",
+                confidence=DATA_EDGE_CONFIDENCE.get(spec["origin"], 60),
+                evidence=spec.get("evidence") or {},
+            )
+        )
+        ap.auto(
+            "edge",
+            edge_key(*ekey),
+            None,
+            {"from": ekey[0], "to": ekey[1], "type": ekey[2], "origin": spec["origin"]},
+            op="add",
+        )
+    for ekey, e in by_key.items():
+        if ekey in want_edges or e.origin not in ("contract", "curated"):
+            continue
+        if e.status == "active":
+            e.status = "removed"
+            ap.auto(
+                "edge",
+                edge_key(*ekey),
+                {"from": e.from_id, "to": e.to_id, "type": e.type, "status": "active"},
+                {"status": "removed", "reason": "Non più dichiarato nei data contract"},
+                op="remove",
+            )
+        elif e.status == "verified":
+            ap.scopes.add(e.from_id)
+            ap.propose(
+                "edge",
+                "remove",
+                edge_key(*ekey),
+                {
+                    "from": e.from_id,
+                    "to": e.to_id,
+                    "type": e.type,
+                    "status": e.status,
+                    "id": str(e.id),
+                },
+                None,
+                conflict=True,
+            )
+
+    meta = await db.get(EaMeta, "dq_result_tables")
+    tables = graph.get("quality_tables") or []
+    if meta is None:
+        db.add(EaMeta(key="dq_result_tables", value=tables))
+    elif meta.value != tables:
+        meta.value = tables
+
+
 async def _apply(
     db: AsyncSession, run: EaSyncRun, state: _State, col: _Collected
 ) -> dict[str, Any]:
@@ -461,6 +691,26 @@ async def _apply(
                 branch,
                 sha,
                 facts,
+                now,
+            )
+    if col.contracts_fresh is not None and col.contracts is not None:
+        branch, sha = col.contracts_fresh
+        snap = await db.get(EaRepoSnapshot, CONTRACTS_REPO)
+        if snap is None:
+            db.add(
+                EaRepoSnapshot(
+                    repo=CONTRACTS_REPO,
+                    default_branch=branch,
+                    head_sha=sha,
+                    extracted=col.contracts,
+                    fetched_at=now,
+                )
+            )
+        else:
+            snap.default_branch, snap.head_sha, snap.extracted, snap.fetched_at = (
+                branch,
+                sha,
+                col.contracts,
                 now,
             )
     for repo in col.touched:
@@ -516,6 +766,9 @@ async def _apply(
     if col.pages is not None:
         await _apply_product_docs(ap, col.pages)
 
+    if col.contracts is not None:
+        await _apply_data_lake(ap, col.contracts)
+
     superseded = 0
     open_changes = await db.scalars(
         select(EaChange).where(EaChange.status.in_(OPEN_STATUSES), EaChange.run_id != run.id)
@@ -537,6 +790,9 @@ async def _apply(
     if col.pages is not None:
         sources["confluence_pages"] = sum(len(v) for v in col.pages.values())
         sources["confluence_spaces"] = list(CONFLUENCE_SPACES)
+    if col.contracts is not None:
+        sources["data_contracts"] = col.contracts.get("files", 0)
+        sources["data_contracts_repo"] = f"{GITHUB_ORG}/{CONTRACTS_REPO}"
     kb_meta["sources"] = sources
     if meta is None:
         db.add(EaMeta(key="kb", value=kb_meta))
@@ -580,6 +836,9 @@ async def execute_run(
             "repos_failed": len(repo_failures),
             "candidates_checked": len(col.candidates),
             "confluence_pages": sum(len(v) for v in col.pages.values()) if col.pages else 0,
+            "data_contracts": (col.contracts or {}).get("files", 0),
+            "data_contracts_read": col.contracts_fresh is not None,
+            "datasets": len((col.contracts or {}).get("nodes") or {}),
             "github_rate_remaining": github.rate_limit_remaining(),
             **result,
         }
@@ -587,10 +846,15 @@ async def execute_run(
             "repos": {k: v[1] for k, v in col.fresh.items()},
             "failures": repo_failures,
             "confluence_error": col.confluence_error,
+            "data_contracts": col.contracts_fresh[1] if col.contracts_fresh else None,
+            "data_contracts_error": col.contracts_error or col.contracts_skipped,
+            "data_contracts_invalid": (col.contracts or {}).get("errors") or {},
         }
-        partial = bool(repo_failures or col.confluence_error or confluence is None)
+        partial = bool(
+            repo_failures or col.confluence_error or confluence is None or col.contracts_error
+        )
         run.status = "partial" if partial else "success"
-        run.error = col.confluence_error
+        run.error = col.confluence_error or col.contracts_error
         run.finished_at = _now()
         summary = _summary(run)
         if dry_run:

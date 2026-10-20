@@ -1,0 +1,54 @@
+dataContractSpecification: 0.9.3
+id: urn:pagopa:gpd:payment-position
+info:
+  title: Payment Position Contract
+  description: Oggetto che rappresenta l'entità Posizione Debitoria
+  owner: pagoPA QA-Team
+  version: 0.0.2
+  contact:
+    name: Data Owner
+    url: https://pagopa.atlassian.net/wiki/spaces/PPR/pages/1/DR+-+Ingestion+dati+GPD
+    email: owner@example.test
+    slack-channel: https://example.slack.com/archives/C1
+
+servers:
+  production:
+    type: kafka
+    host: sb://pagopa-p-itn-observ-gpd-evh.servicebus.windows.net
+    topic: gpd-ingestion.apd.payment_position
+    format: json
+  uat:
+    type: kafka
+    host: sb://pagopa-u-itn-observ-gpd-evh.servicebus.windows.net
+    topic: gpd-ingestion.apd.payment_position
+    format: json
+
+terms:
+  usage: >
+    - Il contratto espone un flusso CDC: il campo `op` indica l'operazione applicata sulla tabella sorgente
+  noticePeriod: P1M
+
+models:
+  payment-position:
+    description: Modello utilizzato per rappresentare l'entità `payment-position`
+    fields:
+      after:
+        type: record
+        required: false
+        fields:
+          id: {type: int, required: true, pii: false}
+          iupd: {type: string, required: true, pii: false}
+          company_name: {type: string, required: true, pii: false}
+          debtor_fiscal_code: {type: string, required: false, pii: true}
+      before:
+        type: record
+        required: false
+        fields:
+          id: {type: int, required: true, pii: false}
+      op: {type: string, required: true}
+      ts_ms: {type: long, required: true}
+
+servicelevels:
+  availability:
+    description: Il servizio è garantito 24/7.
+    percentage: 99.99%

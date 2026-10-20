@@ -1,0 +1,17 @@
+dataContractSpecification: 0.9.3
+id: urn:pagopa:mef:tari-tefa
+info:
+  title: TARI-TEFA Report per MEF
+  version: 0.0.1
+  description: Report CSV contenente i pagamenti TARI e TEFA, destinato al Ministero dell'Economia e delle Finanze (MEF). I dati provengono da silver_positive_denorm_increment (per i campi trasformati) con join su biz_positive (per il Codice Fiscale in chiaro).
+  owner: Data Lake Team
+servers:
+  production:
+    type: s3
+    location: s3a://pdnd-prod-dl-1/tmp/mef/tari_tmp
+    format: csv
+models:
+  tari_tefa:
+    fields:
+      debt_id: {type: string}
+      fiscal_code: {type: string, pii: true}

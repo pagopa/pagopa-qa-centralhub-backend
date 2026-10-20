@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.ea import TECH_EDGE_TYPES, EaEdge, EaEditLog, EaNode, EaQaSignal
+from app.models.ea import DATA_EDGE_TYPES, TECH_EDGE_TYPES, EaEdge, EaEditLog, EaNode, EaQaSignal
 
 EDITABLE_EDGE_STATUSES = ("active", "verified")
 # which node kinds may be the parent of which
@@ -97,7 +97,7 @@ async def _edge(db: AsyncSession, edge_id: uuid.UUID) -> EaEdge:
 
 
 def _check_type(edge_type: str) -> None:
-    if edge_type not in TECH_EDGE_TYPES:
+    if edge_type not in TECH_EDGE_TYPES + DATA_EDGE_TYPES:
         raise EaEditError(f"Tipo di legame non valido: {edge_type}")
 
 

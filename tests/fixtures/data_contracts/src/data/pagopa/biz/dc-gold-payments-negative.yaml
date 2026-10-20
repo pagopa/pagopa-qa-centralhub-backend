@@ -1,0 +1,16 @@
+dataContractSpecification: 0.9.3
+id: urn:pagopa:gold:payments-negative
+info:
+  title: Payments Gold Negative - Pagamenti Negativi Definitivi
+  version: 0.0.1
+  description: Tabella gold dei pagamenti negativi definitivi, derivata da pagopa.silver_negative filtrata per useCase
+  owner: Data Lake Team
+servers:
+  production:
+    type: impala
+    host: impala-proxy.example.test
+    table: pagopa.gold_payments_negative
+models:
+  gold_payments_negative:
+    fields:
+      id: {type: string}
