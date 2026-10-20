@@ -55,9 +55,6 @@ def upgrade() -> None:
     op.create_index('ix_qachub_flaky_scenarios_suite_id', 'flaky_scenarios', ['suite_id'], unique=False, schema='qachub')
     op.create_index('ix_qachub_flaky_scenarios_test_object', 'flaky_scenarios', ['test_object'], unique=False, schema='qachub')
 
-
-    op.create_index(op.f('ix_qachub_flaky_scenarios_suite_id'), 'flaky_scenarios', ['suite_id'], unique=False, schema='qachub')
-    op.create_index('ix_qachub_flaky_scenarios_test_object', 'flaky_scenarios', ['test_object'], unique=False, schema='qachub')
     # ### end Alembic commands ###
 
 
