@@ -477,3 +477,77 @@ def build_graph(files: dict[str, str]) -> DataLakeGraph:
 
     g.edges = list(edges.values())
     return g
+
+
+# ---- producers (PR2): who writes the topic of an ingestion contract ------------------
+
+# Known topics → EA node, with the confidence shown in the review queue. Order matters:
+# the first match wins (negative biz events before the generic biz events topic).
+PRODUCER_RULES: tuple[tuple[str, str, int], ...] = (
+    (r"^gpd-ingestion\.", "pagopa-gpd-ingestion-manager", 90),
+    (r"^nodo-dei-pagamenti-fdr$", "pagopa-fdr-2-event-hub", 85),
+    (r"^nodo-dei-pagamenti-negative-.*biz-evt", "pagopa-negative-biz-events-datastore", 60),
+    (r"^nodo-dei-pagamenti-biz-evt", "pagopa-biz-events-service", 70),
+    (r"^gec-ingestion-", "pagopa-afm-marketplace-be", 60),
+    (r"^payment-wallet-ingestion", "pagopa-payment-wallet-cdc-service", 60),
+    (r"^bdi-kpi-ingestion", "pagopa-observability-bdi", 60),
+    (r"^quality-improvement-psp-kpi", "prod:qi", 50),
+)
+_GENERIC_TOKENS = {
+    "pagopa",
+    "ingestion",
+    "dl",
+    "evt",
+    "evh",
+    "event",
+    "events",
+    "service",
+    "nodo",
+    "dei",
+    "pagamenti",
+    "p",
+    "u",
+    "d",
+    "itn",
+    "weu",
+    "core",
+    "observ",
+    "ns01",
+    "ns03",
+    "ns04",
+    "sb",
+    "servicebus",
+    "windows",
+    "net",
+    "be",
+    "fe",
+    "function",
+    "manager",
+}
+SIMILARITY_CONFIDENCE = 40
+
+
+def _tokens(value: str) -> set[str]:
+    return {t for t in re.split(r"[^a-z0-9]+", value.lower()) if t and t not in _GENERIC_TOKENS}
+
+
+def propose_producer(topic: str | None, candidates: dict[str, str]) -> tuple[str, int, str] | None:
+    """Best EA node for a topic: (node id, confidence, rule).
+
+    ``candidates`` maps active component/product ids to their names. Explicit rules first;
+    otherwise the component sharing at least two distinctive tokens with the topic.
+    """
+    if not topic:
+        return None
+    for pattern, node_id, confidence in PRODUCER_RULES:
+        if re.search(pattern, topic) and node_id in candidates:
+            return node_id, confidence, f"regola {pattern}"
+    wanted = _tokens(topic)
+    best: tuple[int, str] | None = None
+    for node_id, name in candidates.items():
+        shared = len(wanted & (_tokens(node_id) | _tokens(name)))
+        if shared >= 2 and (best is None or shared > best[0]):
+            best = (shared, node_id)
+    if best is None:
+        return None
+    return best[1], SIMILARITY_CONFIDENCE, "somiglianza dei nomi"

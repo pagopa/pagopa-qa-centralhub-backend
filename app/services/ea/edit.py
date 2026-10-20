@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ea import DATA_EDGE_TYPES, TECH_EDGE_TYPES, EaEdge, EaEditLog, EaNode, EaQaSignal
+from app.services.ea.contracts import LAYERS
 
 EDITABLE_EDGE_STATUSES = ("active", "verified")
 # which node kinds may be the parent of which
@@ -267,8 +268,19 @@ async def update_node(
         node.parent_id = parent.id
     if "ctype" in changes and node.kind == "component":
         node.attrs = {**(node.attrs or {}), "ctype": changes["ctype"]}
-    node.verified_by = actor
-    node.verified_at = _now()
+    if "layer" in changes:
+        if node.kind != "dataset":
+            raise EaEditError("Il livello si può correggere solo sui dataset del Data Lake")
+        layer = changes["layer"]
+        if layer is not None and layer not in LAYERS:
+            raise EaEditError(f"Livello non valido: {layer}")
+        attrs = {k: v for k, v in (node.attrs or {}).items() if k != "layer_override"}
+        node.attrs = {**attrs, "layer_override": layer} if layer else attrs
+    if node.kind != "dataset" or set(changes) - {"layer"}:
+        # a dataset's name and description come from its contract: correcting only the
+        # layer must not freeze them
+        node.verified_by = actor
+        node.verified_at = _now()
     _audit(
         db,
         "ea.node.update",

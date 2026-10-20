@@ -44,6 +44,7 @@ class EaNodeDetail(BaseModel):
     docs: list[dict[str, Any]]
     out: list[dict[str, Any]]
     in_: list[dict[str, Any]] = Field(alias="in")
+    dq: dict[str, Any] | None = None  # datasets: Data Quality coverage (PR3)
 
     model_config = {"populate_by_name": True}
 
@@ -92,6 +93,7 @@ class EaNodeUpdate(_Actor):
     description: str | None = None
     parent_id: str | None = None
     ctype: str | None = None
+    layer: str | None = None  # datasets only: correct the layer (null = back to the contract)
 
 
 class EaNodeCreate(_Actor):

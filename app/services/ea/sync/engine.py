@@ -42,6 +42,7 @@ from app.services.ea.contracts import (
     CONTRACTS_PATH,
     CONTRACTS_REPO,
     build_graph,
+    propose_producer,
 )
 from app.services.ea.sync import derive
 from app.services.ea.sync.extract import extract_repo, wanted_files
@@ -529,6 +530,55 @@ async def _ensure_consumers(ap: _Applier) -> None:
         ap.auto("node", node_id, None, {"kind": "external", "name": spec["name"]}, op="add")
 
 
+async def _propose_producers(ap: _Applier, wanted: dict[str, dict[str, Any]]) -> None:
+    """Queue "component produces dataset" for ingestions nobody has linked yet (PR2)."""
+    db = ap.db
+    candidates = {
+        n.id: n.name
+        for n in await db.scalars(
+            select(EaNode).where(
+                EaNode.kind.in_(("component", "product")), EaNode.status == "active"
+            )
+        )
+    }
+    decided = {
+        e.to_id
+        for e in await db.scalars(
+            select(EaEdge).where(
+                EaEdge.type == "produces",
+                EaEdge.status.in_(("active", "verified", "removed", "rejected")),
+            )
+        )
+    }
+    for dataset_id, payload in wanted.items():
+        attrs = payload.get("attrs") or {}
+        if attrs.get("layer") != "ingestion" or dataset_id in decided:
+            continue  # someone already linked (or refused) a producer
+        guess = propose_producer(attrs.get("topic"), candidates)
+        if guess is None:
+            continue
+        producer, confidence, rule = guess
+        ap.scopes.add(producer)
+        ap.propose(
+            "edge",
+            "add",
+            edge_key(producer, dataset_id, "produces"),
+            None,
+            {
+                "from": producer,
+                "to": dataset_id,
+                "type": "produces",
+                "origin": "contract_rule",
+                "confidence": confidence,
+                "evidence": {
+                    "topic": attrs.get("topic"),
+                    "rule": rule,
+                    "contract": (attrs.get("contract") or {}).get("path"),
+                },
+            },
+        )
+
+
 async def _apply_data_lake(ap: _Applier, graph: dict[str, Any]) -> None:
     """Datasets from the data contracts, and the derives/feeds edges among them.
 
@@ -663,6 +713,8 @@ async def _apply_data_lake(ap: _Applier, graph: dict[str, Any]) -> None:
                 None,
                 conflict=True,
             )
+
+    await _propose_producers(ap, wanted)
 
     meta = await db.get(EaMeta, "dq_result_tables")
     tables = graph.get("quality_tables") or []

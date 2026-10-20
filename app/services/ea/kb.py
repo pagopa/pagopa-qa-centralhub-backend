@@ -22,6 +22,7 @@ from app.models.ea import (
     EaNode,
     EaQaSignal,
 )
+from app.services.ea.dq_overlay import dataset_coverage
 from app.services.ea.scoring import KIND_LABELS, QaFacts, maturity_score
 
 _GRAPH_KINDS = ("area", "product", "component", "external", "datastore", "dataset")
@@ -84,7 +85,7 @@ def _doc_payload(d: EaDocLink) -> dict[str, Any]:
     }
 
 
-def _dataset_payload(a: dict[str, Any]) -> dict[str, Any]:
+def _dataset_payload(a: dict[str, Any], dq: dict[str, Any] | None = None) -> dict[str, Any]:
     """Compact dataset card for the graph; the full contract is in the node detail."""
     contract = a.get("contract") or {}
     quality = a.get("quality") or {}
@@ -100,6 +101,9 @@ def _dataset_payload(a: dict[str, Any]) -> dict[str, Any]:
         "fields": a.get("fields") or 0,
         "pii": a.get("pii_fields") or 0,
         "checks": quality.get("checks") or 0,
+        # DQ Framework of the Hub (PR3): controls censused on this dataset's tables
+        "dq": (dq or {}).get("controls", 0),
+        "dqActive": (dq or {}).get("active", 0),
     }
 
 
@@ -117,6 +121,10 @@ async def build_kb(db: AsyncSession) -> dict[str, Any]:
     for d in await db.scalars(select(EaDocLink).order_by(EaDocLink.sort_order)):
         docs[d.node_id].append(d)
     meta = {m.key: m.value for m in await db.scalars(select(EaMeta))}
+    datasets = {
+        n.id: dict(n.attrs or {}) for n in nodes if n.kind == "dataset" and n.status != "archived"
+    }
+    dq_summary = (await dataset_coverage(db, datasets))[0] if datasets else {}
 
     out_nodes: list[dict[str, Any]] = []
     for n in nodes:
@@ -161,7 +169,7 @@ async def build_kb(db: AsyncSession) -> dict[str, Any]:
                 qa=_qa_payload(qa.get(n.id)),
             )
         elif n.kind == "dataset":
-            base.update(_dataset_payload(a))
+            base.update(_dataset_payload(a, dq_summary.get(n.id)))
         out_nodes.append(base)
 
     visible = {n["id"] for n in out_nodes}
@@ -290,7 +298,13 @@ async def get_node_detail(db: AsyncSession, node_id: str) -> dict[str, Any] | No
             "verified_at": e.verified_at,
         }
 
+    dq: dict[str, Any] | None = None
+    if node.kind == "dataset":
+        summary, matched = await dataset_coverage(db, {node.id: dict(node.attrs or {})})
+        dq = {**summary[node.id], "items": matched.get(node.id, [])}
+
     return {
+        "dq": dq,
         "id": node.id,
         "kind": node.kind,
         "parent": node.parent_id,

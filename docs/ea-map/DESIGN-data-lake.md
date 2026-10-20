@@ -1,6 +1,6 @@
 # EA Map – Evoluzione Data Lake – Design tecnico
 
-> Branch: `feature/ea-map-data-lake` (backend e frontend) · Stato: **approvato il 20/10/2026; PR1 implementata** · Autore: Claude con Cristiano Sticca
+> Branch: `feature/ea-map-data-lake` (backend e frontend) · Stato: **approvato il 20/10/2026; PR1, PR2 e PR3 implementate** · Autore: Claude con Cristiano Sticca
 >
 > Obiettivo: portare nella EA Map il Data Lake aziendale, partendo dai data contract della piattaforma pagoPA (`pagopa/pdnd-data-contracts`, cartella `src/data/pagopa`), e metterli in relazione con le entità già presenti (componenti, prodotti, sistemi esterni) e con il Data Quality Framework del Hub.
 
@@ -197,6 +197,8 @@ Per ogni dataset, calcolato in lettura (nessuna tabella nuova):
 - **Check nel contratto**: numero di check SodaCL e divisione per dimensione ricavata dal prefisso del nome (`fld__cmp` completezza, `fld__val` validità…).
 - **Controlli nel DQF del Hub**: istanze `dq_control_instances` del dominio corrispondente (BIZ, GPD, FDR, GEC, Wallet) la cui `table_ref` coincide con la tabella del dataset; totale, attivi e per dimensione.
 - **Allineamento**: check presenti nel contratto ma non censiti nel DQF (e viceversa), confrontando i nomi.
+
+**Come si collegano i controlli alle tabelle** (verificato sui CSV del DQF): i controlli del DQF puntano alle tabelle **bronze** di atterraggio (`pagopa.bronze_gpd_payment_position`), mentre il contratto di ingestion nomina la tabella silver che alimenta (`quality.dataset: pagopa.silver_gpd_payment_position`). Il collegamento passa quindi dal nome base della tabella senza prefisso di livello; le tabelle silver e gold si collegano per nome esatto; un controllo cross-entità su più tabelle conta per ciascun dataset. Sui CSV attuali tutti i controlli con una tabella si collegano al dataset giusto (GPD 78, GEC 73, FdR 18, Wallet 17). Implementazione in `app/services/ea/dq_overlay.py`, calcolata in lettura (nessuna tabella nuova).
 
 Corrispondenza domini contratto → domini DQ: `biz → BIZ`, `gpd → GPD`, `fdr → FDR`, `gec → GEC`, `wallet → Wallet`. Configurabile se i nomi dei domini DQ cambiano.
 

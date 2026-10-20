@@ -175,3 +175,30 @@ def test_bronze_tables_named_by_an_ingestion_contract_are_its_own() -> None:
 def test_a_malformed_models_section_does_not_drop_the_contract() -> None:
     c = parse_contract("src/data/pagopa/x/y.yaml", "id: urn:pagopa:x:y\nmodels:\n  - a\n  - b\n")
     assert c.node_id == "dc:pagopa:x:y" and c.fields == 0
+
+
+def test_producer_rules_and_similarity() -> None:
+    from app.services.ea.contracts import propose_producer
+
+    cands = {
+        "pagopa-gpd-ingestion-manager": "GPD Ingestion Manager",
+        "pagopa-negative-biz-events-datastore": "Negative Biz Events",
+        "pagopa-biz-events-service": "Biz Events Service",
+        "pagopa-receipt-pdf-generator": "Receipt PDF Generator",
+    }
+    assert propose_producer("gpd-ingestion.apd.transfer", cands) == (
+        "pagopa-gpd-ingestion-manager",
+        90,
+        r"regola ^gpd-ingestion\.",
+    )
+    # the negative topic is not the generic biz events one
+    neg = propose_producer("nodo-dei-pagamenti-negative-final-biz-evt", cands)
+    assert neg is not None and neg[0] == "pagopa-negative-biz-events-datastore"
+    # a rule pointing to a node that is not in the map falls back to similarity
+    assert propose_producer("receipt-pdf-ingestion-dl", cands) == (
+        "pagopa-receipt-pdf-generator",
+        40,
+        "somiglianza dei nomi",
+    )
+    assert propose_producer("totally-unknown-topic", cands) is None
+    assert propose_producer(None, cands) is None
