@@ -285,3 +285,32 @@ async def test_layer_can_be_corrected_without_freezing_the_contract(db: AsyncSes
         await edit.update_node(db, GOLD, changes={"layer": "platinum"}, actor="qa")
     with pytest.raises(edit.EaEditError):
         await edit.update_node(db, "pagopa-debt-position", changes={"layer": "gold"}, actor="qa")
+
+
+async def test_documentation_link_can_be_overridden_and_survives_the_sync(db: AsyncSession) -> None:
+    gh = ContractsGitHub()
+    await _sync(db, gh)
+    original = "https://pagopa.atlassian.net/wiki/spaces/PPR/pages/1/DR+-+Ingestion+dati+GPD"
+    kb = await build_kb(db)
+    card = next(n for n in kb["nodes"] if n["id"] == GPD_IN)
+    assert card["docUrl"] == original and card["docOverridden"] is False
+
+    better = "https://pagopa.atlassian.net/wiki/spaces/PPR/pages/2/GPD+Data+Lake"
+    node = await edit.update_node(db, GPD_IN, changes={"doc_url": better}, actor="qa")
+    assert node.attrs["doc_url_override"] == better and node.verified_at is None
+
+    files = contract_files()
+    path = "src/data/pagopa/gpd/payment-position.yaml"
+    files[path] = files[path].replace("version: 0.0.2", "version: 0.0.3")
+    gh.set_contracts(files, pushed=NOW + timedelta(minutes=5))
+    assert (await _sync(db, gh))["status"] == "success"
+    kb = await build_kb(db)
+    card = next(n for n in kb["nodes"] if n["id"] == GPD_IN)
+    assert card["docUrl"] == better and card["docOverridden"] is True
+
+    node = await edit.update_node(db, GPD_IN, changes={"doc_url": None}, actor="qa")
+    assert "doc_url_override" not in node.attrs
+    with pytest.raises(edit.EaEditError):
+        await edit.update_node(db, GPD_IN, changes={"doc_url": "javascript:alert(1)"}, actor="qa")
+    with pytest.raises(edit.EaEditError):
+        await edit.update_node(db, "pagopa-debt-position", changes={"doc_url": better}, actor="qa")

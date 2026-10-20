@@ -241,6 +241,13 @@ async def remove_edge(
     return edge
 
 
+# links of a dataset that people can correct: request field -> (attribute, label)
+_DATASET_LINKS = {
+    "doc_url": ("doc_url_override", "alla documentazione"),
+    "slack_url": ("slack_url_override", "al canale Slack"),
+}
+
+
 async def update_node(
     db: AsyncSession, node_id: str, *, changes: dict[str, Any], actor: str | None
 ) -> EaNode:
@@ -276,9 +283,19 @@ async def update_node(
             raise EaEditError(f"Livello non valido: {layer}")
         attrs = {k: v for k, v in (node.attrs or {}).items() if k != "layer_override"}
         node.attrs = {**attrs, "layer_override": layer} if layer else attrs
-    if node.kind != "dataset" or set(changes) - {"layer"}:
+    for field, (attr, label) in _DATASET_LINKS.items():
+        if field not in changes:
+            continue
+        if node.kind != "dataset":
+            raise EaEditError(f"Il link {label} si può correggere solo sui dataset")
+        url = (changes[field] or "").strip()
+        if url and not url.lower().startswith(("https://", "http://")):
+            raise EaEditError(f"Il link {label} deve iniziare con https://")
+        attrs = {k: v for k, v in (node.attrs or {}).items() if k != attr}
+        node.attrs = {**attrs, attr: url} if url else attrs
+    if node.kind != "dataset" or set(changes) - {"layer", *_DATASET_LINKS}:
         # a dataset's name and description come from its contract: correcting only the
-        # layer must not freeze them
+        # layer or the documentation link must not freeze them
         node.verified_by = actor
         node.verified_at = _now()
     _audit(

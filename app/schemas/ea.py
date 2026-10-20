@@ -94,6 +94,8 @@ class EaNodeUpdate(_Actor):
     parent_id: str | None = None
     ctype: str | None = None
     layer: str | None = None  # datasets only: correct the layer (null = back to the contract)
+    doc_url: str | None = None  # datasets only: documentation link (null = back to the contract)
+    slack_url: str | None = None  # datasets only: Slack channel link (null = back to the contract)
 
 
 class EaNodeCreate(_Actor):

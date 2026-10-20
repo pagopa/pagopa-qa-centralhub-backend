@@ -509,7 +509,7 @@ async def _apply_product_docs(ap: _Applier, pages: dict[str, list[dict[str, str]
 
 DATA_EDGE_CONFIDENCE = {"contract": 80, "curated": 60}
 # dataset attributes a person owns (the sync never overwrites them)
-DATASET_MANUAL_ATTRS = ("layer_override",)
+DATASET_MANUAL_ATTRS = ("layer_override", "doc_url_override", "slack_url_override")
 
 
 async def _ensure_consumers(ap: _Applier) -> None:

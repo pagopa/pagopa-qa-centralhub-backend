@@ -126,7 +126,7 @@ In ordine:
 3. tabella `impala` con prefisso `gold_` → `gold`; `silver_` → `silver`;
 4. altrimenti dal titolo ("Bronze", "Silver", "Gold").
 
-Il livello calcolato si potrà correggere a mano dalla scheda (attributo `layer_override`, che la sync non tocca mai; l'interfaccia per modificarlo arriva con la PR2).
+Il livello calcolato si corregge a mano dalla scheda (attributo `layer_override`, che la sync non tocca mai). Allo stesso modo si correggono il link alla documentazione (`doc_url_override`, al posto di `info.contact.url`) e il canale Slack (`slack_url_override`, al posto di `info.contact.slack-channel`): nei contratti questi campi puntano spesso alla home di uno spazio Confluence o a un canale generico. Le correzioni non segnano il dataset come verificato e si annullano con "Torna al contratto".
 
 ### 3.4 Consumer
 

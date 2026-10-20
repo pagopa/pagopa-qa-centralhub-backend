@@ -98,6 +98,11 @@ def _dataset_payload(a: dict[str, Any], dq: dict[str, Any] | None = None) -> dic
         "owner": contract.get("owner"),
         "version": contract.get("version"),
         "url": contract.get("url"),
+        # documentation: the contact url of the contract, unless corrected by hand
+        "docUrl": a.get("doc_url_override") or (contract.get("contact") or {}).get("url"),
+        "docOverridden": bool(a.get("doc_url_override")),
+        "slackUrl": a.get("slack_url_override") or (contract.get("contact") or {}).get("slack"),
+        "slackOverridden": bool(a.get("slack_url_override")),
         "fields": a.get("fields") or 0,
         "pii": a.get("pii_fields") or 0,
         "checks": quality.get("checks") or 0,
