@@ -240,3 +240,33 @@ class EaAssistantOut(BaseModel):
     highlight: list[str]
     labels: dict[str, str]
     steps: list[dict[str, str]]
+
+
+class EaLiveOut(BaseModel):
+    """Recent outcomes of the automated test runs, tied to the map nodes."""
+
+    env: str
+    days: int
+    generated_at: str
+    objects: list[dict[str, Any]]
+    nodes: dict[str, dict[str, Any]]
+    unmapped: list[str]
+    feed: list[dict[str, Any]]
+    counts: dict[str, int]
+
+
+class EaFlowOut(BaseModel):
+    """A curated payment flow, step by step, tied to the map nodes (draft until validated)."""
+
+    id: str
+    name: str
+    subtitle: str
+    process: str
+    process_name: str
+    services: list[dict[str, str]]
+    lanes: list[dict[str, Any]]
+    steps: list[dict[str, Any]]
+    missing: list[str]
+    validated: bool
+    sanp_url: str | None = None
+    source: str

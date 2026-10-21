@@ -194,6 +194,19 @@ Due funzioni di sola lettura calcolate sul grafo che la mappa mostra (`app/servi
 - `POST /impact/release` con `{"url": "<PR o confronto GitHub>"}` oppure `{"repo", "base", "head"}`: legge i file cambiati (`GITHUB_TOKEN`), li classifica (contratto API, dati, configurazione, codice, test, pipeline, documentazione), risale a chi chiama il componente, ai dati a valle e alle dipendenze, assegna un rischio a ciascun elemento e propone le suite da eseguire, le lacune di test e i processi SANP coinvolti (`app/services/ea/release_impact.py`).
 - `POST /assistant/chat` con la conversazione e il contesto della vista: un assistente Gemini con function calling che usa solo strumenti di sola lettura sul grafo (ricerca, scheda, impatto, lacune QA, impatto di una PR, evidenziazione) e cita i nodi come `[[id]]` (`app/services/ea/assistant.py`). Richiede `GEMINI_API_KEY` (modello in `GEMINI_MODEL`, default `gemini-3.8-flash`; se è sovraccarico (503) riprova 2 volte, se ha esaurito la quota (429) passa subito ai modelli in `GEMINI_FALLBACK_MODELS`, separati da virgola); senza chiave risponde 503.
 
+#### Live: esiti dei test sulla mappa
+
+`GET /live?env=DEV&days=7` legge le run automatiche già salvate nel Hub (`qachub.test_runs`, NRT, TAS, CI…) e per ogni `test_object` restituisce l'ultimo esito, lo storico e il pass rate. Il `test_object` si collega ai componenti tramite i segnali QA della mappa (suite NRT e suite centrali, anche per suffisso: `ecommerce-cdc` → `api/ecommerce-cdc`), oppure al componente o prodotto con lo stesso nome; quelli non collegati sono restituiti in `unmapped` (`app/services/ea/live.py`). Per provarlo in locale:
+
+```bash
+uv run python -m scripts.ea_live_demo            # 7 giorni di run demo in DEV (test_origin=ea-live-demo)
+uv run python -m scripts.ea_live_demo --clear    # le rimuove
+```
+
+#### Flussi di pagamento
+
+`GET /flows` serve i flussi di pagamento passo per passo (Modello 3, Checkout avviato dall'Ente, App IO, Rendicontazione) sui nodi reali della mappa. La sequenza dei passi non è nel codice: è una bozza curata dalle SANP in `app/services/ea/flows.py`, servita con `validated = false`. Per ogni passo l'API dice se la mappa ha già il legame usato (`on_map`, con tipo e origine), così flussi e mappa si verificano a vicenda.
+
 #### Data Lake
 
 La sync legge anche i data contract di [`pagopa/pdnd-data-contracts`](https://github.com/pagopa/pdnd-data-contracts) (solo `src/data/pagopa`, formato datacontract.com 0.9.3) e li porta nella mappa (`app/services/ea/contracts.py`):

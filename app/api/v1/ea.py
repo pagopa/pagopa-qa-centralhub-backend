@@ -21,10 +21,12 @@ from app.schemas.ea import (
     EaEdgeNote,
     EaEdgeOut,
     EaEdgeUpdate,
+    EaFlowOut,
     EaHistoryItem,
     EaImpactItem,
     EaImpactResponse,
     EaKbResponse,
+    EaLiveOut,
     EaNodeCreate,
     EaNodeDetail,
     EaNodeOut,
@@ -39,8 +41,10 @@ from app.schemas.ea import (
 )
 from app.services.ea import assistant as assistant_svc
 from app.services.ea import edit as edit_svc
+from app.services.ea import flows as flows_svc
 from app.services.ea import impact as impact_svc
 from app.services.ea import kb as kb_svc
+from app.services.ea import live as live_svc
 from app.services.ea import release_impact as release_svc
 from app.services.ea.edit import EaEditError
 from app.services.ea.graph_index import GraphIndex
@@ -80,6 +84,24 @@ async def get_impact(
         upstream=[EaImpactItem(**i) for i in result["upstream"]],
         downstream=[EaImpactItem(**i) for i in result["downstream"]],
     )
+
+
+@router.get("/live", response_model=EaLiveOut)
+async def get_live(
+    db: DbDep,
+    env: str = Query(default="DEV", pattern="^(DEV|UAT|PROD)$"),
+    days: int = Query(default=7, ge=1, le=30),
+) -> EaLiveOut:
+    """Outcomes of the test runs of the last ``days`` in ``env``, on the map nodes."""
+    graph = GraphIndex(await kb_svc.build_kb(db))
+    return EaLiveOut(**await live_svc.live_status(db, graph, env, days))
+
+
+@router.get("/flows", response_model=list[EaFlowOut])
+async def list_flows(db: DbDep) -> list[EaFlowOut]:
+    """Curated payment flows (SANP), step by step, on the nodes of the map."""
+    graph = GraphIndex(await kb_svc.build_kb(db))
+    return [EaFlowOut(**f) for f in flows_svc.flows_for_map(graph)]
 
 
 # ── Release impact and map assistant ─────────────────────────────────────────
