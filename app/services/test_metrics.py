@@ -37,7 +37,7 @@ async def create_test_execution(db: AsyncSession, test_execution: list[TestExecu
         await db.refresh(te)
     return test_execution
 
-async def get_nrts(db: AsyncSession, test_object: str | None, trigger: str, page:int = 1, size:int = 20) -> list[NrtListObject]:
+async def get_nrts(db: AsyncSession, test_object: str | None, origin: str | None, page:int = 1, size:int = 20) -> list[NrtListObject]:
     stmt = (
         select(TestRun, TestSuite)
         .join(TestSuite, TestRun.suite_id == TestSuite.id)
@@ -55,9 +55,12 @@ async def get_nrts(db: AsyncSession, test_object: str | None, trigger: str, page
         stmt = stmt.where(TestSuite.test_object == test_object)
         count_stmt = count_stmt.join(TestSuite, TestRun.suite_id == TestSuite.id).where(TestSuite.test_object == test_object)
 
-    if trigger:
-        count_stmt = count_stmt.where(TestRun.trigger_type == trigger)
-        stmt = stmt.where(TestRun.trigger_type == trigger)
+    if origin:
+        count_stmt = count_stmt.where(TestRun.test_origin == origin)
+        stmt = stmt.where(TestRun.test_origin == origin)
+    else:
+        count_stmt = count_stmt.where(TestRun.test_origin != "TAS")
+        stmt = stmt.where(TestRun.test_origin != "TAS")
     
     total: int = await db.scalar(count_stmt) or 0
     result = await db.execute(stmt)
@@ -158,6 +161,6 @@ async def save_or_update_flaky_scenarios(db: AsyncSession, flaky_scenarios: list
 
 
 async def get_origins(db: AsyncSession) -> list[str] | None:
-    stmt = select(TestRun.test_origin).distinct()
+    stmt = select(TestRun.test_origin).where(TestRun.trigger_type == "TAS").distinct()
     result = await db.execute(stmt)
     return result.scalars().all() if result is not None else None

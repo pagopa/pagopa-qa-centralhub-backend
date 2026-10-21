@@ -115,12 +115,12 @@ async def create_test_execution(
 
 @router.get("/nrts", response_model=PaginatedResponse[NrtListObject])
 async def get_nrts(db: DbDep, test_object: Annotated[str| None, Query()] = None,
-    trigger: Annotated[str | None, Query()] = None,
+    origin: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 50,
     ):
     try:
-        nrts, total = await test_metrics_svc.get_nrts(db, test_object, trigger, page, page_size)
+        nrts, total = await test_metrics_svc.get_nrts(db, test_object, origin, page, page_size)
         if nrts is None or len(nrts) == 0:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -213,5 +213,11 @@ async def get_flaky_scenarios(
 
 @router.get("/origins", response_model=list[str])
 async def get_origins(db: DbDep) -> list[str]:
-    return await test_metrics_svc.get_origins(db)
+    result = await test_metrics_svc.get_origins(db)
+    if result is None or len(result) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No origins found",
+        )
+    return result if result is not None else []
 
