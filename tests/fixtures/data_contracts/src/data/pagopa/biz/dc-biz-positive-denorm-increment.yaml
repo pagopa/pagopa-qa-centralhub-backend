@@ -1,0 +1,25 @@
+dataContractSpecification: 0.9.3
+id: urn:pagopa:biz:positive-denorm-increment
+info:
+  title: Biz Events Silver Positive Denormalizzata Incrementale
+  version: 0.0.1
+  description: Tabella silver denormalizzata incrementale degli eventi di business positivi, derivata da biz_positive con lista transfer esplosa
+  owner: Data Lake Team
+servers:
+  production:
+    type: impala
+    host: impala-proxy.example.test
+    port: 443
+    table: pagopa.silver_positive_denorm_increment
+models:
+  silver_positive_denorm_increment:
+    fields:
+      dl_id: {type: string}
+      payment_id: {type: string}
+quality:
+  type: SodaCL
+  dataset: pagopa.silver_positive_denorm_increment
+  specification: |-
+    checks for silver_positive_denorm_increment:
+      - row_count > 0:
+          name: ent__cmp__dataset__is_not_empty

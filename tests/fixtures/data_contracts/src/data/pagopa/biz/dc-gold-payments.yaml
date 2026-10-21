@@ -1,0 +1,38 @@
+dataContractSpecification: 0.9.3
+id: urn:pagopa:gold:payments
+info:
+  title: Payments Gold - Informazioni Pagamenti
+  version: 0.0.1
+  description: Tabella gold contenente le informazioni principali dei pagamenti, derivata da silver_positive_denorm_increment
+  owner: Data Lake Team
+  contact:
+    name: Data Lake
+    email: dl@example.test
+servers:
+  production:
+    type: impala
+    host: impala-proxy.example.test
+    port: 443
+    table: pagopa.gold_payments
+terms:
+  usage: >
+    - Questa tabella gold contiene le informazioni principali dei pagamenti, derivata dalla tabella silver_positive_denorm_increment dopo aggregazione e normalizzazione
+    - Relazioni con altre tabelle: payments.payment_id si collega con gold_transfer.fk_payment_id (relazione one-to-many con i transfer)
+models:
+  gold_payments:
+    fields:
+      receipt_id: {type: string}
+      payment_id: {type: string}
+servicelevels:
+  retention:
+    description: I dati seguono le policy aziendali di retention
+    unlimited: true
+quality:
+  type: SodaCL
+  dataset: pagopa.gold_payments
+  specification: |-
+    checks for gold_payments:
+      - check_row_count > 0:
+          name: Table must contain data
+      - check_duplicate_payment_id = 0:
+          name: Payment ID must be unique

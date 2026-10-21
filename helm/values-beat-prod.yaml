@@ -71,6 +71,7 @@ microservice-chart:
 
   envConfig:
     APP_VERSION: "0.1.0"
+    CELERY_QUEUE: "qa-centralhub-prod"
     DEBUG: "false"
     OTEL_EXPORTER_OTLP_ENDPOINT: ""
     OTEL_SERVICE_NAME: "qa-centralhub-beat"
@@ -99,4 +100,3 @@ microservice-chart:
     deployment:
       image:
         tag: "0.0.0"
-

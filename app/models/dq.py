@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import ENUM, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -65,6 +65,8 @@ class DqCatalogControl(Base):
     dimension_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("dq_dimensions.id", ondelete="RESTRICT"), nullable=False
     )
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -90,6 +92,11 @@ class DqDomain(Base):
 
 class DqControlInstance(Base):
     __tablename__ = "dq_control_instances"
+    __table_args__ = (
+        UniqueConstraint(
+            "domain_id", "table_ref", "check_name", name="uq_dq_control_instance_check_name"
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     domain_id: Mapped[uuid.UUID] = mapped_column(
@@ -107,6 +114,10 @@ class DqControlInstance(Base):
         dq_control_status_enum, nullable=False, default=DqControlStatus.DA_IMPLEMENTARE
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    check_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    soda_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

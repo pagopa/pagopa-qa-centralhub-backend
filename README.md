@@ -101,6 +101,19 @@ CORS_ORIGINS=["http://localhost:3000"]
 
 BDD settings (AI provider, Confluence token, Claude API key) are stored encrypted in the database and managed via `PUT /api/v1/bdd/settings`. They are **not** read from environment variables.
 
+### Celery queue
+
+`CELERY_QUEUE` selects the queue, exchange and routing key used by CentralHub.
+The default is `qa-centralhub`, including local Docker Compose. Set the same value
+in the environment of the API, worker and beat processes. Use a unique name per
+application/environment when sharing Redis; do not use the generic `celery` queue.
+
+Start a local worker with `uv run celery -A app.tasks worker --loglevel=info`.
+Without `-Q`, the worker consumes the queue configured by `CELERY_QUEUE`; no
+separate command override is needed when changing the queue name.
+See [Helm deployment notes](helm/README.md#celery-queue-isolation) for rollout and
+verification.
+
 ### Jira integration
 
 Requires `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` in `.env`.
@@ -136,6 +149,61 @@ Endpoint disponibili sotto `/api/v1/sanp-health`:
 
 Il sync manuale e quello schedulato condividono lo stesso servizio e sono serializzati. Un errore GitHub o di un artifact non elimina l'ultimo report completo; i run parziali vengono ritentati finché gli artifact restano disponibili.
 
+### EA Map
+
+Mappa di Enterprise Architecture della piattaforma pagoPA (Blueprint, Architettura, Data Lake, Matrice QA, Guida). Il design completo è in `docs/ea-map/DESIGN.md`; la parte Data Lake in `docs/ea-map/DESIGN-data-lake.md`.
+
+I dati vivono nelle tabelle `ea_*` (migrazioni `0019`, `0020` e `0021`). Il primo caricamento importa la knowledge base prodotta dagli script di discovery:
+
+```bash
+uv run python -m scripts.ea_import                         # seed in scripts/data/ea_kb_seed.json
+uv run python -m scripts.ea_import path/to/kb.json --replace  # ricarica da zero
+```
+
+Endpoint disponibili sotto `/api/v1/ea`:
+
+- `GET /kb`: knowledge base completa nel formato usato dalle viste;
+- `GET /nodes/{id}`: dettaglio di un nodo con legami in ingresso e uscita, segnali QA e documentazione;
+- `GET /nodes/{id}/impact?depth=3`: elementi a monte e a valle (CTE ricorsiva);
+- `GET /nodes/{id}/history`: storico delle modifiche manuali (tabella `ea_edit_log`).
+
+Endpoint di modifica (nel frontend dietro `edit:ea_map`, i dati QA dietro `edit:ea_qa`; l'attore viaggia nel body come negli altri moduli):
+
+- `POST /edges`, `PATCH /edges/{id}`, `POST /edges/{id}/verify`, `POST /edges/{id}/remove`: aggiunta, correzione, conferma e rimozione logica di un legame;
+- `POST /nodes`, `PATCH /nodes/{id}`: creazione (componente, sistema esterno, datastore) e correzione di un nodo;
+- `PATCH /nodes/{id}/qa`: campi QA manuali (`under_qa`, `tas_ci_override`, `qa_owner`, `qa_notes`).
+
+Sincronizzazione con GitHub e Confluence (settimanale via Celery beat, oppure `POST /sync` dal pulsante "Sincronizza ora"):
+
+- `POST /sync` (202, 409 se già in corso), `GET /sync-status`, `GET /sync-runs`;
+- `GET /changes?status=pending,conflict`, `POST /changes/{id}/approve` · `/reject`, `POST /changes/bulk`: coda di revisione (nel frontend dietro `review:ea_map`).
+
+Usa `GITHUB_TOKEN` (deve poter leggere anche il repo privato del Nodo) e, per Confluence, `JIRA_BASE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN`. Da riga di comando:
+
+```bash
+uv run python -m scripts.ea_sync --dry-run   # calcola tutto e mostra le proposte, senza scrivere
+uv run python -m scripts.ea_sync             # esecuzione reale
+```
+
+Ogni legame dichiara `origin` (`helm`, `infra_rule`, `curated`, `manual`, `contract`, `contract_rule`) e `status`; solo i legami `active` e `verified` sono serviti alle viste.
+
+#### Data Lake
+
+La sync legge anche i data contract di [`pagopa/pdnd-data-contracts`](https://github.com/pagopa/pdnd-data-contracts) (solo `src/data/pagopa`, formato datacontract.com 0.9.3) e li porta nella mappa (`app/services/ea/contracts.py`):
+
+- ogni contratto diventa un nodo `dataset` con id `dc:<urn senza "urn:">`; il livello è ricavato dal server (`kafka` → ingestion, file `s3`/`csv` → export) o dal nome della tabella (`silver_*`, `gold_*`);
+- le tabelle citate dai contratti ma senza un contratto proprio diventano dataset non contrattualizzati (`dl:<db.tabella>`);
+- i legami `derives` (lineage tra dataset, dalle descrizioni e da `quality.dataset`) e `feeds` (verso i consumer: BI per le gold, MEF e Banca d'Italia dove dichiarati) sono applicati in automatico con `origin = contract`;
+- i legami `produces` (componente → ingestion) non sono nei contratti: la sync li propone in Revisione confrontando il topic Event Hub con i componenti (`PRODUCER_RULES`, `origin = contract_rule`, con confidenza);
+- il repo viene riletto solo se ha un push più recente dell'ultimo snapshot; se non è leggibile la run è `partial` e i dataset restano com'erano;
+- un contratto rimosso genera una proposta di archiviazione; i legami verificati non più dichiarati diventano conflitti.
+
+Correzioni manuali sui dataset (`PATCH /nodes/{id}`, conservate dalle sync successive; `null` torna al valore del contratto): `layer` (→ `attrs.layer_override`), `doc_url` (→ `attrs.doc_url_override`), `slack_url` (→ `attrs.slack_url_override`). Non segnano il dataset come verificato, quindi nome e descrizione continuano ad arrivare dal contratto.
+
+Copertura Data Quality (`app/services/ea/dq_overlay.py`): i controlli del DQ Framework (`dq_control_instances`, esclusi gli eliminati) sono collegati ai dataset tramite `table_ref`; i controlli sulle tabelle bronze vanno all'ingestion che le alimenta (stesso nome senza prefisso di livello). `GET /kb` espone per ogni dataset `dq` (controlli) e `dqActive` (attivi); `GET /nodes/{id}` aggiunge `dq` con il riepilogo per dimensione, l'allineamento con i check del contratto e l'elenco dei controlli.
+
+Il `GITHUB_TOKEN` deve poter leggere `pagopa/pdnd-data-contracts`.
+
 ### Auth & RBAC
 
 L'autenticazione (Google SSO) e l'enforcement dei permessi avvengono lato `qa-hub-frontend`; il backend espone i dati su cui si basa la RBAC e resta volutamente "open" (nessun middleware di auth sulle route API).
@@ -146,6 +214,15 @@ L'autenticazione (Google SSO) e l'enforcement dei permessi avvengono lato `qa-hu
 - **`GET/PATCH /api/v1/users`**: lista utenti e aggiornamento ruolo/stato (`is_active`), usati dalla tab "Utenti" di `/settings/users`.
 - **`GET /api/v1/roles`**: restituisce `RoleMatrixResponse` (catalogo azioni, ruoli, matrice permessi) usato da `usePermissions`/`useRoleMatrix` nel frontend.
 - **`PATCH /api/v1/roles/{role}`**: aggiorna i permessi di un ruolo non di sistema (usato dalla tab "Ruoli & Permessi").
+
+### Feature visibility
+
+Il catalogo delle pagine controllabili vive in `app/core/features.py`; include le pagine operative, API Docs e Settings E2E/Gherkin. Gli override globali sono persistiti nella tabella `feature_visibility` introdotta dalla migration `0015`. Una feature senza override è abilitata per default, incluse le voci aggiunte in seguito al catalogo.
+
+- `GET /api/v1/features`: restituisce catalogo, route, permesso RBAC associato e stato effettivo;
+- `PATCH /api/v1/features/{feature_key}` con `{ "enabled": boolean }`: salva un override per l'ambiente corrente.
+
+Il frontend richiede sia la feature abilitata sia il permesso RBAC del ruolo. In linea con l'architettura corrente, gli endpoint backend restano aperti; disabilitare API Docs nasconde il link dal portale, ma non blocca l'URL Swagger diretto.
 
 ### Docs HTML proxy
 

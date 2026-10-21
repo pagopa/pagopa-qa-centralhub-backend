@@ -1,0 +1,17 @@
+dataContractSpecification: 0.9.3
+id: urn:pagopa:dqf:silver-dqf-gec-results
+info:
+  title: Risultati Controlli Data Quality - GEC
+  version: 0.0.1
+  owner: pagoPA QA-Team
+servers:
+  production:
+    type: impala
+    host: impala-proxy.example.test
+    database: pagopa_qa
+    table: silver_dqf_gec_results
+    format: iceberg
+models:
+  silver_dqf_gec_results:
+    fields:
+      check_name: {type: string}

@@ -154,8 +154,11 @@ async def test_list_catalog_controls_with_category_filter(client: AsyncClient) -
 async def test_create_catalog_control(client: AsyncClient) -> None:
     dimension = _dimension()
     control = _control(dimension)
-    with patch(
-        "app.api.v1.dq.dq_svc.create_catalog_control", new_callable=AsyncMock, return_value=control
+    with (
+        patch("app.api.v1.dq.dq_svc.get_dimension", new_callable=AsyncMock, return_value=dimension),
+        patch(
+            "app.api.v1.dq.dq_svc.create_catalog_control", new_callable=AsyncMock, return_value=control
+        ),
     ):
         response = await client.post(
             "/api/v1/dq/catalog",
@@ -231,8 +234,17 @@ async def test_create_control_instance(client: AsyncClient) -> None:
     control = _control(dimension)
     instance = _instance(domain, control)
 
-    with patch(
-        "app.api.v1.dq.dq_svc.create_control_instance", new_callable=AsyncMock, return_value=instance
+    with (
+        patch(
+            "app.api.v1.dq.dq_svc.get_catalog_control",
+            new_callable=AsyncMock,
+            return_value=control,
+        ),
+        patch(
+            "app.api.v1.dq.dq_svc.create_control_instance",
+            new_callable=AsyncMock,
+            return_value=instance,
+        ),
     ):
         response = await client.post(
             "/api/v1/dq/instances",
@@ -244,11 +256,50 @@ async def test_create_control_instance(client: AsyncClient) -> None:
                 "risk": "BASSO",
                 "impact": "ALTO",
                 "status": "da_implementare",
+                "check_name": "fld__vld__id__not_null",
             },
         )
 
     assert response.status_code == 201
     assert response.json()["field_ref"] == "after.id"
+
+
+@pytest.mark.anyio
+async def test_create_active_instance_requires_soda_url(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/dq/instances",
+        json={
+            "domain_id": str(uuid.uuid4()),
+            "catalog_control_id": str(uuid.uuid4()),
+            "table_ref": "pagopa.silver_touchpoints",
+            "field_ref": "createddate",
+            "risk": "BASSO",
+            "impact": "ALTO",
+            "status": "attivo",
+            "check_name": "fld__vld__createddate__date_format",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_update_active_instance_requires_soda_url(client: AsyncClient) -> None:
+    instance = _instance(_domain(), _control(_dimension()))
+    with patch(
+        "app.api.v1.dq.dq_svc.get_control_instance",
+        new_callable=AsyncMock,
+        return_value=instance,
+    ):
+        response = await client.patch(
+            f"/api/v1/dq/instances/{instance.id}",
+            json={
+                "status": "attivo",
+                "check_name": "fld__vld__createddate__date_format",
+            },
+        )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.anyio
@@ -267,3 +318,27 @@ async def test_delete_control_instance_returns_404_when_missing(client: AsyncCli
         response = await client.delete(f"/api/v1/dq/instances/{uuid.uuid4()}")
 
     assert response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_delete_control_instance_passes_updater(client: AsyncClient) -> None:
+    domain = _domain()
+    control = _control(_dimension())
+    instance = _instance(domain, control)
+    with (
+        patch(
+            "app.api.v1.dq.dq_svc.get_control_instance",
+            new_callable=AsyncMock,
+            return_value=instance,
+        ),
+        patch("app.api.v1.dq.dq_svc.delete_control_instance", new_callable=AsyncMock) as mock_delete,
+    ):
+        response = await client.request(
+            "DELETE",
+            f"/api/v1/dq/instances/{instance.id}",
+            json={"updated_by": "deleter@example.com"},
+        )
+
+    assert response.status_code == 204
+    mock_delete.assert_awaited_once()
+    assert mock_delete.call_args.kwargs["updated_by"] == "deleter@example.com"
