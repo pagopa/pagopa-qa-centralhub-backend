@@ -111,6 +111,20 @@ FEATURE_CATALOG: tuple[FeatureDefinition, ...] = (
         "action": "view:api_docs",
         "external": True,
     },
+    {
+        "key": "nrts",
+        "label": "Non-Regression Tests (NRT)",
+        "route": "/nrts",
+        "action": "view:nrts",
+        "external": False,
+    },
+    {
+        "key": "tas_nrts",
+        "label": "Test automation service (TAS)",
+        "route": "/tas-nrts",
+        "action": "view:tas_nrts",
+        "external": False,
+    },
 )
 
 FEATURE_KEYS = frozenset(feature["key"] for feature in FEATURE_CATALOG)
