@@ -20,6 +20,7 @@ import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from time import monotonic
 from typing import Any
 
 import structlog
@@ -59,6 +60,7 @@ from app.services.ea.sync.sources import (
     SourceError,
     list_all_pages,
 )
+from app.services.ea.sync.tracing import error_fields, trace_phase
 
 logger = structlog.get_logger(__name__)
 
@@ -182,10 +184,14 @@ async def _collect(
     github: GitHubSource,
     confluence: ConfluenceSource | None,
     now: datetime,
+    *,
+    run_id: uuid.UUID | None = None,
 ) -> _Collected:
+    log = logger.bind(run_id=str(run_id) if run_id else None)
     col = _Collected()
     try:
-        col.listing = {r.name: r for r in await github.list_repos()}
+        with trace_phase(log, "github_census"):
+            col.listing = {r.name: r for r in await github.list_repos()}
         col.census_ok = True
     except SourceError as exc:
         col.failures["*census*"] = str(exc)
@@ -209,12 +215,16 @@ async def _collect(
             return
         async with sem:
             try:
-                tree = await github.get_tree(name, info.default_branch)
+                with trace_phase(log, "github_tree", repo=name):
+                    tree = await github.get_tree(name, info.default_branch)
                 if snap is not None and snap.head_sha == tree.sha:
                     col.facts[name] = snap.extracted
                     col.touched.add(name)
                     return
-                files = await github.get_files(name, info.default_branch, wanted_files(tree.paths))
+                with trace_phase(log, "github_files", repo=name):
+                    files = await github.get_files(
+                        name, info.default_branch, wanted_files(tree.paths)
+                    )
             except SourceError as exc:
                 col.failures[name] = str(exc)
                 if snap is not None:
@@ -225,14 +235,27 @@ async def _collect(
         col.facts[name] = facts
         col.fresh[name] = (info.default_branch, tree.sha, facts)
 
-    await asyncio.gather(*(read(n) for n in targets))
-    await _collect_contracts(state, github, col)
+    with trace_phase(log, "github_repositories", targets=len(targets)):
+        await asyncio.gather(*(read(n) for n in targets))
+    with trace_phase(log, "data_contracts"):
+        await _collect_contracts(state, github, col, run_id=run_id)
+    log.info(
+        "ea_sync_sources_collected",
+        repos_in_org=len(col.listing),
+        repos_read=len(col.fresh),
+        repos_failed=len(col.failures),
+        contracts_failed=col.contracts_error is not None,
+        contracts_skipped=col.contracts_skipped is not None,
+    )
 
     if confluence is not None:
         try:
-            col.pages = await list_all_pages(confluence)
+            with trace_phase(log, "confluence_pages"):
+                col.pages = await list_all_pages(confluence)
         except SourceError as exc:
             col.confluence_error = str(exc)
+    else:
+        log.info("ea_sync_source_skipped", source="confluence", reason="not_configured")
     return col
 
 
@@ -247,8 +270,15 @@ def _graph_dict(files: dict[str, str]) -> dict[str, Any]:
     }
 
 
-async def _collect_contracts(state: _State, github: GitHubSource, col: _Collected) -> None:
+async def _collect_contracts(
+    state: _State,
+    github: GitHubSource,
+    col: _Collected,
+    *,
+    run_id: uuid.UUID | None = None,
+) -> None:
     """Read the data contracts repository, unless nothing was pushed since the snapshot."""
+    log = logger.bind(run_id=str(run_id) if run_id else None)
     info = col.listing.get(CONTRACTS_REPO)
     snap = state.snapshots.get(CONTRACTS_REPO)
     if info is None:
@@ -261,7 +291,8 @@ async def _collect_contracts(state: _State, github: GitHubSource, col: _Collecte
         col.contracts = snap.extracted
         return
     try:
-        tree = await github.get_tree(CONTRACTS_REPO, info.default_branch)
+        with trace_phase(log, "data_contracts_tree", repo=CONTRACTS_REPO):
+            tree = await github.get_tree(CONTRACTS_REPO, info.default_branch)
         if snap is not None and snap.head_sha == tree.sha:
             col.contracts = snap.extracted
             col.touched.add(CONTRACTS_REPO)
@@ -271,7 +302,8 @@ async def _collect_contracts(state: _State, github: GitHubSource, col: _Collecte
             for p in tree.paths
             if p.startswith(CONTRACTS_PATH + "/") and p.endswith((".yaml", ".yml"))
         ]
-        files = await github.get_files(CONTRACTS_REPO, info.default_branch, paths)
+        with trace_phase(log, "data_contracts_files", repo=CONTRACTS_REPO):
+            files = await github.get_files(CONTRACTS_REPO, info.default_branch, paths)
     except SourceError as exc:
         col.contracts_error = f"Data contract: {exc}"
         if snap is not None:
@@ -870,16 +902,25 @@ async def execute_run(
     With ``dry_run`` everything is computed and then rolled back: the summary lists the
     proposals the sync would make.
     """
-    run = await db.get(EaSyncRun, run_id)
-    if run is None:
-        raise ValueError(f"EA sync run {run_id} not found")
+    started = monotonic()
+    log = logger.bind(run_id=str(run_id), dry_run=dry_run)
+    with trace_phase(log, "load_run"):
+        run = await db.get(EaSyncRun, run_id)
+        if run is None:
+            raise ValueError(f"EA sync run {run_id} not found")
     now = _now()
+    phase = "read_state"
     try:
-        state = await _read_state(db)
-        col = await _collect(state, github, confluence, now)
+        with trace_phase(log, phase):
+            state = await _read_state(db)
+        phase = "collect"
+        with trace_phase(log, phase):
+            col = await _collect(state, github, confluence, now, run_id=run_id)
         if not col.census_ok:
             raise SourceError(col.failures.get("*census*", "Censimento GitHub non riuscito"))
-        result = await _apply(db, run, state, col)
+        phase = "apply"
+        with trace_phase(log, phase):
+            result = await _apply(db, run, state, col)
         repo_failures = {k: v for k, v in col.failures.items() if k != "*census*"}
         run.stats = {
             "repos_in_org": len(col.listing),
@@ -928,11 +969,23 @@ async def execute_run(
             await db.rollback()
             await _discard_run(db, run_id)
             return summary
-        await _record_status(db, run)
-        await db.commit()
-        logger.info("ea_sync_done", run_id=str(run_id), status=summary["status"])
+        phase = "commit"
+        with trace_phase(log, phase):
+            await _record_status(db, run)
+            await db.commit()
+        log.info(
+            "ea_sync_done",
+            status=summary["status"],
+            duration_ms=round((monotonic() - started) * 1000),
+        )
         return summary
     except Exception as exc:  # noqa: BLE001 - every failure must close the run
+        log.error(
+            "ea_sync_failed",
+            phase=phase,
+            duration_ms=round((monotonic() - started) * 1000),
+            **error_fields(exc),
+        )
         await db.rollback()
         failed = await db.get(EaSyncRun, run_id)
         if failed is None:
@@ -948,7 +1001,6 @@ async def execute_run(
         else:
             await _record_status(db, run)
             await db.commit()
-        logger.warning("ea_sync_failed", run_id=str(run_id), error=str(exc))
         return summary
 
 

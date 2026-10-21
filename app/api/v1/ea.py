@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from time import monotonic
 from typing import NoReturn
 
 import structlog
@@ -37,6 +38,7 @@ from app.services.ea import kb as kb_svc
 from app.services.ea.edit import EaEditError
 from app.services.ea.sync import engine as sync_engine
 from app.services.ea.sync import review as review_svc
+from app.services.ea.sync.tracing import error_fields
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -223,12 +225,24 @@ def _run_out(run: EaSyncRun | None) -> EaSyncRunOut | None:
 
 def _dispatch(run_id: str, background: BackgroundTasks) -> None:
     """Hand the run to the Celery worker; without a broker (local dev) run it in-process."""
+    started = monotonic()
+    log = logger.bind(run_id=run_id)
+    log.info("ea_sync_dispatch_started")
     try:
         from app.tasks.sync_ea import sync_ea
 
-        sync_ea.apply_async(args=[run_id], retry=False)
-    except Exception:  # noqa: BLE001 - broker down: still let the user sync
-        logger.warning("ea_sync_dispatch_inprocess", run_id=run_id)
+        task = sync_ea.apply_async(args=[run_id], retry=False)
+        log.info(
+            "ea_sync_dispatched",
+            task_id=task.id,
+            duration_ms=round((monotonic() - started) * 1000),
+        )
+    except Exception as exc:  # noqa: BLE001 - broker down: still let the user sync
+        log.warning(
+            "ea_sync_dispatch_inprocess",
+            duration_ms=round((monotonic() - started) * 1000),
+            **error_fields(exc),
+        )
         from app.services.ea.sync.runner import run_with_default_sources
 
         background.add_task(run_with_default_sources, uuid.UUID(run_id))
@@ -240,6 +254,7 @@ async def trigger_sync(body: EaSyncRequest, db: DbDep, background: BackgroundTas
         run = await sync_engine.create_run(db, trigger="manual", actor=body.actor)
     except sync_engine.EaSyncBusyError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    logger.info("ea_sync_run_created", run_id=str(run.id), trigger="manual")
     _dispatch(str(run.id), background)
     out = _run_out(run)
     assert out is not None  # noqa: S101
