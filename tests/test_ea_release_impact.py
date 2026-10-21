@@ -45,6 +45,20 @@ def test_parse_request_accepts_pr_and_compare_links() -> None:
         ri.parse_request("https://github.com/other/repo/pull/1")
     with pytest.raises(ri.ImpactError):
         ri.parse_request("https://example.com")
+    assert ri.parse_request("github.com/pagopa/pagopa-fdr/pull/7?w=1#diff").number == 7
+    assert (
+        ri.parse_request("https://github.com/pagopa/pagopa-fdr/compare/release/1.2...main").base
+        == "release/1.2"
+    )
+    assert ri.parse_request("https://github.com/pagopa/pagopa-fdr/pull/7/files").number == 7
+    for bad in (
+        "https://github.com/pagopa/pagopa-fdr/compare/main",  # no "..."
+        "https://evil.com/github.com/pagopa/x/pull/1",  # not GitHub
+        "https://github.com/pagopa/pagopa-fdr/pull/abc",
+        "github.com/-/-/compare/" + "!" * 5000,  # CodeQL ReDoS sample: refused at once
+    ):
+        with pytest.raises(ri.ImpactError):
+            ri.parse_request(bad)
     with pytest.raises(ri.ImpactError):
         ri.parse_request()
 

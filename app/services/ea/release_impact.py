@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from app.services.ea.graph_index import GraphIndex, Hop
 from app.services.ea.sync.rules import GITHUB_ORG
@@ -20,8 +21,10 @@ from app.services.ea.sync.sources import GitHubClient, SourceError
 
 MAX_FILES = 3000
 
-_PR_RX = re.compile(r"github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)", re.I)
-_CMP_RX = re.compile(r"github\.com/([\w.-]+)/([\w.-]+)/compare/([^\s?#]+?)\.\.\.([^\s?#]+)", re.I)
+MAX_URL = 500
+# names of GitHub owners/repositories and git refs: anchored, linear-time patterns only
+_NAME_RX = re.compile(r"[\w.-]{1,100}")
+_REF_RX = re.compile(r"[\w./-]{1,200}")
 
 # (category, label, weight, regex) – first match wins
 CATEGORIES: list[tuple[str, str, int, re.Pattern[str]]] = [
@@ -174,24 +177,44 @@ def parse_request(
     head: str | None = None,
 ) -> ImpactRequest:
     if url:
-        m = _PR_RX.search(url)
-        if m:
-            owner, name, num = m.groups()
-            _check_owner(owner)
-            return ImpactRequest(repo=name, number=int(num))
-        m = _CMP_RX.search(url)
-        if m:
-            owner, name, b, h = m.groups()
-            _check_owner(owner)
-            return ImpactRequest(repo=name, base=b, head=h)
-        raise ImpactError(
-            "Link non riconosciuto: incolla l’URL di una pull request o di un confronto GitHub"
-        )
+        return _parse_url(url)
     if repo and base and head:
         return ImpactRequest(
             repo=repo.strip().rsplit("/", 1)[-1], base=base.strip(), head=head.strip()
         )
     raise ImpactError("Indica il link di una pull request, oppure repository, base e head")
+
+
+def _parse_url(url: str) -> ImpactRequest:
+    """A GitHub pull request or comparison link, parsed by its path segments.
+
+    No regular expression runs on the whole user-provided text (CodeQL py/polynomial-redos):
+    the URL is split by ``urlsplit`` and each segment is checked with an anchored pattern."""
+    bad = ImpactError(
+        "Link non riconosciuto: incolla l’URL di una pull request o di un confronto GitHub"
+    )
+    text = url.strip()
+    if len(text) > MAX_URL:
+        raise bad
+    if "://" not in text:
+        text = f"https://{text}"
+    parts = urlsplit(text)
+    if (parts.hostname or "").lower() not in ("github.com", "www.github.com"):
+        raise bad
+    segs = [x for x in parts.path.split("/") if x]
+    if len(segs) < 4 or not (_NAME_RX.fullmatch(segs[0]) and _NAME_RX.fullmatch(segs[1])):
+        raise bad
+    owner, name, kind = segs[0], segs[1], segs[2]
+    if kind == "pull" and segs[3].isdigit() and len(segs[3]) <= 9:
+        _check_owner(owner)
+        return ImpactRequest(repo=name, number=int(segs[3]))
+    if kind == "compare":
+        spec = "/".join(segs[3:])  # refs may contain "/" (e.g. release/1.2)
+        base, sep, head = spec.partition("...")
+        if sep and _REF_RX.fullmatch(base) and _REF_RX.fullmatch(head):
+            _check_owner(owner)
+            return ImpactRequest(repo=name, base=base, head=head)
+    raise bad
 
 
 def _check_owner(owner: str) -> None:
