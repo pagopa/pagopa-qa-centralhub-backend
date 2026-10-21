@@ -199,3 +199,44 @@ class EaChangeBulk(_Actor):
     ids: list[str] = Field(min_length=1, max_length=200)
     decision: str = Field(pattern="^(approve|reject)$")
     note: str | None = None
+
+
+# ── Release impact and map assistant ─────────────────────────────────────────
+
+
+class EaReleaseImpactRequest(BaseModel):
+    """A GitHub pull request or comparison link, or repository + base + head."""
+
+    url: str | None = Field(default=None, max_length=500)
+    repo: str | None = Field(default=None, max_length=200)
+    base: str | None = Field(default=None, max_length=200)
+    head: str | None = Field(default=None, max_length=200)
+
+
+class EaReleaseImpactOut(BaseModel):
+    change: dict[str, Any]
+    component: dict[str, Any]
+    risk: str
+    categories: list[dict[str, Any]]
+    impacted: list[dict[str, Any]]
+    suites: list[dict[str, Any]]
+    gaps: list[dict[str, Any]]
+    processes: list[dict[str, Any]]
+    highlight: list[str]
+
+
+class EaChatMessage(BaseModel):
+    role: str = Field(pattern="^(user|assistant)$")
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class EaAssistantRequest(BaseModel):
+    messages: list[EaChatMessage] = Field(min_length=1, max_length=40)
+    context: dict[str, Any] | None = None
+
+
+class EaAssistantOut(BaseModel):
+    answer: str
+    highlight: list[str]
+    labels: dict[str, str]
+    steps: list[dict[str, str]]

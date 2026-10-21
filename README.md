@@ -187,6 +187,13 @@ uv run python -m scripts.ea_sync             # esecuzione reale
 
 Ogni legame dichiara `origin` (`helm`, `infra_rule`, `curated`, `manual`, `contract`, `contract_rule`) e `status`; solo i legami `active` e `verified` sono serviti alle viste.
 
+#### Impatto dei rilasci e assistente della mappa
+
+Due funzioni di sola lettura calcolate sul grafo che la mappa mostra (`app/services/ea/graph_index.py`):
+
+- `POST /impact/release` con `{"url": "<PR o confronto GitHub>"}` oppure `{"repo", "base", "head"}`: legge i file cambiati (`GITHUB_TOKEN`), li classifica (contratto API, dati, configurazione, codice, test, pipeline, documentazione), risale a chi chiama il componente, ai dati a valle e alle dipendenze, assegna un rischio a ciascun elemento e propone le suite da eseguire, le lacune di test e i processi SANP coinvolti (`app/services/ea/release_impact.py`).
+- `POST /assistant/chat` con la conversazione e il contesto della vista: un assistente Gemini con function calling che usa solo strumenti di sola lettura sul grafo (ricerca, scheda, impatto, lacune QA, impatto di una PR, evidenziazione) e cita i nodi come `[[id]]` (`app/services/ea/assistant.py`). Richiede `GEMINI_API_KEY` (modello in `GEMINI_MODEL`, default `gemini-3.8-flash`; se è sovraccarico (503) riprova 2 volte, se ha esaurito la quota (429) passa subito ai modelli in `GEMINI_FALLBACK_MODELS`, separati da virgola); senza chiave risponde 503.
+
 #### Data Lake
 
 La sync legge anche i data contract di [`pagopa/pdnd-data-contracts`](https://github.com/pagopa/pdnd-data-contracts) (solo `src/data/pagopa`, formato datacontract.com 0.9.3) e li porta nella mappa (`app/services/ea/contracts.py`):
