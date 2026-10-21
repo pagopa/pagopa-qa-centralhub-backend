@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import structlog
 
 from app.tasks import celery_app
+from app.tasks.async_runner import run_async_task
 
 logger = structlog.get_logger(__name__)
 
 
 @celery_app.task(name="app.tasks.sync_sanp_health.sync_sanp_health")  # type: ignore[untyped-decorator]
 def sync_sanp_health() -> dict[str, Any]:
-    return asyncio.run(_async_sync())
+    return run_async_task(_async_sync())
 
 
 async def _async_sync() -> dict[str, Any]:

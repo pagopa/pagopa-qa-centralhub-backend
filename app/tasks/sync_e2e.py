@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import asyncio
-
 import structlog
 
 from app.tasks import celery_app
+from app.tasks.async_runner import run_async_task
 
 logger = structlog.get_logger(__name__)
 
 
 @celery_app.task(name="app.tasks.sync_e2e.sync_e2e_runs", bind=True, max_retries=3)
 def sync_e2e_runs(self) -> dict:  # type: ignore[override]
-    return asyncio.run(_async_sync())
+    return run_async_task(_async_sync())
 
 
 async def _async_sync() -> dict:
