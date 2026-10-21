@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import uuid
 from time import monotonic
 from typing import Any
@@ -9,6 +8,7 @@ import structlog
 
 from app.services.ea.sync.tracing import error_fields
 from app.tasks import celery_app
+from app.tasks.async_runner import run_async_task
 
 logger = structlog.get_logger(__name__)
 
@@ -20,7 +20,7 @@ def sync_ea(run_id: str | None = None) -> dict[str, Any]:
     log = logger.bind(run_id=run_id, task_id=sync_ea.request.id)
     log.info("ea_sync_task_started")
     try:
-        result = asyncio.run(_async_sync(run_id, task_id=sync_ea.request.id))
+        result = run_async_task(_async_sync(run_id, task_id=sync_ea.request.id))
     except Exception as exc:
         log.error(
             "ea_sync_task_failed",

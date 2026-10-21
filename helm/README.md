@@ -141,6 +141,14 @@ queue. Trigger a new EA sync and correlate `ea_sync_dispatched` with
 
 ## EA Map sync diagnostics
 
+Celery tasks use a fresh asyncio event loop per invocation. The shared task runner
+disposes the worker's SQLAlchemy connection pool before that loop closes, including
+on failure. Connections can be reused within a task, but not across tasks/loops.
+The API and its in-process fallback retain their existing pool lifecycle.
+After deploying a fix for `Future ... attached to a different loop`, restart/roll
+all worker pods and verify two consecutive syncs in the same worker process.
+Restarting alone without the fix only temporarily clears the stale connections.
+
 The API persists a `running` run before publishing the Celery task. A successful
 publish does not mean that a worker received it. Follow the `run_id` from
 `POST /api/v1/ea/sync` or `GET /api/v1/ea/sync-runs` across API and worker logs.
