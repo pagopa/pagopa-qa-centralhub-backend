@@ -98,3 +98,46 @@ For each environment (`dev`, `uat`, `prod`):
 - PR merged on `main` → auto release (bump from PR labels) + deploy to `dev`.
 - `workflow_dispatch` from Actions UI → pick env, semver mode, beta flag.
 - `merge_group` → CI dry-run on the merge queue.
+
+## EA Map sync diagnostics
+
+The API persists a `running` run before publishing the Celery task. A successful
+publish does not mean that a worker received it. Follow the `run_id` from
+`POST /api/v1/ea/sync` or `GET /api/v1/ea/sync-runs` across API and worker logs.
+
+| Event | Meaning |
+|---|---|
+| `ea_sync_run_created` | The run was committed to the database. |
+| `ea_sync_dispatch_started` / `ea_sync_dispatched` | API publishing started / broker accepted the task; includes `task_id`. |
+| `ea_sync_dispatch_inprocess` | Publishing failed; the existing in-process fallback was scheduled. |
+| `ea_sync_task_started` | A Celery worker started execution; includes `task_id`. |
+| `ea_sync_runner_started` | Execution entered the runner (also for in-process fallback). |
+| `ea_sync_phase_started` / `ea_sync_phase_completed` | A phase started / finished, with `duration_ms` on completion. |
+| `ea_sync_phase_failed` | A phase raised an exception, including errors later handled as partial results. |
+| `ea_sync_done` / `ea_sync_failed` | Engine completion / failure. |
+| `ea_sync_task_completed` / `ea_sync_task_failed` | Task returned / raised, including failures outside the engine. |
+
+Phases include client configuration, `load_run`, `read_state`, `collect`,
+`github_census`, `github_repositories`, `github_tree`, `github_files`,
+`data_contracts`, `confluence_pages`, `apply`, `commit`, and `close_clients`.
+Repository tree/file events also carry `repo`. Cached repositories do not emit
+tree/file events. A completed collection phase can still contain partial failures;
+check `ea_sync_sources_collected` counters and the final run status.
+
+```bash
+# Use the target cluster context and namespace; commands do not change the deployment.
+kubectl --context "$CTX" -n "$NS" logs deployment/qa-centralhub-backend \
+  --all-pods=true --all-containers=true --since=1h --prefix=true
+kubectl --context "$CTX" -n "$NS" logs deployment/qa-centralhub-worker \
+  --all-pods=true --all-containers=true --since=1h --prefix=true
+```
+
+Filter both outputs by the run ID. If `dispatched` has no corresponding worker
+start, investigate consumers, task registration and broker/queue configuration.
+Otherwise look for the last phase started without completion, or a phase failure.
+Parallel repository phases may interleave; correlate by `run_id`, `phase` and `repo`.
+Logs describe phase boundaries, not a persisted heartbeat or a task timeout.
+
+New diagnostic error fields contain the exception type and stack frame locations,
+not exception messages, local variables, source contents, credentials or broker URLs.
+These are structured application logs, not distributed OpenTelemetry spans.
