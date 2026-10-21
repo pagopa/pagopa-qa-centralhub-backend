@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"
+    celery_queue: str = "qa-centralhub"
 
     # Security
     jwt_secret: str = "change-me-in-production"

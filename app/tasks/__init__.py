@@ -26,6 +26,9 @@ celery_app = Celery(
     backend=_broker_url,
 )
 celery_app.conf.update(
+    task_default_queue=settings.celery_queue,
+    task_default_exchange=settings.celery_queue,
+    task_default_routing_key=settings.celery_queue,
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",

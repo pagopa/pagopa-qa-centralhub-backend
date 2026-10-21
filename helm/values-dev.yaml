@@ -85,6 +85,7 @@ microservice-chart:
   # Plain (non-secret) configuration. Override per environment as needed.
   envConfig:
     APP_VERSION: "0.1.0"
+    CELERY_QUEUE: "qa-centralhub-dev"
     DEBUG: "false"
     CORS_ORIGINS: '["https://qa-central-hub.dev.platform.pagopa.it"]'
     OIDC_ISSUER: ""

@@ -99,6 +99,46 @@ For each environment (`dev`, `uat`, `prod`):
 - `workflow_dispatch` from Actions UI → pick env, semver mode, beta flag.
 - `merge_group` → CI dry-run on the merge queue.
 
+## Celery queue isolation
+
+The API, worker and beat values set the same `CELERY_QUEUE` within each environment:
+
+| Environment | Queue / exchange / routing key |
+|---|---|
+| dev | `qa-centralhub-dev` |
+| uat | `qa-centralhub-uat` |
+| prod | `qa-centralhub-prod` |
+
+The worker command intentionally has no `-Q`: Celery consumes its configured default
+queue, derived from `CELERY_QUEUE`. API publications and beat schedules use that
+same default. If overriding the variable, update all three releases together.
+This separates CentralHub tasks from other applications such as Superset that
+consume the generic `celery` queue on a shared Redis broker.
+
+For the initial migration, pause manual sync requests and stop CentralHub beat,
+deploy the updated worker, then API and beat with matching queue names. Wait for
+old API/worker pods to terminate before resuming requests. Coordinate this rollout
+rather than relying on rolling updates to switch all producers/consumers at once.
+Already-running tasks are not moved; allow them to finish before stopping workers.
+Messages already in the old `celery` queue are not migrated automatically. Do not
+purge that queue: it may contain tasks belonging to other applications. Reconcile
+failed/stuck application runs individually before retrying them after the rollout.
+
+Verify from an API pod:
+
+```bash
+kubectl --context "$CTX" -n "$NS" exec deployment/qa-centralhub-backend -- \
+  celery -A app.tasks inspect active_queues --timeout=10
+kubectl --context "$CTX" -n "$NS" exec deployment/qa-centralhub-backend -- \
+  celery -A app.tasks inspect registered --timeout=10
+```
+
+CentralHub workers must consume only the environment-specific queue and register
+`app.tasks.sync_ea.sync_ea`. Other applications may still appear in inspect responses
+because broker control traffic is shared; they must not consume the CentralHub
+queue. Trigger a new EA sync and correlate `ea_sync_dispatched` with
+`ea_sync_task_started` using the same `task_id`.
+
 ## EA Map sync diagnostics
 
 The API persists a `running` run before publishing the Celery task. A successful

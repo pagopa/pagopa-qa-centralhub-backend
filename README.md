@@ -101,6 +101,19 @@ CORS_ORIGINS=["http://localhost:3000"]
 
 BDD settings (AI provider, Confluence token, Claude API key) are stored encrypted in the database and managed via `PUT /api/v1/bdd/settings`. They are **not** read from environment variables.
 
+### Celery queue
+
+`CELERY_QUEUE` selects the queue, exchange and routing key used by CentralHub.
+The default is `qa-centralhub`, including local Docker Compose. Set the same value
+in the environment of the API, worker and beat processes. Use a unique name per
+application/environment when sharing Redis; do not use the generic `celery` queue.
+
+Start a local worker with `uv run celery -A app.tasks worker --loglevel=info`.
+Without `-Q`, the worker consumes the queue configured by `CELERY_QUEUE`; no
+separate command override is needed when changing the queue name.
+See [Helm deployment notes](helm/README.md#celery-queue-isolation) for rollout and
+verification.
+
 ### Jira integration
 
 Requires `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` in `.env`.

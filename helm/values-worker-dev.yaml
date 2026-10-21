@@ -74,6 +74,7 @@ microservice-chart:
 
   envConfig:
     APP_VERSION: "0.1.0"
+    CELERY_QUEUE: "qa-centralhub-dev"
     DEBUG: "false"
     JIRA_BASE_URL: "https://pagopa.atlassian.net"
     JIRA_EMAIL: "cristiano.sticca@pagopa.it"
@@ -109,5 +110,4 @@ microservice-chart:
     deployment:
       image:
         tag: "0.0.0"
-
 

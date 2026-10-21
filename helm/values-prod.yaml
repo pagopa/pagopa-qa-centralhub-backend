@@ -82,6 +82,7 @@ microservice-chart:
 
   envConfig:
     APP_VERSION: "0.1.0"
+    CELERY_QUEUE: "qa-centralhub-prod"
     DEBUG: "false"
     CORS_ORIGINS: '["https://qa-central-hub.platform.pagopa.it"]'   # TODO confirm prod frontend host
     OIDC_ISSUER: ""
@@ -122,4 +123,3 @@ microservice-chart:
     deployment:
       image:
         tag: "0.0.0"
-
