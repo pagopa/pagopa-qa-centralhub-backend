@@ -8,9 +8,12 @@ import structlog
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from sqlalchemy import select
 
+from app.config import settings
 from app.deps import DbDep
 from app.models.ea import EaEdge, EaNode, EaSyncRun, EaSyncStatus
 from app.schemas.ea import (
+    EaAssistantOut,
+    EaAssistantRequest,
     EaChangeBulk,
     EaChangeDecision,
     EaChangeOut,
@@ -18,26 +21,36 @@ from app.schemas.ea import (
     EaEdgeNote,
     EaEdgeOut,
     EaEdgeUpdate,
+    EaFlowOut,
     EaHistoryItem,
     EaImpactItem,
     EaImpactResponse,
     EaKbResponse,
+    EaLiveOut,
     EaNodeCreate,
     EaNodeDetail,
     EaNodeOut,
     EaNodeUpdate,
     EaQaOut,
     EaQaUpdate,
+    EaReleaseImpactOut,
+    EaReleaseImpactRequest,
     EaSyncRequest,
     EaSyncRunOut,
     EaSyncStatusOut,
 )
+from app.services.ea import assistant as assistant_svc
 from app.services.ea import edit as edit_svc
+from app.services.ea import flows as flows_svc
 from app.services.ea import impact as impact_svc
 from app.services.ea import kb as kb_svc
+from app.services.ea import live as live_svc
+from app.services.ea import release_impact as release_svc
 from app.services.ea.edit import EaEditError
+from app.services.ea.graph_index import GraphIndex
 from app.services.ea.sync import engine as sync_engine
 from app.services.ea.sync import review as review_svc
+from app.services.ea.sync.sources import GitHubClient
 from app.services.ea.sync.tracing import error_fields
 
 router = APIRouter()
@@ -71,6 +84,99 @@ async def get_impact(
         upstream=[EaImpactItem(**i) for i in result["upstream"]],
         downstream=[EaImpactItem(**i) for i in result["downstream"]],
     )
+
+
+@router.get("/live", response_model=EaLiveOut)
+async def get_live(
+    db: DbDep,
+    env: str = Query(default="DEV", pattern="^(DEV|UAT|PROD)$"),
+    days: int = Query(default=7, ge=1, le=30),
+) -> EaLiveOut:
+    """Outcomes of the test runs of the last ``days`` in ``env``, on the map nodes."""
+    graph = GraphIndex(await kb_svc.build_kb(db))
+    return EaLiveOut(**await live_svc.live_status(db, graph, env, days))
+
+
+@router.get("/flows", response_model=list[EaFlowOut])
+async def list_flows(db: DbDep) -> list[EaFlowOut]:
+    """Curated payment flows (SANP), step by step, on the nodes of the map."""
+    graph = GraphIndex(await kb_svc.build_kb(db))
+    return [EaFlowOut(**f) for f in flows_svc.flows_for_map(graph)]
+
+
+# ── Release impact and map assistant ─────────────────────────────────────────
+
+
+def _github() -> GitHubClient | None:
+    """GitHub client for the analyses, or None when the Hub has no token."""
+    return GitHubClient(settings.github_token) if settings.github_token else None
+
+
+def _chat_model() -> assistant_svc.ChatModel:
+    fallbacks = [m.strip() for m in settings.gemini_fallback_models.split(",") if m.strip()]
+    return assistant_svc.GeminiModel(settings.gemini_api_key, settings.gemini_model, fallbacks)
+
+
+@router.post("/impact/release", response_model=EaReleaseImpactOut)
+async def release_impact(body: EaReleaseImpactRequest, db: DbDep) -> EaReleaseImpactOut:
+    try:
+        req = release_svc.parse_request(body.url, body.repo, body.base, body.head)
+    except release_svc.ImpactError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    gh = _github()
+    if gh is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="GITHUB_TOKEN non configurato: non posso leggere la pull request",
+        )
+    try:
+        graph = GraphIndex(await kb_svc.build_kb(db))
+        result = await release_svc.release_impact(graph, release_svc.GitHubChanges(gh), req)
+    except release_svc.ImpactError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    finally:
+        await gh.aclose()
+    logger.info(
+        "ea_release_impact", repo=req.repo, risk=result["risk"], impacted=len(result["impacted"])
+    )
+    return EaReleaseImpactOut(**result)
+
+
+@router.post("/assistant/chat", response_model=EaAssistantOut)
+async def assistant_chat(body: EaAssistantRequest, db: DbDep) -> EaAssistantOut:
+    try:
+        model = _chat_model()
+    except assistant_svc.AssistantUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    gh = _github()
+    started = monotonic()
+    try:
+        graph = GraphIndex(await kb_svc.build_kb(db))
+        result = await assistant_svc.chat(
+            graph,
+            model,
+            [m.model_dump() for m in body.messages],
+            changes=release_svc.GitHubChanges(gh) if gh else None,
+            context=body.context,
+        )
+    except assistant_svc.AssistantUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    finally:
+        if gh is not None:
+            await gh.aclose()
+    logger.info(
+        "ea_assistant_chat",
+        steps=[s["tool"] for s in result["steps"]],
+        highlight=len(result["highlight"]),
+        duration_ms=round((monotonic() - started) * 1000),
+    )
+    return EaAssistantOut(**result)
 
 
 def _raise(exc: EaEditError) -> NoReturn:

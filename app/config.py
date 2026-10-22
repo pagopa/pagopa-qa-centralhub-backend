@@ -35,20 +35,29 @@ class Settings(BaseSettings):
     # GitHub integration
     github_token: str = ""
 
+    # EA Map assistant (Gemini, function calling)
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.8-flash"
+    # comma-separated models tried, in order, when the main one stays overloaded
+    gemini_fallback_models: str = ""
+
     # Jira integration
     jira_base_url: str = ""
     jira_email: str = ""
     jira_api_token: str = ""
 
     # PSP Fee catalog (Data Hub)
-    psp_fee_json_url: str = "https://pagopa-afm-p-st-fee.s3.eu-central-1.amazonaws.com/output_elenco_servizi.json"
+    psp_fee_json_url: str = (
+        "https://pagopa-afm-p-st-fee.s3.eu-central-1.amazonaws.com/output_elenco_servizi.json"
+    )
 
-    superset_main_dashboard_id: str = "1" 
+    superset_main_dashboard_id: str = "1"
     superset_url: str = "http://localhost:8088"
     superset_guest_username: str = "service"
     superset_guest_first_name: str = "service"
     superset_guest_last_name: str = "service"
     superset_username: str = "admin"
     superset_password: str = ""
+
 
 settings = Settings()
