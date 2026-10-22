@@ -103,8 +103,8 @@ async def get_nrts(db: AsyncSession, test_object: str | None, origin: str | None
         if not result_unzip:
             logger.info("get_nrts query succeeded with 0 results", page=page, size=size, total=total)
         for run, suite in result_unzip:
-            run.timestamp_start = datetime.fromtimestamp(run.timestamp_start.timestamp()).strftime("%Y-%m-%d %H:%M")
-            run.timestamp_end = datetime.fromtimestamp(run.timestamp_end.timestamp()).strftime("%Y-%m-%d %H:%M")
+            run.timestamp_start = datetime.fromtimestamp(run.timestamp_start.timestamp()).strftime("%Y-%m-%d %H:%M:%S")
+            run.timestamp_end = datetime.fromtimestamp(run.timestamp_end.timestamp()).strftime("%Y-%m-%d %H:%M:%S")
 
         return [
             NrtListObject(
