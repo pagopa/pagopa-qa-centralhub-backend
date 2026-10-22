@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = structlog.get_logger(__name__)
 
 _IMPACT_SQL = text(
     """
@@ -46,11 +49,17 @@ _IMPACT_SQL = text(
 
 
 async def impact(db: AsyncSession, node_id: str, depth: int = 3) -> dict[str, list[dict[str, Any]]]:
-    rows = (await db.execute(_IMPACT_SQL, {"start": node_id, "depth": depth})).mappings().all()
-    result: dict[str, list[dict[str, Any]]] = {"upstream": [], "downstream": []}
-    for row in rows:
-        key = "downstream" if row["direction"] == "down" else "upstream"
-        result[key].append(
-            {"id": row["id"], "kind": row["kind"], "name": row["name"], "depth": row["depth"]}
-        )
-    return result
+    try:
+        rows = (await db.execute(_IMPACT_SQL, {"start": node_id, "depth": depth})).mappings().all()
+        if rows is None or not rows:
+            logger.info("impact query succeeded with 0 results")
+        result: dict[str, list[dict[str, Any]]] = {"upstream": [], "downstream": []}
+        for row in rows:
+            key = "downstream" if row["direction"] == "down" else "upstream"
+            result[key].append(
+                {"id": row["id"], "kind": row["kind"], "name": row["name"], "depth": row["depth"]}
+            )
+        return result
+    except Exception:
+        logger.exception("impact failed")
+        raise

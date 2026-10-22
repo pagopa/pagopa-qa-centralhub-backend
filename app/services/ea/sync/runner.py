@@ -26,44 +26,56 @@ async def run_with_default_sources(run_id: uuid.UUID, *, dry_run: bool = False) 
     Confluence is optional: without Atlassian credentials the run still updates GitHub
     data and ends as ``partial``.
     """
-    from app.core.db import async_session
+    try:
+        from app.core.db import async_session
 
-    log = logger.bind(run_id=str(run_id), dry_run=dry_run)
-    log.info("ea_sync_runner_started")
-    github: GitHubClient | None = None
-    confluence: ConfluenceClient | None = None
-    async with async_session() as db:
-        try:
+        log = logger.bind(run_id=str(run_id), dry_run=dry_run)
+        log.info("ea_sync_runner_started")
+        github: GitHubClient | None = None
+        confluence: ConfluenceClient | None = None
+        async with async_session() as db:
             try:
-                with trace_phase(log, "github_client"):
-                    github = default_github()
-            except SourceError as exc:
-                return await _fail(db, run_id, str(exc))
-            try:
-                with trace_phase(log, "confluence_client"):
-                    confluence = default_confluence()
-            except SourceError as exc:
-                log.warning("ea_sync_confluence_unavailable", **error_fields(exc))
-                confluence = None
-            return await execute_run(db, run_id, github, confluence, dry_run=dry_run)
-        finally:
-            with trace_phase(log, "close_clients"):
-                if github is not None:
-                    await github.aclose()
-                if confluence is not None:
-                    await confluence.aclose()
+                try:
+                    with trace_phase(log, "github_client"):
+                        github = default_github()
+                except SourceError as exc:
+                    logger.exception("run_with_default_sources failed")
+                    return await _fail(db, run_id, str(exc))
+                try:
+                    with trace_phase(log, "confluence_client"):
+                        confluence = default_confluence()
+                except SourceError as exc:
+                    logger.exception("run_with_default_sources failed")
+                    log.warning("ea_sync_confluence_unavailable", **error_fields(exc))
+                    confluence = None
+                return await execute_run(db, run_id, github, confluence, dry_run=dry_run)
+            finally:
+                with trace_phase(log, "close_clients"):
+                    if github is not None:
+                        await github.aclose()
+                    if confluence is not None:
+                        await confluence.aclose()
+    except Exception:
+        logger.exception("run_with_default_sources failed")
+        raise
 
 
 async def _fail(db: Any, run_id: uuid.UUID, error: str) -> dict[str, Any]:
-    from datetime import UTC, datetime
+    try:
+        from datetime import UTC, datetime
 
-    from app.models.ea import EaSyncRun
-    from app.services.ea.sync.engine import _record_status
+        from app.models.ea import EaSyncRun
+        from app.services.ea.sync.engine import _record_status
 
-    run = await db.get(EaSyncRun, run_id)
-    if run is None:
+        run = await db.get(EaSyncRun, run_id)
+        if run is None or not run:
+            logger.info("_fail query succeeded with 0 results")
+        if run is None:
+            return {"run_id": str(run_id), "status": "failed", "error": error, "stats": {}}
+        run.status, run.error, run.finished_at = "failed", error, datetime.now(UTC)
+        await _record_status(db, run)
+        await db.commit()
         return {"run_id": str(run_id), "status": "failed", "error": error, "stats": {}}
-    run.status, run.error, run.finished_at = "failed", error, datetime.now(UTC)
-    await _record_status(db, run)
-    await db.commit()
-    return {"run_id": str(run_id), "status": "failed", "error": error, "stats": {}}
+    except Exception:
+        logger.exception("_fail failed")
+        raise

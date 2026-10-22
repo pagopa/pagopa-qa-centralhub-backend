@@ -14,9 +14,12 @@ from datetime import datetime
 from typing import Any, Protocol
 
 import httpx
+import structlog
 
 from app.config import settings
 from app.services.ea.sync.rules import CONFLUENCE_SPACES, GITHUB_ORG
+
+logger = structlog.get_logger(__name__)
 
 _GITHUB_API = "https://api.github.com"
 _FILES_PER_QUERY = 40
@@ -60,102 +63,147 @@ class ConfluenceSource(Protocol):
 
 
 def _parse_dt(value: str | None) -> datetime | None:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+    except Exception:
+        logger.exception("_parse_dt failed")
+        raise
 
 
 class GitHubClient:
     def __init__(self, token: str, org: str = GITHUB_ORG, client: httpx.AsyncClient | None = None):
-        if not token:
-            raise SourceError("GITHUB_TOKEN non configurato: la sync non può leggere GitHub")
-        self.org = org
-        self._client = client or httpx.AsyncClient(timeout=_TIMEOUT)
-        self._headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        }
-        self._remaining: int | None = None
+        try:
+            if not token:
+                raise SourceError("GITHUB_TOKEN non configurato: la sync non può leggere GitHub")
+            self.org = org
+            self._client = client or httpx.AsyncClient(timeout=_TIMEOUT)
+            self._headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            }
+            self._remaining: int | None = None
+        except Exception:
+            logger.exception("GitHubClient.__init__ failed")
+            raise
 
     def rate_limit_remaining(self) -> int | None:
-        return self._remaining
+        try:
+            return self._remaining
+        except Exception:
+            logger.exception("GitHubClient.rate_limit_remaining failed")
+            raise
 
     async def aclose(self) -> None:
-        await self._client.aclose()
+        try:
+            await self._client.aclose()
+        except Exception:
+            logger.exception("GitHubClient.aclose failed")
+            raise
 
     async def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         try:
-            resp = await self._client.request(method, url, headers=self._headers, **kwargs)
-        except httpx.HTTPError as exc:
-            raise SourceError(f"GitHub non raggiungibile: {exc}") from exc
-        remaining = resp.headers.get("X-RateLimit-Remaining")
-        if remaining is not None:
-            self._remaining = int(remaining)
-        if resp.status_code in (403, 429) and self._remaining == 0:
-            raise SourceError("Limite di richieste GitHub esaurito, riprova più tardi")
-        if resp.status_code == 401:
-            raise SourceError("Token GitHub non valido")
-        return resp
+            try:
+                resp = await self._client.request(method, url, headers=self._headers, **kwargs)
+            except httpx.HTTPError as exc:
+                logger.exception("GitHubClient._request failed")
+                raise SourceError(f"GitHub non raggiungibile: {exc}") from exc
+            remaining = resp.headers.get("X-RateLimit-Remaining")
+            if remaining is not None:
+                self._remaining = int(remaining)
+            if resp.status_code in (403, 429) and self._remaining == 0:
+                raise SourceError("Limite di richieste GitHub esaurito, riprova più tardi")
+            if resp.status_code == 401:
+                raise SourceError("Token GitHub non valido")
+            return resp
+        except Exception:
+            logger.exception("GitHubClient._request failed")
+            raise
 
     async def list_repos(self) -> list[RepoInfo]:
-        out: list[RepoInfo] = []
-        url: str | None = f"{_GITHUB_API}/orgs/{self.org}/repos?type=all&per_page=100"
-        while url:
-            resp = await self._request("GET", url)
-            if resp.status_code != 200:
-                raise SourceError(f"Elenco repository GitHub: HTTP {resp.status_code}")
-            for r in resp.json():
-                out.append(
-                    RepoInfo(
-                        name=r["name"],
-                        archived=bool(r.get("archived")),
-                        fork=bool(r.get("fork")),
-                        private=bool(r.get("private")),
-                        default_branch=r.get("default_branch") or "main",
-                        pushed_at=_parse_dt(r.get("pushed_at")),
-                        description=r.get("description"),
+        try:
+            out: list[RepoInfo] = []
+            url: str | None = f"{_GITHUB_API}/orgs/{self.org}/repos?type=all&per_page=100"
+            while url:
+                resp = await self._request("GET", url)
+                if resp.status_code != 200:
+                    raise SourceError(f"Elenco repository GitHub: HTTP {resp.status_code}")
+                for r in resp.json():
+                    out.append(
+                        RepoInfo(
+                            name=r["name"],
+                            archived=bool(r.get("archived")),
+                            fork=bool(r.get("fork")),
+                            private=bool(r.get("private")),
+                            default_branch=r.get("default_branch") or "main",
+                            pushed_at=_parse_dt(r.get("pushed_at")),
+                            description=r.get("description"),
+                        )
                     )
-                )
-            url = resp.links.get("next", {}).get("url")
-        return out
+                url = resp.links.get("next", {}).get("url")
+            if not out:
+                logger.info("GitHubClient.list_repos query succeeded with 0 results")
+            return out
+        except Exception:
+            logger.exception("GitHubClient.list_repos failed")
+            raise
 
     async def get_tree(self, repo: str, branch: str) -> RepoTree:
-        resp = await self._request(
-            "GET",
-            f"{_GITHUB_API}/repos/{self.org}/{repo}/git/trees/{branch}",
-            params={"recursive": "1"},
-        )
-        if resp.status_code != 200:
-            raise SourceError(f"Albero di {repo}: HTTP {resp.status_code}")
-        data = resp.json()
-        paths = [e["path"] for e in data.get("tree", []) if e.get("type") == "blob"]
-        return RepoTree(sha=data["sha"], paths=paths, truncated=bool(data.get("truncated")))
+        try:
+            resp = await self._request(
+                "GET",
+                f"{_GITHUB_API}/repos/{self.org}/{repo}/git/trees/{branch}",
+                params={"recursive": "1"},
+            )
+            if resp.status_code != 200:
+                raise SourceError(f"Albero di {repo}: HTTP {resp.status_code}")
+            data = resp.json()
+            if data is None or not data:
+                logger.info("GitHubClient.get_tree query succeeded with 0 results")
+            paths = [e["path"] for e in data.get("tree", []) if e.get("type") == "blob"]
+            if not paths:
+                logger.info("GitHubClient.get_tree query succeeded with 0 results")
+            return RepoTree(sha=data["sha"], paths=paths, truncated=bool(data.get("truncated")))
+        except Exception:
+            logger.exception("GitHubClient.get_tree failed")
+            raise
 
     async def get_files(self, repo: str, branch: str, paths: list[str]) -> dict[str, str]:
-        out: dict[str, str] = {}
-        for start in range(0, len(paths), _FILES_PER_QUERY):
-            chunk = paths[start : start + _FILES_PER_QUERY]
-            blob_fragment = "{ ... on Blob { text } }"
-            fields = "\n".join(
-                f"f{i}: object(expression: {json.dumps(f'{branch}:{p}')}) {blob_fragment}"
-                for i, p in enumerate(chunk)
-            )
-            query = (
-                f"query {{ repository(owner: {json.dumps(self.org)}, name: {json.dumps(repo)}) "
-                f"{{ {fields} }} }}"
-            )
-            resp = await self._request("POST", f"{_GITHUB_API}/graphql", json={"query": query})
-            if resp.status_code != 200:
-                raise SourceError(f"File di {repo}: HTTP {resp.status_code}")
-            body = resp.json()
-            repo_data = (body.get("data") or {}).get("repository")
-            if repo_data is None:
-                errors = "; ".join(e.get("message", "") for e in body.get("errors") or [])
-                raise SourceError(f"File di {repo}: {errors or 'repository non accessibile'}")
-            for i, p in enumerate(chunk):
-                blob = repo_data.get(f"f{i}")
-                if blob and blob.get("text") is not None:
-                    out[p] = blob["text"]
-        return out
+        try:
+            if not paths:
+                logger.info("GitHubClient.get_files: no input paths to fetch")
+            out: dict[str, str] = {}
+            for start in range(0, len(paths), _FILES_PER_QUERY):
+                chunk = paths[start : start + _FILES_PER_QUERY]
+                blob_fragment = "{ ... on Blob { text } }"
+                fields = "\n".join(
+                    f"f{i}: object(expression: {json.dumps(f'{branch}:{p}')}) {blob_fragment}"
+                    for i, p in enumerate(chunk)
+                )
+                query = (
+                    f"query {{ repository(owner: {json.dumps(self.org)}, name: {json.dumps(repo)}) "
+                    f"{{ {fields} }} }}"
+                )
+                resp = await self._request("POST", f"{_GITHUB_API}/graphql", json={"query": query})
+                if resp.status_code != 200:
+                    raise SourceError(f"File di {repo}: HTTP {resp.status_code}")
+                body = resp.json()
+                if body is None or not body:
+                    logger.info("GitHubClient.get_files query succeeded with 0 results")
+                repo_data = (body.get("data") or {}).get("repository")
+                if repo_data is None:
+                    errors = "; ".join(e.get("message", "") for e in body.get("errors") or [])
+                    raise SourceError(f"File di {repo}: {errors or 'repository non accessibile'}")
+                for i, p in enumerate(chunk):
+                    blob = repo_data.get(f"f{i}")
+                    if blob and blob.get("text") is not None:
+                        out[p] = blob["text"]
+            if paths and not out:
+                logger.info("GitHubClient.get_files query succeeded with 0 results")
+            return out
+        except Exception:
+            logger.exception("GitHubClient.get_files failed")
+            raise
 
 
 class ConfluenceClient:
@@ -168,59 +216,94 @@ class ConfluenceClient:
         token: str,
         client: httpx.AsyncClient | None = None,
     ):
-        if not (base_url and email and token):
-            raise SourceError(
-                "Credenziali Atlassian non configurate (JIRA_BASE_URL/EMAIL/API_TOKEN)"
-            )
-        self.base = base_url.rstrip("/")
-        self._client = client or httpx.AsyncClient(timeout=_TIMEOUT, auth=(email, token))
+        try:
+            if not (base_url and email and token):
+                raise SourceError(
+                    "Credenziali Atlassian non configurate (JIRA_BASE_URL/EMAIL/API_TOKEN)"
+                )
+            self.base = base_url.rstrip("/")
+            self._client = client or httpx.AsyncClient(timeout=_TIMEOUT, auth=(email, token))
+        except Exception:
+            logger.exception("ConfluenceClient.__init__ failed")
+            raise
 
     async def aclose(self) -> None:
-        await self._client.aclose()
+        try:
+            await self._client.aclose()
+        except Exception:
+            logger.exception("ConfluenceClient.aclose failed")
+            raise
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         try:
-            resp = await self._client.get(f"{self.base}{path}", params=params)
-        except httpx.HTTPError as exc:
-            raise SourceError(f"Confluence non raggiungibile: {exc}") from exc
-        if resp.status_code != 200:
-            raise SourceError(f"Confluence {path}: HTTP {resp.status_code}")
-        return resp.json()  # type: ignore[no-any-return]
+            try:
+                resp = await self._client.get(f"{self.base}{path}", params=params)
+            except httpx.HTTPError as exc:
+                logger.exception("ConfluenceClient._get failed")
+                raise SourceError(f"Confluence non raggiungibile: {exc}") from exc
+            if resp.status_code != 200:
+                raise SourceError(f"Confluence {path}: HTTP {resp.status_code}")
+            _query_result_for_logging = resp.json()  # type: ignore[no-any-return]
+            if _query_result_for_logging is None or not _query_result_for_logging:
+                logger.info("ConfluenceClient._get query succeeded with 0 results")
+            return _query_result_for_logging
+        except Exception:
+            logger.exception("ConfluenceClient._get failed")
+            raise
 
     async def list_pages(self, space_key: str) -> list[dict[str, str]]:
-        spaces = await self._get("/wiki/api/v2/spaces", {"keys": space_key})
-        results = spaces.get("results") or []
-        if not results:
-            raise SourceError(f"Spazio Confluence {space_key} non trovato o non accessibile")
-        space_id = results[0]["id"]
-        out: list[dict[str, str]] = []
-        path: str | None = f"/wiki/api/v2/spaces/{space_id}/pages"
-        params: dict[str, Any] | None = {"limit": 250, "status": "current"}
-        while path:
-            data = await self._get(path, params)
-            for p in data.get("results") or []:
-                out.append(
-                    {
-                        "id": str(p["id"]),
-                        "t": p.get("title") or "",
-                        "par": str(p.get("parentId") or ""),
-                    }
-                )
-            path = (data.get("_links") or {}).get("next")
-            params = None  # the next link already carries the cursor
-        return out
+        try:
+            spaces = await self._get("/wiki/api/v2/spaces", {"keys": space_key})
+            results = spaces.get("results") or []
+            if not results:
+                logger.info("ConfluenceClient.list_pages spaces query succeeded with 0 results")
+                raise SourceError(f"Spazio Confluence {space_key} non trovato o non accessibile")
+            space_id = results[0]["id"]
+            out: list[dict[str, str]] = []
+            path: str | None = f"/wiki/api/v2/spaces/{space_id}/pages"
+            params: dict[str, Any] | None = {"limit": 250, "status": "current"}
+            while path:
+                data = await self._get(path, params)
+                for p in data.get("results") or []:
+                    out.append(
+                        {
+                            "id": str(p["id"]),
+                            "t": p.get("title") or "",
+                            "par": str(p.get("parentId") or ""),
+                        }
+                    )
+                path = (data.get("_links") or {}).get("next")
+                params = None  # the next link already carries the cursor
+            if not out:
+                logger.info("ConfluenceClient.list_pages query succeeded with 0 results")
+            return out
+        except Exception:
+            logger.exception("ConfluenceClient.list_pages failed")
+            raise
 
 
 async def list_all_pages(
     confluence: ConfluenceSource, spaces: tuple[str, ...] = CONFLUENCE_SPACES
 ) -> dict[str, list[dict[str, str]]]:
-    results = await asyncio.gather(*(confluence.list_pages(s) for s in spaces))
-    return dict(zip(spaces, results, strict=True))
+    try:
+        results = await asyncio.gather(*(confluence.list_pages(s) for s in spaces))
+        return dict(zip(spaces, results, strict=True))
+    except Exception:
+        logger.exception("list_all_pages failed")
+        raise
 
 
 def default_github() -> GitHubClient:
-    return GitHubClient(settings.github_token)
+    try:
+        return GitHubClient(settings.github_token)
+    except Exception:
+        logger.exception("default_github failed")
+        raise
 
 
 def default_confluence() -> ConfluenceClient:
-    return ConfluenceClient(settings.jira_base_url, settings.jira_email, settings.jira_api_token)
+    try:
+        return ConfluenceClient(settings.jira_base_url, settings.jira_email, settings.jira_api_token)
+    except Exception:
+        logger.exception("default_confluence failed")
+        raise

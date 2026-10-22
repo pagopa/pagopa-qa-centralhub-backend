@@ -121,35 +121,33 @@ async def get_nrts(db: DbDep, test_object: Annotated[str| None, Query()] = None,
     ):
     try:
         nrts, total = await test_metrics_svc.get_nrts(db, test_object, origin, page, page_size)
-        if nrts is None or len(nrts) == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No NRTs found",
-            )
-        return PaginatedResponse(items=nrts, total=total, page=page, page_size=page_size)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"{str(e)}",
         )
+    if nrts is None or len(nrts) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No NRTs found",
+            )
+    return PaginatedResponse(items=nrts, total=total, page=page, page_size=page_size)
 
 @router.get("/nrt/{id}", response_model=list[TestExecutionOut])
 async def get_nrt_by_id(db: DbDep, id: str ):
     try:
         nrt = await test_metrics_svc.get_nrt_by_id(db, id)
-        if nrt is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="NRT not found",
-            )
-        return nrt
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"{str(e)}",
         )
+    if nrt is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="NRT not found",
+        )
+    return nrt
 
 @router.put("/nrts/update", response_model=UpdateNrtsObject)
 async def update_nrt(
@@ -158,17 +156,17 @@ async def update_nrt(
     ) -> UpdateNrtsObject:
     try:
         updated_nrt = await test_metrics_svc.update_nrt(db, body)
-        if updated_nrt is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="NRT not found",
-            )
-        return updated_nrt
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"{str(e)}",
         )
+    if updated_nrt is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="NRT not found",
+        )
+    return updated_nrt
 
 
 @router.post("/flaky-scenarios/save", response_model=list[FlakyScenarioOut])
@@ -179,17 +177,17 @@ async def save_flaky_scenarios(
     try:
         if flaky_scenarios is not None and len(flaky_scenarios) > 0:
             saved_or_updated_scenarios = await test_metrics_svc.save_or_update_flaky_scenarios(db, flaky_scenarios)
-        if saved_or_updated_scenarios is None or len(saved_or_updated_scenarios) == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No flaky scenarios saved or updated",
-            )
-        return saved_or_updated_scenarios
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"{str(e)}",
         )
+    if saved_or_updated_scenarios is None or len(saved_or_updated_scenarios) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No flaky scenarios saved or updated",
+        )
+    return saved_or_updated_scenarios
 
 
 @router.get("/flaky-scenarios", response_model=list[FlakyScenarioOut])
@@ -199,25 +197,15 @@ async def get_flaky_scenarios(
 ) -> list[FlakyScenarioOut]:
     try:
         scenarios = await test_metrics_svc.get_flaky_scenarios(db, test_object)
-        if scenarios is None or len(scenarios) == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No flaky scenarios found",
-            )
-        return scenarios
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"{str(e)}",
         )
-
-@router.get("/origins", response_model=list[str])
-async def get_origins(db: DbDep) -> list[str]:
-    result = await test_metrics_svc.get_origins(db)
-    if result is None or len(result) == 0:
+    if scenarios is None or len(scenarios) == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No origins found",
+            detail="No flaky scenarios found",
         )
-    return result if result is not None else []
+    return scenarios
 

@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import structlog
+
+logger = structlog.get_logger(__name__)
+
 RUNTIME_KINDS = frozenset({"be", "fn", "fe"})
 
 KIND_LABELS = {
@@ -35,15 +39,19 @@ class QaFacts:
 
 
 def maturity_score(facts: QaFacts) -> int:
-    score = 0
-    if facts.unit_files > 0:
-        score += 1
-    if facts.it_features > 0 or facts.it_workflow or facts.nodo_bdd:
-        score += 1
-    if facts.central_suites or facts.nodo_bdd:
-        score += 1
-    if facts.perf:
-        score += 1
-    if facts.nrt_suites:
-        score += 1
-    return score
+    try:
+        score = 0
+        if facts.unit_files > 0:
+            score += 1
+        if facts.it_features > 0 or facts.it_workflow or facts.nodo_bdd:
+            score += 1
+        if facts.central_suites or facts.nodo_bdd:
+            score += 1
+        if facts.perf:
+            score += 1
+        if facts.nrt_suites:
+            score += 1
+        return score
+    except Exception:
+        logger.exception("maturity_score failed")
+        raise
