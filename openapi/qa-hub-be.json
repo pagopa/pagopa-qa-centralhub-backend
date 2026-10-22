@@ -4428,11 +4428,11 @@
             }
           },
           {
-            "name": "trigger",
+            "name": "origin",
             "in": "query",
             "required": false,
             "schema": {
-              "title": "Trigger",
+              "title": "Origin",
               "type": "string",
               "nullable": true
             }
@@ -4703,11 +4703,11 @@
         "operationId": "get_suites_api_v1_suites_all_get",
         "parameters": [
           {
-            "name": "trigger",
+            "name": "origin",
             "in": "query",
             "required": false,
             "schema": {
-              "title": "Trigger",
+              "title": "Origin",
               "type": "string",
               "nullable": true
             }
