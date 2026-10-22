@@ -125,6 +125,6 @@ al componente nella mappa e al file Terraform su GitHub.
 
 ## 8. Fasi
 
-1. Modello, parser, resolver, integrazione nel sync, API (backend, migration 0022).
+1. Modello, parser, resolver, integrazione nel sync, API (backend, migration 0023).
 2. Tab frontend e guida (`EaGuide.tsx`).
 3. Stato vivo degli alert e override manuale delle posizioni.

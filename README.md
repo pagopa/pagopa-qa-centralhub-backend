@@ -153,7 +153,7 @@ Il sync manuale e quello schedulato condividono lo stesso servizio e sono serial
 
 Mappa di Enterprise Architecture della piattaforma pagoPA (Blueprint, Architettura, Data Lake, Infrastruttura, Matrice QA, Guida). Il design completo è in `docs/ea-map/DESIGN.md`; la parte Data Lake in `docs/ea-map/DESIGN-data-lake.md`; la vista Infrastruttura in `docs/ea-map/DESIGN-infra.md`.
 
-I dati vivono nelle tabelle `ea_*` (migrazioni da `0019` a `0022`). Il primo caricamento importa la knowledge base prodotta dagli script di discovery:
+I dati vivono nelle tabelle `ea_*` (migrazioni `0019`, `0020`, `0021` e `0023`). Il primo caricamento importa la knowledge base prodotta dagli script di discovery:
 
 ```bash
 uv run python -m scripts.ea_import                         # seed in scripts/data/ea_kb_seed.json

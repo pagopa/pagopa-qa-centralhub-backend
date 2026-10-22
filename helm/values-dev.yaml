@@ -101,6 +101,8 @@ microservice-chart:
     SUPERSET_GUEST_USERNAME: "service"
     SUPERSET_GUEST_FIRST_NAME: "service"
     SUPERSET_GUEST_LAST_NAME: "service"
+    GEMINI_MODEL: "gemini-3.5-flash"
+    GEMINI_FALLBACK_MODELS: "gemini-3.8-flash,gemini-3.7-flash"
     
 
   # Secrets resolved from Azure Key Vault via the chart's CSI integration.
@@ -114,6 +116,7 @@ microservice-chart:
     GITHUB_TOKEN: "qa-centralhub-github-token"
     JIRA_API_TOKEN: "qa-centralhub-jira-api-token"
     SUPERSET_PASSWORD: "qa-superset-password"
+    GEMINI_API_KEY: "qa-centralhub-gemini-api-key"
    
 
 

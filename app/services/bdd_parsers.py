@@ -25,103 +25,126 @@ async def parse_source(
     file_bytes: bytes | None = None,
     filename: str | None = None,
 ) -> str:
-    match source_type:
-        case "text":
-            if not content:
-                raise ParseError("content is required for text source")
-            return content.strip()
+    try:
+        match source_type:
+            case "text":
+                if not content:
+                    raise ParseError("content is required for text source")
+                return content.strip()
 
-        case "url":
-            if not url:
-                raise ParseError("url is required for url source")
-            return await _fetch_url(url)
+            case "url":
+                if not url:
+                    raise ParseError("url is required for url source")
+                return await _fetch_url(url)
 
-        case "confluence":
-            if not url:
-                raise ParseError("url is required for confluence source")
-            return await _fetch_confluence(url, confluence_email, confluence_token)
+            case "confluence":
+                if not url:
+                    raise ParseError("url is required for confluence source")
+                return await _fetch_confluence(url, confluence_email, confluence_token)
 
-        case "pdf":
-            if not file_bytes:
-                raise ParseError("file_bytes is required for pdf source")
-            return _parse_pdf(file_bytes)
+            case "pdf":
+                if not file_bytes:
+                    raise ParseError("file_bytes is required for pdf source")
+                return _parse_pdf(file_bytes)
 
-        case "docx":
-            if not file_bytes:
-                raise ParseError("file_bytes is required for docx source")
-            return _parse_docx(file_bytes)
+            case "docx":
+                if not file_bytes:
+                    raise ParseError("file_bytes is required for docx source")
+                return _parse_docx(file_bytes)
 
-        case _:
-            raise ParseError(f"unknown source_type: {source_type}")
+            case _:
+                raise ParseError(f"unknown source_type: {source_type}")
+    except Exception:
+        _log.exception("parse_source failed")
+        raise
 
 
 async def _fetch_url(url: str) -> str:
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise ParseError(f"URL scheme must be http or https, got: {parsed.scheme!r}")
-
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        resp = await client.get(url, headers={"User-Agent": "QA-Hub-BDD/1.0"})
-        resp.raise_for_status()
-        html = resp.text
-
     try:
-        import trafilatura
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ParseError(f"URL scheme must be http or https, got: {parsed.scheme!r}")
 
-        text = trafilatura.extract(html, include_comments=False, include_tables=True)
-        if text:
-            return text.strip()
-        _log.debug("trafilatura_no_content", url=url)
-    except Exception as exc:
-        _log.warning("trafilatura_failed", url=url, error=str(exc))
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "QA-Hub-BDD/1.0"})
+            resp.raise_for_status()
+            html = resp.text
 
-    # Fallback: strip HTML tags naively
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()[:10000]
+        try:
+            import trafilatura
+
+            text = trafilatura.extract(html, include_comments=False, include_tables=True)
+            if text:
+                return text.strip()
+            _log.debug("trafilatura_no_content", url=url)
+        except Exception as exc:
+            _log.exception("_fetch_url failed")
+            _log.warning("trafilatura_failed", url=url, error=str(exc))
+
+        # Fallback: strip HTML tags naively
+        text = re.sub(r"<[^>]+>", " ", html)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()[:10000]
+    except Exception:
+        _log.exception("_fetch_url failed")
+        raise
 
 
 async def _fetch_confluence(url: str, email: str | None, token: str | None) -> str:
-    if not email or not token:
-        raise ParseError("Confluence credentials not configured in BDD Settings")
+    try:
+        if not email or not token:
+            raise ParseError("Confluence credentials not configured in BDD Settings")
 
-    # Extract page ID from URL: .../pages/12345/... or ?pageId=12345
-    m = re.search(r"/pages/(\d+)", url) or re.search(r"pageId=(\d+)", url)
-    if not m:
-        raise ParseError(f"Cannot extract Confluence page ID from URL: {url}")
-    page_id = m.group(1)
+        # Extract page ID from URL: .../pages/12345/... or ?pageId=12345
+        m = re.search(r"/pages/(\d+)", url) or re.search(r"pageId=(\d+)", url)
+        if not m:
+            raise ParseError(f"Cannot extract Confluence page ID from URL: {url}")
+        page_id = m.group(1)
 
-    # Determine base URL (everything up to /wiki/)
-    base_match = re.match(r"(https?://[^/]+)", url)
-    if not base_match:
-        raise ParseError("Cannot determine Confluence base URL")
-    base = base_match.group(1)
+        # Determine base URL (everything up to /wiki/)
+        base_match = re.match(r"(https?://[^/]+)", url)
+        if not base_match:
+            raise ParseError("Cannot determine Confluence base URL")
+        base = base_match.group(1)
 
-    api_url = f"{base}/wiki/api/v2/pages/{page_id}?body-format=storage"
-    creds = base64.b64encode(f"{email}:{token}".encode()).decode()
+        api_url = f"{base}/wiki/api/v2/pages/{page_id}?body-format=storage"
+        creds = base64.b64encode(f"{email}:{token}".encode()).decode()
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(api_url, headers={"Authorization": f"Basic {creds}"})
-        resp.raise_for_status()
-        data = resp.json()
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(api_url, headers={"Authorization": f"Basic {creds}"})
+            resp.raise_for_status()
+            data = resp.json()
+            if data is None or not data:
+                _log.info("_fetch_confluence query succeeded with 0 results")
 
-    body_html = data.get("body", {}).get("storage", {}).get("value", "")
-    text = re.sub(r"<[^>]+>", " ", body_html)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+        body_html = data.get("body", {}).get("storage", {}).get("value", "")
+        text = re.sub(r"<[^>]+>", " ", body_html)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+    except Exception:
+        _log.exception("_fetch_confluence failed")
+        raise
 
 
 def _parse_pdf(file_bytes: bytes) -> str:
-    import pypdf
+    try:
+        import pypdf
 
-    reader = pypdf.PdfReader(io.BytesIO(file_bytes))
-    pages = [page.extract_text() or "" for page in reader.pages]
-    return "\n\n".join(p.strip() for p in pages if p.strip())
+        reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+        pages = [page.extract_text() or "" for page in reader.pages]
+        return "\n\n".join(p.strip() for p in pages if p.strip())
+    except Exception:
+        _log.exception("_parse_pdf failed")
+        raise
 
 
 def _parse_docx(file_bytes: bytes) -> str:
-    import docx
+    try:
+        import docx
 
-    doc = docx.Document(io.BytesIO(file_bytes))
-    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
-    return "\n\n".join(paragraphs)
+        doc = docx.Document(io.BytesIO(file_bytes))
+        paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        return "\n\n".join(paragraphs)
+    except Exception:
+        _log.exception("_parse_docx failed")
+        raise

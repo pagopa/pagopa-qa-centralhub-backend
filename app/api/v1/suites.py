@@ -14,5 +14,5 @@ from app.services import suites as suites_svc
 router = APIRouter()
 
 @router.get("/all", response_model=list[str])
-async def get_suites(db: DbDep, trigger: Annotated[str | None, Query()] = None) -> list[str]:
-    return await suites_svc.get_suites(db, trigger)
+async def get_suites(db: DbDep, origin: Annotated[str | None, Query()] = None) -> list[str]:
+    return await suites_svc.get_suites(db, origin)

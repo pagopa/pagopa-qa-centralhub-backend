@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 
+import structlog
 from sqlalchemy import distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -16,69 +17,123 @@ from app.models.dq import (
     DqRiskLevel,
 )
 
+logger = structlog.get_logger(__name__)
+
 
 # ── Dimensions ────────────────────────────────────────────────────────────────
 
 async def list_dimensions(db: AsyncSession) -> list[DqDimension]:
-    result = await db.execute(select(DqDimension).order_by(DqDimension.sort_order))
-    return list(result.scalars())
+    try:
+        result = await db.execute(select(DqDimension).order_by(DqDimension.sort_order))
+        _query_result_for_logging = list(result.scalars())
+        if _query_result_for_logging is None or not _query_result_for_logging:
+            logger.info("list_dimensions query succeeded with 0 results")
+        return _query_result_for_logging
+    except Exception:
+        logger.exception("list_dimensions failed")
+        raise
 
 
 async def get_dimension(db: AsyncSession, dimension_id: uuid.UUID) -> DqDimension | None:
-    return await db.get(DqDimension, dimension_id)
+    try:
+        _query_result_for_logging = await db.get(DqDimension, dimension_id)
+        if _query_result_for_logging is None or not _query_result_for_logging:
+            logger.info("get_dimension query succeeded with 0 results")
+        return _query_result_for_logging
+    except Exception:
+        logger.exception("get_dimension failed")
+        raise
 
 
 async def create_dimension(db: AsyncSession, name: str, sort_order: int = 0) -> DqDimension:
-    dimension = DqDimension(name=name, sort_order=sort_order)
-    db.add(dimension)
-    await db.commit()
-    await db.refresh(dimension)
-    return dimension
+    try:
+        dimension = DqDimension(name=name, sort_order=sort_order)
+        db.add(dimension)
+        await db.commit()
+        await db.refresh(dimension)
+        return dimension
+    except Exception:
+        logger.exception("create_dimension failed")
+        raise
 
 
 async def update_dimension(db: AsyncSession, dimension: DqDimension, fields: dict) -> DqDimension:
-    for k, v in fields.items():
-        setattr(dimension, k, v)
-    await db.commit()
-    await db.refresh(dimension)
-    return dimension
+    try:
+        for k, v in fields.items():
+            setattr(dimension, k, v)
+        await db.commit()
+        await db.refresh(dimension)
+        return dimension
+    except Exception:
+        logger.exception("update_dimension failed")
+        raise
 
 
 async def delete_dimension(db: AsyncSession, dimension: DqDimension) -> None:
-    await db.delete(dimension)
-    await db.commit()
+    try:
+        await db.delete(dimension)
+        await db.commit()
+    except Exception:
+        logger.exception("delete_dimension failed")
+        raise
 
 
 # ── Domains ───────────────────────────────────────────────────────────────────
 
 async def list_domains(db: AsyncSession) -> list[DqDomain]:
-    result = await db.execute(select(DqDomain).order_by(DqDomain.sort_order))
-    return list(result.scalars())
+    try:
+        result = await db.execute(select(DqDomain).order_by(DqDomain.sort_order))
+        _query_result_for_logging = list(result.scalars())
+        if _query_result_for_logging is None or not _query_result_for_logging:
+            logger.info("list_domains query succeeded with 0 results")
+        return _query_result_for_logging
+    except Exception:
+        logger.exception("list_domains failed")
+        raise
 
 
 async def get_domain(db: AsyncSession, domain_id: uuid.UUID) -> DqDomain | None:
-    return await db.get(DqDomain, domain_id)
+    try:
+        _query_result_for_logging = await db.get(DqDomain, domain_id)
+        if _query_result_for_logging is None or not _query_result_for_logging:
+            logger.info("get_domain query succeeded with 0 results")
+        return _query_result_for_logging
+    except Exception:
+        logger.exception("get_domain failed")
+        raise
 
 
 async def create_domain(db: AsyncSession, name: str, sort_order: int = 0) -> DqDomain:
-    domain = DqDomain(name=name, sort_order=sort_order)
-    db.add(domain)
-    await db.commit()
-    await db.refresh(domain)
-    return domain
+    try:
+        domain = DqDomain(name=name, sort_order=sort_order)
+        db.add(domain)
+        await db.commit()
+        await db.refresh(domain)
+        return domain
+    except Exception:
+        logger.exception("create_domain failed")
+        raise
 
 
 async def update_domain(db: AsyncSession, domain: DqDomain, fields: dict) -> DqDomain:
-    for k, v in fields.items():
-        setattr(domain, k, v)
-    await db.commit()
-    await db.refresh(domain)
-    return domain
+    try:
+        for k, v in fields.items():
+            setattr(domain, k, v)
+        await db.commit()
+        await db.refresh(domain)
+        return domain
+    except Exception:
+        logger.exception("update_domain failed")
+        raise
 
 
 async def delete_domain(db: AsyncSession, domain: DqDomain) -> None:
-    await db.delete(domain)
-    await db.commit()
+    try:
+        await db.delete(domain)
+        await db.commit()
+    except Exception:
+        logger.exception("delete_domain failed")
+        raise
 
 
 # ── Catalog controls ────────────────────────────────────────────────────────
@@ -86,22 +141,36 @@ async def delete_domain(db: AsyncSession, domain: DqDomain) -> None:
 async def list_catalog_controls(
     db: AsyncSession, category: DqCategory | None = None
 ) -> list[DqCatalogControl]:
-    q = select(DqCatalogControl).options(selectinload(DqCatalogControl.dimension))
-    if category is not None:
-        q = q.where(DqCatalogControl.category == category)
-    q = q.order_by(DqCatalogControl.name)
-    result = await db.execute(q)
-    return list(result.scalars())
+    try:
+        q = select(DqCatalogControl).options(selectinload(DqCatalogControl.dimension))
+        if category is not None:
+            q = q.where(DqCatalogControl.category == category)
+        q = q.order_by(DqCatalogControl.name)
+        result = await db.execute(q)
+        _query_result_for_logging = list(result.scalars())
+        if _query_result_for_logging is None or not _query_result_for_logging:
+            logger.info("list_catalog_controls query succeeded with 0 results")
+        return _query_result_for_logging
+    except Exception:
+        logger.exception("list_catalog_controls failed")
+        raise
 
 
 async def get_catalog_control(db: AsyncSession, control_id: uuid.UUID) -> DqCatalogControl | None:
-    q = (
-        select(DqCatalogControl)
-        .options(selectinload(DqCatalogControl.dimension))
-        .where(DqCatalogControl.id == control_id)
-    )
-    result = await db.execute(q)
-    return result.scalar_one_or_none()
+    try:
+        q = (
+            select(DqCatalogControl)
+            .options(selectinload(DqCatalogControl.dimension))
+            .where(DqCatalogControl.id == control_id)
+        )
+        result = await db.execute(q)
+        _query_result_for_logging = result.scalar_one_or_none()
+        if _query_result_for_logging is None or not _query_result_for_logging:
+            logger.info("get_catalog_control query succeeded with 0 results")
+        return _query_result_for_logging
+    except Exception:
+        logger.exception("get_catalog_control failed")
+        raise
 
 
 async def create_catalog_control(
@@ -112,34 +181,46 @@ async def create_catalog_control(
     dimension_id: uuid.UUID,
     created_by: str | None = None,
 ) -> DqCatalogControl:
-    control = DqCatalogControl(
-        category=category,
-        name=name,
-        description=description,
-        dimension_id=dimension_id,
-        created_by=created_by,
-        updated_by=created_by,
-    )
-    db.add(control)
-    await db.commit()
-    await db.refresh(control, attribute_names=["dimension"])
-    return control
+    try:
+        control = DqCatalogControl(
+            category=category,
+            name=name,
+            description=description,
+            dimension_id=dimension_id,
+            created_by=created_by,
+            updated_by=created_by,
+        )
+        db.add(control)
+        await db.commit()
+        await db.refresh(control, attribute_names=["dimension"])
+        return control
+    except Exception:
+        logger.exception("create_catalog_control failed")
+        raise
 
 
 async def update_catalog_control(
     db: AsyncSession, control: DqCatalogControl, fields: dict
 ) -> DqCatalogControl:
-    for k, v in fields.items():
-        setattr(control, k, v)
-    await db.commit()
-    await db.refresh(control)
-    await db.refresh(control, attribute_names=["dimension"])
-    return control
+    try:
+        for k, v in fields.items():
+            setattr(control, k, v)
+        await db.commit()
+        await db.refresh(control)
+        await db.refresh(control, attribute_names=["dimension"])
+        return control
+    except Exception:
+        logger.exception("update_catalog_control failed")
+        raise
 
 
 async def delete_catalog_control(db: AsyncSession, control: DqCatalogControl) -> None:
-    await db.delete(control)
-    await db.commit()
+    try:
+        await db.delete(control)
+        await db.commit()
+    except Exception:
+        logger.exception("delete_catalog_control failed")
+        raise
 
 
 # ── Control instances ────────────────────────────────────────────────────────
@@ -151,20 +232,27 @@ async def list_control_instances(
     status: DqControlStatus | None = None,
     table_ref: str | None = None,
 ) -> list[DqControlInstance]:
-    q = select(DqControlInstance).options(
-        selectinload(DqControlInstance.catalog_control).selectinload(DqCatalogControl.dimension)
-    )
-    if domain_id is not None:
-        q = q.where(DqControlInstance.domain_id == domain_id)
-    if category is not None:
-        q = q.join(DqCatalogControl).where(DqCatalogControl.category == category)
-    if status is not None:
-        q = q.where(DqControlInstance.status == status)
-    if table_ref is not None:
-        q = q.where(DqControlInstance.table_ref == table_ref)
-    q = q.order_by(DqControlInstance.table_ref, DqControlInstance.field_ref)
-    result = await db.execute(q)
-    return list(result.scalars())
+    try:
+        q = select(DqControlInstance).options(
+            selectinload(DqControlInstance.catalog_control).selectinload(DqCatalogControl.dimension)
+        )
+        if domain_id is not None:
+            q = q.where(DqControlInstance.domain_id == domain_id)
+        if category is not None:
+            q = q.join(DqCatalogControl).where(DqCatalogControl.category == category)
+        if status is not None:
+            q = q.where(DqControlInstance.status == status)
+        if table_ref is not None:
+            q = q.where(DqControlInstance.table_ref == table_ref)
+        q = q.order_by(DqControlInstance.table_ref, DqControlInstance.field_ref)
+        result = await db.execute(q)
+        _query_result_for_logging = list(result.scalars())
+        if _query_result_for_logging is None or not _query_result_for_logging:
+            logger.info("list_control_instances query succeeded with 0 results")
+        return _query_result_for_logging
+    except Exception:
+        logger.exception("list_control_instances failed")
+        raise
 
 
 async def list_control_instance_tables(
@@ -172,24 +260,38 @@ async def list_control_instance_tables(
     domain_id: uuid.UUID,
     category: DqCategory | None = None,
 ) -> list[str]:
-    q = select(distinct(DqControlInstance.table_ref)).where(
-        DqControlInstance.domain_id == domain_id,
-        DqControlInstance.table_ref != "",
-    )
-    if category is not None:
-        q = q.join(DqCatalogControl).where(DqCatalogControl.category == category)
-    result = await db.execute(q.order_by(DqControlInstance.table_ref))
-    return list(result.scalars())
+    try:
+        q = select(distinct(DqControlInstance.table_ref)).where(
+            DqControlInstance.domain_id == domain_id,
+            DqControlInstance.table_ref != "",
+        )
+        if category is not None:
+            q = q.join(DqCatalogControl).where(DqCatalogControl.category == category)
+        result = await db.execute(q.order_by(DqControlInstance.table_ref))
+        _query_result_for_logging = list(result.scalars())
+        if _query_result_for_logging is None or not _query_result_for_logging:
+            logger.info("list_control_instance_tables query succeeded with 0 results")
+        return _query_result_for_logging
+    except Exception:
+        logger.exception("list_control_instance_tables failed")
+        raise
 
 
 async def get_control_instance(db: AsyncSession, instance_id: uuid.UUID) -> DqControlInstance | None:
-    q = (
-        select(DqControlInstance)
-        .options(selectinload(DqControlInstance.catalog_control).selectinload(DqCatalogControl.dimension))
-        .where(DqControlInstance.id == instance_id)
-    )
-    result = await db.execute(q)
-    return result.scalar_one_or_none()
+    try:
+        q = (
+            select(DqControlInstance)
+            .options(selectinload(DqControlInstance.catalog_control).selectinload(DqCatalogControl.dimension))
+            .where(DqControlInstance.id == instance_id)
+        )
+        result = await db.execute(q)
+        _query_result_for_logging = result.scalar_one_or_none()
+        if _query_result_for_logging is None or not _query_result_for_logging:
+            logger.info("get_control_instance query succeeded with 0 results")
+        return _query_result_for_logging
+    except Exception:
+        logger.exception("get_control_instance failed")
+        raise
 
 
 async def create_control_instance(
@@ -207,43 +309,55 @@ async def create_control_instance(
     soda_url: str | None = None,
     created_by: str | None = None,
 ) -> DqControlInstance:
-    instance = DqControlInstance(
-        domain_id=domain_id,
-        catalog_control_id=catalog_control_id,
-        table_ref=table_ref,
-        field_ref=field_ref,
-        owner=owner,
-        risk=risk,
-        impact=impact,
-        status=status,
-        notes=notes,
-        check_name=check_name,
-        soda_url=soda_url,
-        created_by=created_by,
-        updated_by=created_by,
-    )
-    db.add(instance)
-    await db.commit()
-    await db.refresh(instance, attribute_names=["catalog_control"])
-    await db.refresh(instance.catalog_control, attribute_names=["dimension"])
-    return instance
+    try:
+        instance = DqControlInstance(
+            domain_id=domain_id,
+            catalog_control_id=catalog_control_id,
+            table_ref=table_ref,
+            field_ref=field_ref,
+            owner=owner,
+            risk=risk,
+            impact=impact,
+            status=status,
+            notes=notes,
+            check_name=check_name,
+            soda_url=soda_url,
+            created_by=created_by,
+            updated_by=created_by,
+        )
+        db.add(instance)
+        await db.commit()
+        await db.refresh(instance, attribute_names=["catalog_control"])
+        await db.refresh(instance.catalog_control, attribute_names=["dimension"])
+        return instance
+    except Exception:
+        logger.exception("create_control_instance failed")
+        raise
 
 
 async def update_control_instance(
     db: AsyncSession, instance: DqControlInstance, fields: dict
 ) -> DqControlInstance:
-    for k, v in fields.items():
-        setattr(instance, k, v)
-    await db.commit()
-    await db.refresh(instance)
-    await db.refresh(instance, attribute_names=["catalog_control"])
-    await db.refresh(instance.catalog_control, attribute_names=["dimension"])
-    return instance
+    try:
+        for k, v in fields.items():
+            setattr(instance, k, v)
+        await db.commit()
+        await db.refresh(instance)
+        await db.refresh(instance, attribute_names=["catalog_control"])
+        await db.refresh(instance.catalog_control, attribute_names=["dimension"])
+        return instance
+    except Exception:
+        logger.exception("update_control_instance failed")
+        raise
 
 
 async def delete_control_instance(
     db: AsyncSession, instance: DqControlInstance, updated_by: str | None = None
 ) -> None:
-    instance.status = DqControlStatus.ELIMINATO
-    instance.updated_by = updated_by
-    await db.commit()
+    try:
+        instance.status = DqControlStatus.ELIMINATO
+        instance.updated_by = updated_by
+        await db.commit()
+    except Exception:
+        logger.exception("delete_control_instance failed")
+        raise

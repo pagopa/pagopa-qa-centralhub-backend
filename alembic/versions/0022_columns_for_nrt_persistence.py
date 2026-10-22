@@ -1,7 +1,7 @@
 """columns for NRT persistence
 
-Revision ID: 0016
-Revises: 0015
+Revision ID: 0022
+Revises: 0021
 Create Date: 2026-10-14 10:19:32.774958
 """
 from __future__ import annotations
@@ -13,8 +13,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '0016'
-down_revision: Union[str, None] = '0015'
+revision: str = '0022'
+down_revision: Union[str, None] = '0021'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -72,7 +72,9 @@ def downgrade() -> None:
    
    
     op.drop_column('test_executions', 'revision_note')
-    op.drop_column('test_executions', 'is_flaky')
+    op.drop_column('test_executions', 'is_flaky')  
+    op.drop_column('test_executions', 'allure_url')
+
     op.execute("DROP TYPE IF EXISTS qachub.revision_result_enum;")
 
     op.drop_index('ix_qachub_flaky_scenarios_test_object', table_name='flaky_scenarios', schema='qachub')
