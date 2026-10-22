@@ -11,6 +11,8 @@ from app.models.ea import (  # noqa: F401
     EaChange,
     EaDocLink,
     EaEdge,
+    EaInfraLink,
+    EaInfraResource,
     EaMeta,
     EaNode,
     EaQaSignal,

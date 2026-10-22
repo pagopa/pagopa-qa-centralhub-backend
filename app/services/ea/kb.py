@@ -194,12 +194,21 @@ async def build_kb(db: AsyncSession) -> dict[str, Any]:
 
     # blueprint
     bp_edges: dict[str, list[EaEdge]] = defaultdict(list)
+    archived = {n.id for n in nodes if n.status == "archived"}
+    # a process that only used archived products has nothing left to show: it goes too
+    # (and comes back by itself if one of its products is restored)
+    used: dict[str, list[str]] = defaultdict(list)
     for e in edges:
-        if e.type in BLUEPRINT_EDGE_TYPES:
+        if e.type == "uses":
+            used[e.from_id].append(e.to_id)
+    archived |= {p for p, prods in used.items() if prods and all(x in archived for x in prods)}
+    for e in edges:
+        # an archived product or process leaves the blueprint with its links
+        if e.type in BLUEPRINT_EDGE_TYPES and e.from_id not in archived and e.to_id not in archived:
             bp_edges[e.type].append(e)
 
     def kind_nodes(kind: str) -> list[EaNode]:
-        return [n for n in nodes if n.kind == kind and n.status != "archived"]
+        return [n for n in nodes if n.kind == kind and n.id not in archived]
 
     serves_to: dict[str, list[str]] = defaultdict(list)
     for e in bp_edges["serves"]:

@@ -45,13 +45,15 @@ from app.services.ea.contracts import (
     build_graph,
     propose_producer,
 )
+from app.services.ea.infra import sync as infra_sync
 from app.services.ea.sync import derive
 from app.services.ea.sync.extract import extract_repo, wanted_files
 from app.services.ea.sync.rules import (
     CANDIDATE_MAX_AGE_DAYS,
-    CANDIDATE_PREFIXES,
     CONFLUENCE_SPACES,
     GITHUB_ORG,
+    REPO_PERIMETER,
+    in_perimeter,
 )
 from app.services.ea.sync.sources import (
     ConfluenceSource,
@@ -145,6 +147,8 @@ class _Collected:
     contracts_fresh: tuple[str, str] | None = None  # (branch, sha) when read in this run
     contracts_error: str | None = None
     contracts_skipped: str | None = None
+    # infrastructure view (docs/ea-map/DESIGN-infra.md §5)
+    infra: infra_sync.InfraCollected = field(default_factory=infra_sync.InfraCollected)
 
 
 async def _read_state(db: AsyncSession) -> _State:
@@ -172,7 +176,7 @@ async def _read_state(db: AsyncSession) -> _State:
 def _is_candidate(info: RepoInfo, state: _State, now: datetime) -> bool:
     if info.name in state.components or info.archived or info.fork:
         return False
-    if not info.name.startswith(CANDIDATE_PREFIXES):
+    if not in_perimeter(info.name):
         return False
     if info.pushed_at is None or info.pushed_at < now - timedelta(days=CANDIDATE_MAX_AGE_DAYS):
         return False
@@ -239,6 +243,8 @@ async def _collect(
         await asyncio.gather(*(read(n) for n in targets))
     with trace_phase(log, "data_contracts"):
         await _collect_contracts(state, github, col, run_id=run_id)
+    with trace_phase(log, "infra"):
+        col.infra = await infra_sync.collect(state.snapshots, github, col.listing, log)
     log.info(
         "ea_sync_sources_collected",
         repos_in_org=len(col.listing),
@@ -481,6 +487,45 @@ async def _apply_helm_edges(
             None,
             conflict=e.status == "verified",
         )
+
+
+OUT_OF_PERIMETER = (
+    f"Fuori dal perimetro della mappa: il nome del repository non contiene «{REPO_PERIMETER}»"
+)
+
+
+async def _propose_out_of_perimeter(ap: _Applier, components: dict[str, EaNode]) -> None:
+    """Components whose repository is outside the perimeter, and the products they leave
+    empty, go to review for archiving (a rejection keeps them for good)."""
+    out = {
+        name
+        for name, node in components.items()
+        if not in_perimeter(name) and node.source != "manual"
+    }
+    for name in sorted(out):
+        ap.propose(
+            "node",
+            "update",
+            name,
+            {"status": "active"},
+            {"status": "archived", "reason": OUT_OF_PERIMETER},
+        )
+    by_product: dict[str, list[str]] = {}
+    for name, node in components.items():
+        if node.parent_id:
+            by_product.setdefault(node.parent_id, []).append(name)
+    for product_id, names in sorted(by_product.items()):
+        if names and all(n in out for n in names):
+            ap.propose(
+                "node",
+                "update",
+                product_id,
+                {"status": "active"},
+                {
+                    "status": "archived",
+                    "reason": "Tutti i suoi componenti sono fuori dal perimetro della mappa",
+                },
+            )
 
 
 def _candidate_payload(
@@ -797,6 +842,23 @@ async def _apply(
                 col.contracts,
                 now,
             )
+    for repo, (branch, sha) in col.infra.fresh.items():
+        key = infra_sync.snapshot_key(repo)
+        extract = col.infra.extracts[repo]
+        snap = await db.get(EaRepoSnapshot, key)
+        if snap is None:
+            db.add(
+                EaRepoSnapshot(
+                    repo=key, default_branch=branch, head_sha=sha, extracted=extract, fetched_at=now
+                )
+            )
+        else:
+            snap.default_branch, snap.head_sha, snap.extracted, snap.fetched_at = (
+                branch,
+                sha,
+                extract,
+                now,
+            )
     for repo in col.touched:
         snap = await db.get(EaRepoSnapshot, repo)
         if snap is not None:
@@ -833,6 +895,7 @@ async def _apply(
                     {"status": "active"},
                     {"status": "archived", "reason": f"Repository {reason} su GitHub"},
                 )
+        await _propose_out_of_perimeter(ap, components)
         for name in col.candidates:
             cand_facts = col.facts.get(name)
             if cand_facts is None or not derive.owners_overlap(
@@ -852,6 +915,10 @@ async def _apply(
 
     if col.contracts is not None:
         await _apply_data_lake(ap, col.contracts)
+
+    infra_stats: dict[str, int] = {}
+    if col.infra.extracts:
+        infra_stats = await infra_sync.apply(ap, col.infra)
 
     superseded = 0
     open_changes = await db.scalars(
@@ -877,13 +944,16 @@ async def _apply(
     if col.contracts is not None:
         sources["data_contracts"] = col.contracts.get("files", 0)
         sources["data_contracts_repo"] = f"{GITHUB_ORG}/{CONTRACTS_REPO}"
+    if col.infra.extracts:
+        sources["infra_repos"] = [f"{GITHUB_ORG}/{r}" for r in sorted(col.infra.extracts)]
+        sources["infra_resources"] = infra_stats.get("infra_resources", 0)
     kb_meta["sources"] = sources
     if meta is None:
         db.add(EaMeta(key="kb", value=kb_meta))
     else:
         meta.value = kb_meta
 
-    return {**ap.stats, "superseded": superseded}
+    return {**ap.stats, **infra_stats, "superseded": superseded}
 
 
 # ---- entry point -----------------------------------------------------------------------
@@ -932,6 +1002,7 @@ async def execute_run(
             "data_contracts": (col.contracts or {}).get("files", 0),
             "data_contracts_read": col.contracts_fresh is not None,
             "datasets": len((col.contracts or {}).get("nodes") or {}),
+            "infra_repos_read": len(col.infra.fresh),
             "github_rate_remaining": github.rate_limit_remaining(),
             **result,
         }
@@ -942,9 +1013,20 @@ async def execute_run(
             "data_contracts": col.contracts_fresh[1] if col.contracts_fresh else None,
             "data_contracts_error": col.contracts_error or col.contracts_skipped,
             "data_contracts_invalid": (col.contracts or {}).get("errors") or {},
+            "infra": {k: v[1] for k, v in col.infra.fresh.items()},
+            "infra_errors": {**col.infra.skipped, **col.infra.errors},
+            "infra_invalid_files": {
+                repo: ext.get("errors") or {}
+                for repo, ext in col.infra.extracts.items()
+                if ext.get("errors")
+            },
         }
         partial = bool(
-            repo_failures or col.confluence_error or confluence is None or col.contracts_error
+            repo_failures
+            or col.confluence_error
+            or confluence is None
+            or col.contracts_error
+            or col.infra.errors
         )
         run.status = "partial" if partial else "success"
         run.error = col.confluence_error or col.contracts_error

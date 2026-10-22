@@ -142,7 +142,7 @@ Task Celery `app.tasks.sync_ea.sync_ea`, registrato in `beat_schedule`: **una vo
 
 | Passo | Cosa fa | Fonte |
 |---|---|---|
-| 1. Censimento | Elenca i repo dell'org e applica le regole di perimetro (attivi, non fork, prefissi configurati). Repo nuovi → `ea_change add` strutturale; repo archiviati → `ea_change update` strutturale | GitHub API (`github_token`) |
+| 1. Censimento | Elenca i repo dell'org e applica le regole di perimetro (attivi, non fork, nome che contiene `pagopa`). Repo nuovi → `ea_change add` strutturale; repo archiviati → `ea_change update` strutturale | GitHub API (`github_token`) |
 | 2. Delta | Per ogni repo confronta `head_sha` con `ea_repo_snapshots`; se è uguale lo salta. In una notte normale si rileggono pochi repo | GitHub API |
 | 3. Estrazione | Albero del repo (`git/trees?recursive=1`) e lettura dei soli file di metadati, con la logica di `extract.py` portata in `app/services/ea/extract.py` come funzioni pure testate | GitHub contents/raw |
 | 4. Contesto | Domini e API da `pagopa-infra`; suite, `nrt-suites.json` e workflow TAS da `pagopa-platform-integration-test`; feature BDD del Nodo | GitHub |
@@ -152,7 +152,7 @@ Task Celery `app.tasks.sync_ea.sync_ea`, registrato in `beat_schedule`: **una vo
 | 8. Applicazione | Metadati, segnali QA osservati e link da regola si applicano subito (`auto_applied`); le modifiche strutturali vanno in coda (`pending`) | – |
 | 9. Notifica | Se ci sono modifiche in coda, avviso tramite il sistema di notifiche esistente | `notification_rules` |
 
-**Classificazione dei repo nuovi.** Un repo è candidato se ha un prefisso noto (`pagopa-`, `arc-`, `emd-`, `rtp-`…), non è fork né archiviato, ha avuto push nell'ultimo anno e il suo CODEOWNERS cita almeno un team che possiede già un componente della mappa. La sync propone il prodotto in base al prefisso del nome condiviso con i componenti noti, verificato con il namespace Helm / dominio `.identity`. Chi revisiona conferma o sceglie un altro prodotto, nome e tipo. Le regole sono in `app/services/ea/sync/rules.py`, portate dagli script di discovery (renderle editabili da UI è un'evoluzione possibile).
+**Classificazione dei repo nuovi.** Un repo è candidato se il suo nome contiene `pagopa` (perimetro deciso il 22/10/2026: prima valevano anche i prefissi `arc-`, `emd-`, `rtp-`, `qe_`…; i componenti già in mappa fuori perimetro vengono proposti per l'archiviazione, insieme ai prodotti che restano vuoti), non è fork né archiviato, ha avuto push nell'ultimo anno e il suo CODEOWNERS cita almeno un team che possiede già un componente della mappa. La sync propone il prodotto in base al prefisso del nome condiviso con i componenti noti, verificato con il namespace Helm / dominio `.identity`. Chi revisiona conferma o sceglie un altro prodotto, nome e tipo. Le regole sono in `app/services/ea/sync/rules.py`, portate dagli script di discovery (renderle editabili da UI è un'evoluzione possibile).
 
 **Costo.** Per repo: una chiamata REST per l'albero e una GraphQL per tutti i file di metadati. Primo giro ≈ 190 + 190 chiamate; a regime si rileggono solo i repo con push successivi all'ultimo snapshot, e se lo SHA dell'albero è invariato si riusa l'estrazione salvata. Margine ampio rispetto alle 5.000 richieste/ora.
 

@@ -465,3 +465,52 @@ async def test_doc_links_can_change_while_keeping_the_same_urls(db: AsyncSession
         "https://pagopa.atlassian.net/wiki/x/one",
         "https://pagopa.atlassian.net/wiki/x/two",
     ]
+
+
+async def test_components_outside_the_perimeter_are_proposed_for_archiving() -> None:
+    async with TestSession() as session:
+        await _wipe(session)
+        kb = _kb()
+        kb["nodes"].append(
+            {
+                "id": "prod:arc",
+                "type": "product",
+                "parent": "area:core",
+                "name": "ARC",
+                "desc": "",
+                "domain": "arc",
+                "conf": [],
+            }
+        )
+        kb["nodes"].append(_comp("arc-be", "prod:arc", ["team-core"]))
+        kb["blueprint"] = {
+            "functions": [{"id": "fn-a", "name": "Funzione"}],
+            "processes": [
+                {"id": "pr-arc", "name": "Solo ARC", "fn": "fn-a", "prod": ["arc"]},
+                {"id": "pr-mix", "name": "ARC e GPD", "fn": "fn-a", "prod": ["arc", "gpd"]},
+            ],
+        }
+        await import_kb(session, kb)
+        gh = FakeGitHub()
+        gh.listing.append(_repo("arc-be"))
+        gh.listing.append(_repo("arc-new-thing"))  # not a candidate any more
+        await _sync(session, gh)
+        open_ = await _open(session)
+        assert open_[("node", "update", "arc-be")].after["reason"].startswith("Fuori dal perimetro")
+        assert ("node", "update", "prod:arc") in open_  # left empty
+        assert ("node", "add", "arc-new-thing") not in open_
+        assert ("node", "update", GPD) not in open_
+
+        await review.decide(
+            session, open_[("node", "update", "arc-be")].id, approve=True, actor="qa"
+        )
+        await review.decide(
+            session, open_[("node", "update", "prod:arc")].id, approve=True, actor="qa"
+        )
+        await session.commit()
+        ids = {n["id"] for n in (await build_kb(session))["nodes"]}
+        assert "arc-be" not in ids and "prod:arc" not in ids
+        # a process that only used the archived product leaves the blueprint, the others stay
+        procs = {p["id"]: p["prod"] for p in (await build_kb(session))["blueprint"]["processes"]}
+        assert procs == {"pr-mix": ["gpd"]}
+        await _wipe(session)

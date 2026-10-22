@@ -56,8 +56,13 @@ EDGE_ORIGINS = ("helm", "infra_rule", "curated", "manual", "contract", "contract
 EDGE_STATUSES = ("proposed", "active", "verified", "rejected", "removed")
 VISIBLE_EDGE_STATUSES = ("active", "verified")
 
-CHANGE_ENTITIES = ("node", "edge", "qa", "doc")
+CHANGE_ENTITIES = ("node", "edge", "qa", "doc", "infra")
 CHANGE_OPS = ("add", "update", "remove")
+
+# Infrastructure view (docs/ea-map/DESIGN-infra.md)
+INFRA_STATUSES = ("active", "removed")
+INFRA_LINK_KINDS = ("ref", "monitors", "notifies")
+INFRA_LINK_ORIGINS = ("explicit", "inferred")
 CHANGE_STATUSES = ("pending", "approved", "rejected", "auto_applied", "superseded", "conflict")
 
 
@@ -279,6 +284,74 @@ class EaSyncStatus(Base):
     last_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ea_sync_runs.id", ondelete="SET NULL"), nullable=True
     )
+
+
+class EaInfraResource(Base):
+    """A Terraform resource of the payments platform (one per stack and address).
+
+    Written by the EA sync from the infra repositories; only ``ea_node_id`` is a human
+    decision (an approved link to a component or blueprint node of the map).
+    """
+
+    __tablename__ = "ea_infra_resources"
+    __table_args__ = (
+        CheckConstraint(_in("status", INFRA_STATUSES), name="ck_ea_infra_resources_status"),
+        Index("ix_ea_infra_resources_parent_id", "parent_id"),
+        Index("ix_ea_infra_resources_ea_node_id", "ea_node_id"),
+        Index("ix_ea_infra_resources_blueprint_id", "blueprint_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(400), primary_key=True)
+    repo: Mapped[str] = mapped_column(String(200), nullable=False)
+    stack: Mapped[str] = mapped_column(String(300), nullable=False)
+    address: Mapped[str] = mapped_column(String(300), nullable=False)
+    tf_kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    tf_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    ltype: Mapped[str] = mapped_column(String(40), nullable=False)
+    vendor: Mapped[str] = mapped_column(String(20), nullable=False)
+    label: Mapped[str] = mapped_column(String(300), nullable=False)
+    file: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    envs: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
+    names: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    attrs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    parent_id: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    blueprint_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ea_node_id: Mapped[str | None] = mapped_column(
+        String(200), ForeignKey("ea_nodes.id", ondelete="SET NULL"), nullable=True
+    )
+    external: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class EaInfraLink(Base):
+    """An arrow between two infrastructure resources: explicit (a Terraform reference) or
+    inferred (e.g. a ``data`` block matched by name in another stack)."""
+
+    __tablename__ = "ea_infra_links"
+    __table_args__ = (
+        UniqueConstraint("from_id", "to_id", "kind", name="uq_ea_infra_links_from_to_kind"),
+        CheckConstraint(_in("kind", INFRA_LINK_KINDS), name="ck_ea_infra_links_kind"),
+        CheckConstraint(_in("origin", INFRA_LINK_ORIGINS), name="ck_ea_infra_links_origin"),
+        Index("ix_ea_infra_links_to_id", "to_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    from_id: Mapped[str] = mapped_column(
+        String(400), ForeignKey("ea_infra_resources.id", ondelete="CASCADE"), nullable=False
+    )
+    to_id: Mapped[str] = mapped_column(
+        String(400), ForeignKey("ea_infra_resources.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    origin: Mapped[str] = mapped_column(String(20), nullable=False)
+    envs: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
 
 class EaEditLog(Base):
