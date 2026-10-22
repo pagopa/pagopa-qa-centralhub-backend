@@ -68,7 +68,9 @@ def _label(res: dict[str, Any]) -> str:
     for env in ("prod", "uat", "dev"):
         if names.get(env):
             return str(names[env])
-    return str(res["addr"]).rsplit(".", 1)[-1]
+    addr = str(res["addr"])
+    key = re.search(r'\["([^"]+)"\]$', addr)  # an instance of a for_each block: its key
+    return key.group(1) if key else addr.rsplit(".", 1)[-1]
 
 
 _ENV_PREFIX = re.compile(r"^pagopa-[dup]-(?:(?:weu|itn|neu)-)?")

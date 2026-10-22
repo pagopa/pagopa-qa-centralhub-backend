@@ -22,9 +22,11 @@ def resource_out(res: EaInfraResource, env: str | None = None) -> dict[str, Any]
     attrs = dict(res.attrs or {})
     location = attrs.pop("location", None) or {}
     names = res.names or {}
+    hosts = attrs.get("hostnames") or []
     return {
         "id": res.id,
-        "label": (names.get(env) if env else None) or res.label,
+        # a web frontend is known by its public address, the rest by its Azure name
+        "label": (hosts[0] if hosts else None) or (names.get(env) if env else None) or res.label,
         "ltype": res.ltype,
         "vendor": res.vendor,
         "tf_type": res.tf_type,

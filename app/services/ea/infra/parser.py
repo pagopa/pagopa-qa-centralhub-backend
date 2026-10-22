@@ -52,7 +52,7 @@ _GUID = re.compile(r"\b[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\b")
 _IP = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?\b")
 MASK = "•••"
 # Bumped when the extract changes shape or content: snapshots of an older parser are re-read.
-PARSER_VERSION = 4
+PARSER_VERSION = 5
 _MAX_DEPTH = 12
 
 
