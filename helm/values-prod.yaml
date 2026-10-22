@@ -92,6 +92,8 @@ microservice-chart:
     PSP_FEE_JSON_URL: "https://pagopa-afm-p-st-fee.s3.eu-central-1.amazonaws.com/output_elenco_servizi.json"
     OTEL_EXPORTER_OTLP_ENDPOINT: ""
     OTEL_SERVICE_NAME: "qa-centralhub-backend"
+    GEMINI_MODEL: "gemini-3.5-flash"
+    GEMINI_FALLBACK_MODELS: "gemini-3.8-flash,gemini-3.7-flash"
 
   # TODO: confirm PROD Key Vault name and that the secrets are populated there.
   envSecret:
@@ -101,7 +103,7 @@ microservice-chart:
     ENCRYPTION_KEY: "qa-centralhub-encryption-key"
     GITHUB_TOKEN: "qa-centralhub-github-token"
     JIRA_API_TOKEN: "qa-centralhub-jira-api-token"
-
+    GEMINI_API_KEY: "qa-centralhub-gemini-api-key"
   keyvault:
     name: "pagopa-p-itn-qa-kv"   # TODO confirm
     tenantId: "7788edaf-0346-4068-9d79-c868aed15b3d"
