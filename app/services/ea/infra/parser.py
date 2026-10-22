@@ -14,6 +14,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from posixpath import dirname
 from typing import Any
+from urllib.parse import urlparse
 
 import hcl2
 
@@ -80,7 +81,9 @@ def module_library(source: str) -> str:
     tail = s.split("://", 1)[-1]
     if "//" in tail:
         return tail.rsplit("//", 1)[1]
-    if s.startswith("git::") or "github.com" in s:
+    # a remote module: compare the host exactly, never as a substring of the source
+    host = urlparse(s.removeprefix("git::")).hostname or s.split("/", 1)[0]
+    if s.startswith("git::") or host == "github.com":
         return s.rstrip("/").rsplit("/", 1)[1].removesuffix(".git")
     return s
 

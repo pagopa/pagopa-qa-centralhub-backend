@@ -634,3 +634,20 @@ module "pdf" {
         ("pagopa-pdf-engine", "image"),
         ("pagopa-qa-centralhub-frontend", "image"),
     ]
+
+
+def test_module_library_recognises_local_and_remote_modules() -> None:
+    from app.services.ea.infra.parser import module_library
+
+    assert module_library("./.terraform/modules/__v4__//kubernetes_cluster") == "kubernetes_cluster"
+    assert module_library("./.terraform/modules/__v4__/IDH/subnet") == "IDH/subnet"
+    assert module_library("git::https://github.com/pagopa/terraform-azurerm-v4.git?ref=v1") == (
+        "terraform-azurerm-v4"
+    )
+    assert module_library("github.com/pagopa/terraform-aws-ses") == "terraform-aws-ses"
+    assert module_library("git::https://github.com/pagopa/x.git//storage_account?ref=v1") == (
+        "storage_account"
+    )
+    # a source that only mentions github.com in its path is not a GitHub module
+    assert module_library("../../evil.com/github.com") == "../../evil.com/github.com"
+    assert module_library("../../tag_config") == "../../tag_config"
