@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from app.deps import DbDep
 from app.models.test_metrics import TestSuite, TestExecution, TestRun, FlakyScenario
 from app.schemas.test_metrics import NrtDetailsObject, TestExecutionCreate, TestExecutionOut, FlakyScenarioIn, FlakyScenarioOut
-from app.schemas.test_metrics import TestSuiteOut, TestSuiteCreate, TestRunCreate, TestRunOut, NrtListObject, UpdateNrtsObject
+from app.schemas.test_metrics import TestSuiteOut, TestSuiteCreate, TestRunCreate, TestRunOut, NrtListObject, UpdateNrtsObject, NrtWithLatestRunOut
 from app.services import test_metrics as test_metrics_svc
 from app.schemas.common import PaginatedResponse
 
@@ -209,3 +209,10 @@ async def get_flaky_scenarios(
         )
     return scenarios
 
+@router.get("/nrts-suites", response_model=list[NrtWithLatestRunOut])
+async def list_suites(db: DbDep) -> list[NrtWithLatestRunOut]:
+    pairs = await test_metrics_svc.list_suites_with_latest_run(db)
+    return [
+        NrtWithLatestRunOut(suite=suite, latest_run=run, trend=trend)
+        for suite, run, trend in pairs
+    ]
