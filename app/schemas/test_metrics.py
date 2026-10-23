@@ -180,5 +180,9 @@ class FlakyScenarioOut(BaseModel):
     inserted_at: datetime | None = None
     is_flaky: bool 
 
+class NrtWithLatestRunOut(BaseModel):
+    suite: TestSuiteOut
+    latest_run: TestRunOut | None
+    trend: list[float]  # pass rate 0.0–1.0, ultimi N run, ordine cronologico
 
     
