@@ -20,6 +20,7 @@ from app.models.ea import (  # noqa: F401
     EaSyncRun,
     EaSyncStatus,
 )
+from app.models.ea_assistant import EaAssistantSettings  # noqa: F401
 from app.models.feature_visibility import FeatureVisibility  # noqa: F401
 from app.models.gpd_position import GpdPositionSnapshot, GpdPositionSyncStatus  # noqa: F401
 from app.models.integration import Integration

@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import AsyncClient
 
+from app.schemas.ea_assistant import AssistantConfig
+
 _KB = {"meta": {}, "nodes": [], "edges": [], "blueprint": {}}
 
 
@@ -93,7 +95,10 @@ async def test_release_impact_returns_the_analysis(client: AsyncClient) -> None:
 
 @pytest.mark.anyio
 async def test_assistant_unconfigured_returns_503(client: AsyncClient) -> None:
-    with patch("app.api.v1.ea.settings.gemini_api_key", ""):
+    with (
+        patch("app.api.v1.ea.settings.gemini_api_key", ""),
+        patch("app.services.ea.assistant_settings.get_config", return_value=AssistantConfig()),
+    ):
         response = await client.post(
             "/api/v1/ea/assistant/chat", json={"messages": [{"role": "user", "content": "ciao"}]}
         )
@@ -111,7 +116,9 @@ async def test_assistant_chat_answers(client: AsyncClient) -> None:
             return a.ModelTurn(text="Ecco [[prod:gpd]].")
 
     with (
-        patch("app.api.v1.ea._chat_model", return_value=OneShot()),
+        patch("app.services.ea.assistant_settings.create_model", return_value=OneShot()),
+        patch("app.services.ea.assistant_settings.get_config", return_value=AssistantConfig()),
+        patch("app.api.v1.ea.settings.gemini_api_key", "test-key"),
         patch("app.api.v1.ea._github", return_value=None),
         patch("app.services.ea.kb.build_kb", new_callable=AsyncMock, return_value=kb()),
     ):

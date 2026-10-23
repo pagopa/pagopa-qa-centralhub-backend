@@ -39,7 +39,10 @@ class Settings(BaseSettings):
     # and subscription ids are never ingested, see docs/ea-map/DESIGN-infra.md §4)
     ea_infra_include_network_details: bool = False
 
-    # EA Map assistant (Gemini, function calling)
+    # Bootstrap defaults; runtime choices are stored in ea_assistant_settings.
+    ea_assistant_provider: str = "gemini"
+    groq_api_key: str = ""
+    groq_model: str = "openai/gpt-oss-120b"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
     # comma-separated models tried, in order, when the main one stays overloaded

@@ -192,16 +192,43 @@ Ogni legame dichiara `origin` (`helm`, `infra_rule`, `curated`, `manual`, `contr
 Due funzioni di sola lettura calcolate sul grafo che la mappa mostra (`app/services/ea/graph_index.py`):
 
 - `POST /impact/release` con `{"url": "<PR o confronto GitHub>"}` oppure `{"repo", "base", "head"}`: legge i file cambiati (`GITHUB_TOKEN`), li classifica (contratto API, dati, configurazione, codice, test, pipeline, documentazione), risale a chi chiama il componente, ai dati a valle e alle dipendenze, assegna un rischio a ciascun elemento e propone le suite da eseguire, le lacune di test e i processi SANP coinvolti (`app/services/ea/release_impact.py`).
-- `POST /assistant/chat` con la conversazione e il contesto della vista: un assistente Gemini con function calling che usa solo strumenti di sola lettura sul grafo (ricerca, scheda, impatto, lacune QA, impatto di una PR, evidenziazione) e cita i nodi come `[[id]]` (`app/services/ea/assistant.py`). Richiede `GEMINI_API_KEY` (modello in `GEMINI_MODEL`, default `gemini-3.8-flash`; se è sovraccarico (503) riprova 2 volte, se ha esaurito la quota (429) passa subito ai modelli in `GEMINI_FALLBACK_MODELS`, separati da virgola); senza chiave risponde 503.
+- `POST /assistant/chat` con la conversazione e il contesto della vista: Pagoda usa Gemini o Groq con function calling e solo strumenti di lettura sul grafo (ricerca, scheda, impatto, lacune QA, impatto di una PR, evidenziazione). Cita i nodi come `[[id]]`. Il provider si sceglie a runtime nei Settings Pagoda; senza la sua chiave sul backend risponde 503. La tab Impatto non usa un LLM e non dipende da questa scelta.
+- `GET /assistant/settings` e `PUT /assistant/settings`: configurazione globale per ambiente, persistita nella tabella singleton `ea_assistant_settings` (migration **0024**). Campi: `provider` (`gemini` o `groq`), `gemini_model`, `groq_model`, `fallback_enabled`. Il GET restituisce anche `configured`, con due booleani sulla presenza delle chiavi, mai le chiavi stesse. Il PUT rifiuta campi extra, modelli vuoti e provider attivi senza secret. Le richieste successive rileggono la configurazione dal DB; quelle in corso non cambiano motore.
+
+**Configurazione iniziale e deploy**
+
+- Senza una riga salvata nei Settings si usano `EA_ASSISTANT_PROVIDER` (default `gemini`), `GEMINI_MODEL` (default `gemini-3.8-flash`) e `GROQ_MODEL` (default `openai/gpt-oss-120b`). Il fallback tra fornitori parte sempre disattivato. Dopo il primo salvataggio, provider e modelli persistiti prevalgono sui default d'ambiente. Se il provider ritira un modello, aggiornare il suo identificativo nei Settings senza rilascio; `llama-3.3-70b-versatile` e stato ritirato per gli account free/developer il 16 agosto 2026 (https://console.groq.com/docs/deprecations).
+- `GEMINI_API_KEY` e `GROQ_API_KEY` restano nei secret del backend, mai nel database o nel frontend. Nei valori Helm DEV/UAT/PROD Groq usa il secret Key Vault **`qa-centralhub-groq-api-key`**: va creato in ciascun ambiente prima di distribuire quei valori. L'aggiunta o rotazione di una chiave richiede il normale aggiornamento dei secret/processi; il cambio provider/modello no.
+- Applicare la migration 0024 prima di avviare questa versione. Nessun dato di configurazione viene creato durante una semplice lettura.
+- Il frontend limita la pagina ai superadmin, ma **le API non implementano ancora autenticazione/autorizzazione backend**, rinviate esplicitamente per questo lavoro. L'SSO Google del frontend non protegge le chiamate dirette al backend: non esporre questi endpoint a reti non fidate.
+
+**Fallback opzionale**
+
+Un 429 di Groq indica un limite di richieste o token: se il provider invia `Retry-After`,
+la risposta di errore mostra il tempo di attesa in secondi, senza tentativi immediati.
+Le quote esatte dipendono dall'organizzazione: https://console.groq.com/settings/limits.
+Una singola domanda di Pagoda puo richiedere piu chiamate al modello, fino al limite di 8 passi,
+e ogni passo reinvia prompt, strumenti e cronologia. Un 503/504 Gemini indica invece
+indisponibilita o timeout, non prova che il modello non esista o sia utilizzabile in quel momento.
+
+Groq riceve inoltre istruzioni specifiche per mantenere testo descrittivo e riferimenti
+cliccabili insieme: `[[id]]` sostituisce solo il nome, non la spiegazione della relazione.
+Una dipendenza e descritta come impatto potenziale, non come guasto certo.
+Il prompt include esempi di riferimenti `[[id]]` corretti
+e formati da evitare, a ogni passo del ciclo. Gli esempi non sono dati del grafo:
+gli ID devono provenire dagli strumenti. Questo rafforza il prompt, ma non garantisce
+la conformita del modello; i pulsanti degli elementi evidenziati restano una protezione UI.
+
+Se abilitato, dopo errori temporanei (429, 500, 502, 503, 504 o problemi di trasporto) e tentativi limitati, si prova una sola volta l'altro provider. Richiede entrambe le chiavi. La nuova analisi riparte dai messaggi originali e dal contesto: non si trasferiscono chiamate interne o firme Gemini, né risultati parziali della prima esecuzione. Non si effettua fallback per errori di autenticazione/configurazione o risposte Groq non valide. Domande e risultati degli strumenti possono quindi essere inviati a entrambi i fornitori: verificare le policy aziendali prima dell'attivazione. Gemini mantiene anche il fallback fra modelli in `GEMINI_FALLBACK_MODELS`; questo avviene prima dell'eventuale passaggio a Groq.
 
 Come risponde l'assistente (`chat()` in `assistant.py`):
 
 1. il frontend invia gli ultimi messaggi (al massimo 12, `MAX_HISTORY`) e il contesto (`view`, `node_id`), che diventa una riga in coda al prompt di sistema;
 2. il prompt di sistema fissa le regole: usare solo i dati degli strumenti, cercare l'id con `cerca_nodi` prima di parlare di un elemento, citare i nodi come `[[id]]`, chiamare `evidenzia` prima della risposta finale;
 3. ciclo modello ↔ strumenti, al massimo 8 passi (`MAX_STEPS`): il modello restituisce una o più chiamate di funzione, il backend le esegue sul `GraphIndex` in memoria e rimanda il risultato in JSON; quando il modello non chiede più strumenti, il suo testo è la risposta;
-4. controllo finale: ogni `[[id]]` citato viene cercato nel grafo; se esiste diventa un collegamento e si aggiunge ai nodi evidenziati, se non esiste resta testo semplice. La risposta contiene `answer`, `highlight` (al massimo 40 id), `labels` e `steps` (i passaggi mostrati sotto la risposta).
+4. controllo finale: ogni `[[id]]` citato viene cercato nel grafo; se esiste diventa un collegamento e si aggiunge ai nodi evidenziati, se non esiste resta testo semplice. La risposta contiene `answer`, `highlight` (al massimo 40 id), `labels`, `steps`, `provider`, `model` effettivo e `fallback_used`.
 
-Il modello non ha accesso al database e non scrive nulla: vede solo i risultati degli strumenti. Non c'è memoria tra una conversazione e l'altra. Con Gemini i risultati delle funzioni sono inviati con ruolo `user` e il contenuto originale del modello viene ripassato per conservare le `thought_signature`; il modello che ha risposto per primo resta quello della conversazione. Il formato della conversazione è neutro (`ChatModel`), quindi il provider si può sostituire implementando `step()`.
+Il modello non ha accesso al database e non scrive nulla: vede solo i risultati degli strumenti. Non c'è memoria tra una conversazione e l'altra. Con Gemini i risultati delle funzioni sono inviati con ruolo `user` e il contenuto originale del modello viene ripassato per conservare le `thought_signature`; il modello che ha risposto per primo resta quello dei passi successivi della singola richiesta. Groq usa l'API Chat Completions compatibile OpenAI via `httpx`, con schemi JSON normalizzati e `tool_call_id` per ogni risultato, anche con chiamate multiple nello stesso turno. Il formato del ciclo resta neutro (`ChatModel`).
 
 #### Live: esiti dei test sulla mappa
 
