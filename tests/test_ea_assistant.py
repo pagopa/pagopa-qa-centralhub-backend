@@ -234,3 +234,18 @@ async def test_gemini_does_not_retry_client_errors() -> None:
     except a.AssistantUnavailableError as exc:
         assert "404" in str(exc)
     assert fake.calls == ["main"] and slept == []
+
+
+async def test_gemini_transport_failure_is_eligible_for_provider_fallback() -> None:
+    from unittest.mock import AsyncMock
+
+    import httpx
+
+    model, _, _ = _gemini({})
+    model._client.aio.models.generate_content = AsyncMock(side_effect=httpx.ReadTimeout("timeout"))
+    try:
+        await model._generate([], None)
+    except a.AssistantUnavailableError as exc:
+        assert exc.retryable
+    else:
+        raise AssertionError("expected AssistantUnavailableError")

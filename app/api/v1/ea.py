@@ -41,7 +41,9 @@ from app.schemas.ea import (
     EaSyncRunOut,
     EaSyncStatusOut,
 )
+from app.schemas.ea_assistant import AssistantConfig, AssistantSettingsOut
 from app.services.ea import assistant as assistant_svc
+from app.services.ea import assistant_settings as assistant_settings_svc
 from app.services.ea import edit as edit_svc
 from app.services.ea import flows as flows_svc
 from app.services.ea import impact as impact_svc
@@ -136,9 +138,25 @@ def _github() -> GitHubClient | None:
     return GitHubClient(settings.github_token) if settings.github_token else None
 
 
-def _chat_model() -> assistant_svc.ChatModel:
-    fallbacks = [m.strip() for m in settings.gemini_fallback_models.split(",") if m.strip()]
-    return assistant_svc.GeminiModel(settings.gemini_api_key, settings.gemini_model, fallbacks)
+@router.get(
+    "/assistant/settings", response_model=AssistantSettingsOut,
+)
+async def get_assistant_settings(db: DbDep) -> AssistantSettingsOut:
+    return assistant_settings_svc.public_settings(await assistant_settings_svc.get_config(db))
+
+
+@router.put(
+    "/assistant/settings", response_model=AssistantSettingsOut,
+)
+async def update_assistant_settings(body: AssistantConfig, db: DbDep) -> AssistantSettingsOut:
+    try:
+        config = await assistant_settings_svc.save_config(db, body)
+    except ValueError as exc:
+        logger.warning("ea_assistant_settings_rejected", provider=body.provider)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    return assistant_settings_svc.public_settings(config)
 
 
 @router.post("/impact/release", response_model=EaReleaseImpactOut)
@@ -172,19 +190,21 @@ async def release_impact(body: EaReleaseImpactRequest, db: DbDep) -> EaReleaseIm
 
 @router.post("/assistant/chat", response_model=EaAssistantOut)
 async def assistant_chat(body: EaAssistantRequest, db: DbDep) -> EaAssistantOut:
-    try:
-        model = _chat_model()
-    except assistant_svc.AssistantUnavailableError as exc:
+    config = await assistant_settings_svc.get_config(db)
+    if not assistant_settings_svc.public_settings(config).configured[config.provider]:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
-        ) from exc
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"Assistente non configurato: manca {config.provider.upper()}_API_KEY sul backend"
+            ),
+        )
     gh = _github()
     started = monotonic()
     try:
         graph = GraphIndex(await kb_svc.build_kb(db))
-        result = await assistant_svc.chat(
+        result = await assistant_settings_svc.answer(
             graph,
-            model,
+            config,
             [m.model_dump() for m in body.messages],
             changes=release_svc.GitHubChanges(gh) if gh else None,
             context=body.context,
@@ -196,6 +216,9 @@ async def assistant_chat(body: EaAssistantRequest, db: DbDep) -> EaAssistantOut:
             await gh.aclose()
     logger.info(
         "ea_assistant_chat",
+        provider=result["provider"],
+        model=result["model"],
+        fallback_used=result["fallback_used"],
         steps=[s["tool"] for s in result["steps"]],
         highlight=len(result["highlight"]),
         duration_ms=round((monotonic() - started) * 1000),

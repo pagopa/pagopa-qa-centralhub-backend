@@ -102,6 +102,8 @@ microservice-chart:
     SUPERSET_GUEST_FIRST_NAME: "service"
     SUPERSET_GUEST_LAST_NAME: "service"
     GEMINI_MODEL: "gemini-3.5-flash"
+    EA_ASSISTANT_PROVIDER: "gemini"
+    GROQ_MODEL: "openai/gpt-oss-120b"
     GEMINI_FALLBACK_MODELS: "gemini-3.8-flash,gemini-3.7-flash"
     
 
@@ -117,6 +119,8 @@ microservice-chart:
     JIRA_API_TOKEN: "qa-centralhub-jira-api-token"
     SUPERSET_PASSWORD: "qa-superset-password"
     GEMINI_API_KEY: "qa-centralhub-gemini-api-key"
+    # Provision this secret in Key Vault before deploying this configuration.
+    GROQ_API_KEY: "qa-centralhub-groq-api-key"
    
 
 

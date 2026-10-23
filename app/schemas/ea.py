@@ -242,6 +242,9 @@ class EaAssistantOut(BaseModel):
     highlight: list[str]
     labels: dict[str, str]
     steps: list[dict[str, str]]
+    provider: str
+    model: str
+    fallback_used: bool
 
 
 class EaLiveOut(BaseModel):

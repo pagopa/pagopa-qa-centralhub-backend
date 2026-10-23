@@ -7,7 +7,7 @@ The tools also let it choose which nodes to highlight on the map. Node reference
 the answer are written as ``[[node-id]]`` and rendered by the frontend as clickable chips.
 
 The model sits behind :class:`ChatModel`, so tests use a scripted fake; production uses
-Gemini (``GEMINI_API_KEY``) with function calling.
+Gemini or Groq with function calling.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+import httpx
 import structlog
 
 from app.services.ea.graph_index import GraphIndex, Hop
@@ -56,6 +57,7 @@ Niente tabelle, niente titoli."""
 class ToolCall:
     name: str
     args: dict[str, Any]
+    id: str = ""
 
 
 @dataclass
@@ -75,6 +77,7 @@ class Msg:
     tool_name: str = ""
     tool_result: dict[str, Any] | None = None
     raw: Any = None
+    tool_call_id: str = ""
 
 
 class ChatModel(Protocol):
@@ -85,6 +88,10 @@ class ChatModel(Protocol):
 
 class AssistantUnavailableError(RuntimeError):
     """The assistant is not configured (no API key) or the model failed."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 # ── tools ────────────────────────────────────────────────────────────────────
@@ -363,7 +370,9 @@ async def chat(
         history.append(Msg(role="model", text=turn.text, calls=turn.calls, raw=turn.raw))
         for call in turn.calls:
             result = await tools.run(call)
-            history.append(Msg(role="tool", tool_name=call.name, tool_result=result))
+            history.append(
+                Msg(role="tool", tool_name=call.name, tool_result=result, tool_call_id=call.id)
+            )
     else:
         answer = "Non sono riuscito a completare l’analisi in pochi passaggi: prova a riformulare la domanda in modo più specifico."
 
@@ -387,7 +396,7 @@ class GeminiModel:
     the loop above runs the tools, so every call is visible and bounded."""
 
     #: HTTP codes worth retrying: rate limit and temporary overload of the model
-    RETRYABLE = frozenset({429, 500, 503, 504})
+    RETRYABLE = frozenset({429, 500, 502, 503, 504})
     DELAYS = (1.0, 3.0)
 
     def __init__(self, api_key: str, model: str, fallbacks: list[str] | None = None) -> None:
@@ -396,12 +405,17 @@ class GeminiModel:
                 "Assistente non configurato: manca GEMINI_API_KEY sul backend"
             )
         from google import genai  # imported lazily: the dependency is only needed here
+        from google.genai import types
 
-        self._client = genai.Client(api_key=api_key)
+        self._client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=30_000))
         self._model = model
         self._fallbacks = [m for m in (fallbacks or []) if m and m != model]
         self._sleep = asyncio.sleep
         self._current: str | None = None
+
+    @property
+    def model_name(self) -> str:
+        return self._current or self._model
 
     async def _generate(self, contents: list[Any], config: Any) -> Any:
         """One generation with retries on overload, then the fallback models, if any.
@@ -425,8 +439,12 @@ class GeminiModel:
                 except Exception as exc:  # noqa: BLE001 – classified below
                     last = exc
                     code = getattr(exc, "code", None)
-                    if code not in self.RETRYABLE:
-                        raise AssistantUnavailableError(f"Gemini non ha risposto: {exc}") from exc
+                    transport_error = isinstance(exc, (httpx.TransportError, TimeoutError))
+                    if code not in self.RETRYABLE and not transport_error:
+                        logger.warning("ea_assistant_provider_error", provider="gemini", code=code)
+                        raise AssistantUnavailableError(
+                            f"Gemini non ha risposto (codice {code or 'non disponibile'})"
+                        ) from exc
                     if code == 429:
                         break
                     if attempt < len(self.DELAYS):
@@ -436,7 +454,8 @@ class GeminiModel:
                         await self._sleep(self.DELAYS[attempt])
             logger.warning("ea_assistant_model_unavailable", model=model)
         raise AssistantUnavailableError(
-            "Gemini è sovraccarico in questo momento: riprova tra qualche minuto"
+            "Gemini è sovraccarico in questo momento: riprova tra qualche minuto",
+            retryable=True,
         ) from last
 
     @staticmethod
