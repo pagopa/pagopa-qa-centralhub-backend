@@ -151,9 +151,9 @@ Il sync manuale e quello schedulato condividono lo stesso servizio e sono serial
 
 ### EA Map
 
-Mappa di Enterprise Architecture della piattaforma pagoPA (Blueprint, Architettura, Data Lake, Matrice QA, Guida). Il design completo è in `docs/ea-map/DESIGN.md`; la parte Data Lake in `docs/ea-map/DESIGN-data-lake.md`.
+Mappa di Enterprise Architecture della piattaforma pagoPA (Blueprint, Architettura, Data Lake, Infrastruttura, Matrice QA, Guida). Il design completo è in `docs/ea-map/DESIGN.md`; la parte Data Lake in `docs/ea-map/DESIGN-data-lake.md`; la vista Infrastruttura in `docs/ea-map/DESIGN-infra.md`.
 
-I dati vivono nelle tabelle `ea_*` (migrazioni `0019`, `0020` e `0021`). Il primo caricamento importa la knowledge base prodotta dagli script di discovery:
+I dati vivono nelle tabelle `ea_*` (migrazioni `0019`, `0020`, `0021` e `0023`). Il primo caricamento importa la knowledge base prodotta dagli script di discovery:
 
 ```bash
 uv run python -m scripts.ea_import                         # seed in scripts/data/ea_kb_seed.json
@@ -232,6 +232,17 @@ Correzioni manuali sui dataset (`PATCH /nodes/{id}`, conservate dalle sync succe
 Copertura Data Quality (`app/services/ea/dq_overlay.py`): i controlli del DQ Framework (`dq_control_instances`, esclusi gli eliminati) sono collegati ai dataset tramite `table_ref`; i controlli sulle tabelle bronze vanno all'ingestion che le alimenta (stesso nome senza prefisso di livello). `GET /kb` espone per ogni dataset `dq` (controlli) e `dqActive` (attivi); `GET /nodes/{id}` aggiunge `dq` con il riepilogo per dimensione, l'allineamento con i check del contratto e l'elenco dei controlli.
 
 Il `GITHUB_TOKEN` deve poter leggere `pagopa/pdnd-data-contracts`.
+
+#### Infrastruttura
+
+La stessa sync legge il Terraform di `pagopa/pagopa-infra`, `pagopa/pagopa-infra-core` e `pagopa/pagopa-aws-infra` (`INFRA_REPOS` in `app/services/ea/infra/config.py`) e popola `ea_infra_resources` e `ea_infra_links` (`app/services/ea/infra/`):
+
+- `parser.py` legge `.tf` e `env/*/terraform.tfvars` per stack (cartella), classifica ogni `resource`/`module` in un tipo logico (`TYPE_RULES`), valuta per ambiente `var.*`, `local.*`, interpolazioni e `format()` per ricavare il nome Azure e il `count` (es. alert solo prod); i blocchi di contorno (secret, access policy, named value...) sono solo contati;
+- `resolve.py` abbina ogni `data` alla risorsa con stesso tipo Azure e nome nello stesso ambiente, in qualunque stack o repo (anche se creata da un modulo, `MODULE_AZURE_TYPES`): il link risultante è `inferred`; i riferimenti diretti sono `explicit`; `resource_group_name`, `subnet_id`, `namespace`... diventano il contenitore (`parent_id`). Alert → risorsa monitorata (`monitors`) e alert → action group (`notifies`) compongono la catena di monitoring;
+- risorse, link e riepiloghi per repository sono applicati subito; i collegamenti risorsa → nodo della mappa (namespace → `ns-*`, API/Function con nome uguale a un componente) sono proposte in Revisione (entità `infra`); approvate valorizzano `ea_node_id`. Le risorse sparite diventano `removed`; un repo non leggibile tiene l'ultima foto e rende la run `partial`, uno non visibile al token viene saltato;
+- subscription, GUID e IP non sono salvati (i tfvars non si conservano, le stringhe sono mascherate). `EA_INFRA_INCLUDE_NETWORK_DETAILS=true` aggiunge gli address prefix di VNet e subnet: lasciarlo spento finché il backend non verifica il JWT, perché la vista è visibile come il resto della mappa.
+
+Endpoint: `GET /api/v1/ea/infra?env=prod|uat|dev` (risorse, link, alert, action group e canali dell'ambiente), `GET /api/v1/ea/infra/resources/{id}` (dettaglio con link entranti e uscenti); `GET /nodes/{id}` include `infra`, le risorse collegate al nodo.
 
 ### Auth & RBAC
 

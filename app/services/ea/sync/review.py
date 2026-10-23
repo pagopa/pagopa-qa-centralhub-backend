@@ -10,7 +10,15 @@ import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.ea import EaChange, EaDocLink, EaEdge, EaEditLog, EaNode, EaQaSignal
+from app.models.ea import (
+    EaChange,
+    EaDocLink,
+    EaEdge,
+    EaEditLog,
+    EaInfraResource,
+    EaNode,
+    EaQaSignal,
+)
 from app.services.ea.edit import EaEditError
 
 logger = structlog.get_logger(__name__)
@@ -245,6 +253,17 @@ async def _apply(
                 edge.status = "removed"
                 edge.verified_by, edge.verified_at = actor, now
                 return "edge", str(edge.id)
+        if change.entity == "infra" and change.op == "add":
+            # link an infrastructure resource to a node of the map (DESIGN-infra.md §2)
+            after = change.after or {}
+            resource = await db.get(EaInfraResource, str(after.get("resource_id")))
+            node_id = overrides.get("node_id") or after.get("node_id")
+            if resource is None or resource.status != "active":
+                raise EaEditError("La risorsa infrastrutturale non esiste più", 409)
+            if not node_id or await db.get(EaNode, node_id) is None:
+                raise EaEditError("Il nodo della mappa non esiste più", 409)
+            resource.ea_node_id = node_id
+            return "infra", resource.id
         raise EaEditError(f"Proposta non gestita: {change.entity}/{change.op}")
     except Exception:
         logger.exception("_apply failed")
@@ -283,6 +302,8 @@ async def _apply_rejection(
                 edge.confidence = 100
                 edge.verified_by, edge.verified_at = actor, now
             return "edge", str(edge.id) if edge is not None else change.target_id
+        if change.entity == "infra":
+            return "infra", change.target_id
         return "node", change.target_id
     except Exception:
         logger.exception("_apply_rejection failed")

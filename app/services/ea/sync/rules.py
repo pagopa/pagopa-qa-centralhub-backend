@@ -237,20 +237,18 @@ GITHUB_ORG = "pagopa"
 CONFLUENCE_SPACES: tuple[str, ...] = ("I", "PAG", "PPR", "PN5", "PAGTECH", "IQCGJ", "QDP")
 CONFLUENCE_BASE = "https://pagopa.atlassian.net/wiki/spaces"
 
-# A repository of the org becomes a *candidate* component when its name has one of these
-# prefixes, it is not a fork nor archived, it was pushed recently and its CODEOWNERS
-# mention at least one team that already owns a component of the map.
-CANDIDATE_PREFIXES: tuple[str, ...] = (
-    "pagopa-",
-    "arc-",
-    "emd-",
-    "rtp-",
-    "srtp-",
-    "io-pay",
-    "payment",
-    "qe_",
-    "qaops",
-)
+# Perimeter of the map (decided on 22/10/2026): only the repositories whose name contains
+# "pagopa". A repository of the org becomes a *candidate* component when it is in the
+# perimeter, it is not a fork nor archived, it was pushed recently and its CODEOWNERS mention
+# at least one team that already owns a component of the map. Components outside the
+# perimeter are proposed for archiving.
+REPO_PERIMETER = "pagopa"
+
+
+def in_perimeter(repo: str) -> bool:
+    return REPO_PERIMETER in repo.lower()
+
+
 CANDIDATE_MAX_AGE_DAYS = 365
 
 TAS_REPO = "pagopa-platform-integration-test"

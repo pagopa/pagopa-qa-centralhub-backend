@@ -16,6 +16,8 @@ from app.models.ea import (
     EaDocLink,
     EaEdge,
     EaEditLog,
+    EaInfraLink,
+    EaInfraResource,
     EaMeta,
     EaNode,
     EaQaSignal,
@@ -34,6 +36,8 @@ SEED = Path(__file__).resolve().parents[1] / "scripts" / "data" / "ea_kb_seed.js
 
 async def _wipe(session: AsyncSession) -> None:
     for model in (
+        EaInfraLink,
+        EaInfraResource,
         EaEditLog,
         EaChange,
         EaSyncStatus,

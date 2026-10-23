@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # GitHub integration
     github_token: str = ""
 
+    # EA Map, infrastructure view: also store VNet/subnet address prefixes (off: IPs, CIDRs
+    # and subscription ids are never ingested, see docs/ea-map/DESIGN-infra.md §4)
+    ea_infra_include_network_details: bool = False
+
     # EA Map assistant (Gemini, function calling)
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"

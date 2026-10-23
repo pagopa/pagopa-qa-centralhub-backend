@@ -25,6 +25,8 @@ from app.schemas.ea import (
     EaHistoryItem,
     EaImpactItem,
     EaImpactResponse,
+    EaInfraResourceDetail,
+    EaInfraViewOut,
     EaKbResponse,
     EaLiveOut,
     EaNodeCreate,
@@ -48,6 +50,7 @@ from app.services.ea import live as live_svc
 from app.services.ea import release_impact as release_svc
 from app.services.ea.edit import EaEditError
 from app.services.ea.graph_index import GraphIndex
+from app.services.ea.infra import view as infra_view_svc
 from app.services.ea.sync import engine as sync_engine
 from app.services.ea.sync import review as review_svc
 from app.services.ea.sync.sources import GitHubClient
@@ -68,7 +71,28 @@ async def get_node(node_id: str, db: DbDep) -> EaNodeDetail:
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="EA node not found")
     detail["in_"] = detail.pop("in")
+    detail["infra"] = await infra_view_svc.resources_of_node(db, node_id)
     return EaNodeDetail(**detail)
+
+
+@router.get("/infra", response_model=EaInfraViewOut, response_model_by_alias=True)
+async def get_infra(
+    db: DbDep, env: str = Query(default="prod", pattern="^(prod|uat|dev)$")
+) -> EaInfraViewOut:
+    """Infrastructure of one environment, from the Terraform of the platform."""
+    return EaInfraViewOut(**await infra_view_svc.infra_view(db, env))
+
+
+@router.get(
+    "/infra/resources/{resource_id:path}",
+    response_model=EaInfraResourceDetail,
+    response_model_by_alias=True,
+)
+async def get_infra_resource(resource_id: str, db: DbDep) -> EaInfraResourceDetail:
+    detail = await infra_view_svc.resource_detail(db, resource_id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+    return EaInfraResourceDetail(**detail)
 
 
 @router.get("/nodes/{node_id}/impact", response_model=EaImpactResponse)

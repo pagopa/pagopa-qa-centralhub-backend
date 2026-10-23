@@ -45,6 +45,8 @@ class EaNodeDetail(BaseModel):
     out: list[dict[str, Any]]
     in_: list[dict[str, Any]] = Field(alias="in")
     dq: dict[str, Any] | None = None  # datasets: Data Quality coverage (PR3)
+    # infrastructure resources linked to this node (DESIGN-infra.md §6)
+    infra: list[dict[str, Any]] = []
 
     model_config = {"populate_by_name": True}
 
@@ -270,3 +272,92 @@ class EaFlowOut(BaseModel):
     validated: bool
     sanp_url: str | None = None
     source: str
+
+
+# ---- infrastructure view (docs/ea-map/DESIGN-infra.md) ---------------------------------
+
+
+class EaInfraResourceOut(BaseModel):
+    id: str
+    label: str
+    ltype: str
+    vendor: str
+    tf_type: str
+    address: str
+    repo: str
+    stack: str
+    file_url: str | None
+    parent: str | None
+    blueprint: str | None
+    node: str | None
+    external: bool
+    envs: list[str]
+    location: str | None
+    attrs: dict[str, Any]
+
+
+class EaInfraLinkOut(BaseModel):
+    from_: str = Field(alias="from")
+    to: str
+    kind: str
+    origin: str
+    evidence: dict[str, Any]
+
+    model_config = {"populate_by_name": True}
+
+
+class EaInfraAlertOut(BaseModel):
+    id: str
+    label: str
+    severity: int | str | None
+    kind: str | None
+    targets: list[str]
+    action_groups: list[str]
+
+
+class EaInfraActionGroupOut(BaseModel):
+    id: str
+    label: str
+    channels: list[str]
+
+
+class EaInfraDashboardOut(BaseModel):
+    id: str
+    label: str
+
+
+class EaInfraMonitoringOut(BaseModel):
+    alerts: list[EaInfraAlertOut]
+    action_groups: list[EaInfraActionGroupOut]
+    dashboards: list[EaInfraDashboardOut]
+
+
+class EaInfraViewOut(BaseModel):
+    env: str
+    envs: list[str]
+    synced_at: datetime | None
+    resources: list[EaInfraResourceOut]
+    links: list[EaInfraLinkOut]
+    monitoring: EaInfraMonitoringOut
+
+
+class EaInfraLinkSide(BaseModel):
+    id: str
+    label: str
+    ltype: str
+    kind: str
+    origin: str
+    envs: list[str]
+    evidence: dict[str, Any]
+
+
+class EaInfraResourceDetail(EaInfraResourceOut):
+    names: dict[str, str]
+    locations: dict[str, str]
+    status: str
+    node_name: str | None
+    children: int
+    out: list[EaInfraLinkSide]
+    in_: list[EaInfraLinkSide] = Field(alias="in")
+
+    model_config = {"populate_by_name": True}
