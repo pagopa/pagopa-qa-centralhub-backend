@@ -1,14 +1,14 @@
 """Export the FastAPI OpenAPI schema to a file.
 
 Usage:
-    python -m scripts.generate_openapi [--output PATH] [--format json|yaml]
+    uv run --extra dev python -m scripts.generate_openapi [--output PATH] [--format json|yaml]
         [--indent N] [--openapi-version VERSION] [--apim-compatible]
 
 Examples:
-    python -m scripts.generate_openapi
-    python -m scripts.generate_openapi --openapi-version 3.0.3
-    python -m scripts.generate_openapi --apim-compatible
-    python -m scripts.generate_openapi --output docs/openapi.yaml --format yaml
+    uv run --extra dev python -m scripts.generate_openapi
+    uv run --extra dev python -m scripts.generate_openapi --openapi-version 3.0.3
+    uv run --extra dev python -m scripts.generate_openapi --apim-compatible
+    uv run --extra dev python -m scripts.generate_openapi --output docs/openapi.yaml --format yaml
 """
 
 from __future__ import annotations
@@ -150,4 +150,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
