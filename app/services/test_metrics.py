@@ -209,9 +209,12 @@ async def save_or_update_flaky_scenarios(db: AsyncSession, flaky_scenarios: list
             )
             existing_scenario = existing_scenario.scalars().first()
             values = scenario.model_dump(by_alias=False, exclude={"id"})
+            if values["inserted_at"] is None:
+                values.pop("inserted_at")
             if existing_scenario:
                 for key, value in values.items():
                     setattr(existing_scenario, key, value)
+                existing_scenario.inserted_at = datetime.now()
                 processed_scenarios.append(existing_scenario)
             else:
                 logger.info("save_or_update_flaky_scenarios query succeeded with 0 results; inserting scenario", suite_id=str(scenario.suite_id), scenario_name=scenario.scenario_name, test_version=scenario.test_version)
