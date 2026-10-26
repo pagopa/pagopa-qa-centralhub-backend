@@ -22,6 +22,9 @@ from app.schemas.test_metrics import (
 
 logger = structlog.get_logger(__name__)
 
+TREND_WINDOW = 10
+
+
 async def create_test_suite(db: AsyncSession, test_suite: TestSuite):
     try:
         db.add(test_suite)
@@ -206,9 +209,12 @@ async def save_or_update_flaky_scenarios(db: AsyncSession, flaky_scenarios: list
             )
             existing_scenario = existing_scenario.scalars().first()
             values = scenario.model_dump(by_alias=False, exclude={"id"})
+            if values["inserted_at"] is None:
+                values.pop("inserted_at")
             if existing_scenario:
                 for key, value in values.items():
                     setattr(existing_scenario, key, value)
+                existing_scenario.inserted_at = datetime.now()
                 processed_scenarios.append(existing_scenario)
             else:
                 logger.info("save_or_update_flaky_scenarios query succeeded with 0 results; inserting scenario", suite_id=str(scenario.suite_id), scenario_name=scenario.scenario_name, test_version=scenario.test_version)
@@ -222,4 +228,43 @@ async def save_or_update_flaky_scenarios(db: AsyncSession, flaky_scenarios: list
         return processed_scenarios
     except Exception:
         logger.exception("save_or_update_flaky_scenarios failed")
+        raise
+
+
+
+async def list_suites_with_latest_run(
+    db: AsyncSession,
+) -> list[tuple[TestSuite, TestRun | None, list[float]]]:
+    try:
+        suites = list(
+            await db.scalars(
+                select(TestSuite).order_by(
+                    TestSuite.test_object,
+                    TestSuite.test_type,
+                    TestSuite.suite_version,
+                )
+            )
+        )
+        if not suites:
+            logger.info("list_suites_with_latest_run query succeeded with 0 results")
+        result: list[tuple[TestSuite, TestRun | None, list[float]]] = []
+        for suite in suites:
+            rows = list(
+                await db.scalars(
+                    select(TestRun)
+                    .where(TestRun.suite_id == suite.id)
+                    .order_by(TestRun.timestamp_end.desc().nullslast())
+                    .limit(TREND_WINDOW)
+                )
+            )
+            if not rows:
+                logger.info("list_suites_with_latest_run query succeeded with 0 results")
+            latest = rows[0] if rows else None
+            trend: list[float] = []
+            for run in reversed(rows):
+                trend.append(round(run.passed_scenario / run.scenario_qty, 4) if run.scenario_qty and run.scenario_qty > 0 else 0.0)
+            result.append((suite, latest, trend))
+        return result
+    except Exception:
+        logger.exception("list_suites_with_latest_run failed")
         raise
