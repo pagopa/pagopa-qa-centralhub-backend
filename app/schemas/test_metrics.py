@@ -30,8 +30,8 @@ class ScenarioStatusEnum(str, Enum):
     SKIPPED = "SKIPPED"
 
 class RevisionResultEnum(str, Enum):
-    GO = "GO"
-    NO_GO = "NO_GO"
+    OK = "OK"
+    KO = "KO"
     PENDING = "PENDING"
 
 
