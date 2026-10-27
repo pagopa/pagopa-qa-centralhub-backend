@@ -9182,8 +9182,8 @@
       "RevisionResultEnum": {
         "type": "string",
         "enum": [
-          "GO",
-          "NO_GO",
+          "OK",
+          "KO",
           "PENDING"
         ],
         "title": "RevisionResultEnum"
