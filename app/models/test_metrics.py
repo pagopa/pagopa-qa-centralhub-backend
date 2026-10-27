@@ -27,8 +27,8 @@ class ScenarioStatusEnum(enum.Enum):
     SKIPPED = "SKIPPED"
 
 class RevisionResultEnum(enum.Enum):
-    GO = "GO"
-    NO_GO = "NO_GO"
+    OK = "OK"
+    KO = "KO"
     PENDING = "PENDING"
 
 # ==========================================
