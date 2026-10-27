@@ -234,34 +234,46 @@ async def save_or_update_flaky_scenarios(db: AsyncSession, flaky_scenarios: list
 
 async def list_suites_with_latest_run(
     db: AsyncSession,
+    origin: str | None = None,
 ) -> list[tuple[TestSuite, TestRun | None, list[float]]]:
     try:
-        suites = list(
-            await db.scalars(
-                select(TestSuite).order_by(
-                    TestSuite.test_object,
-                    TestSuite.test_type,
-                    TestSuite.suite_version,
-                )
-            )
+        stmt = (
+            select(TestSuite.test_object)
+            .join(TestRun, TestRun.suite_id == TestSuite.id)
+            .distinct()
+            .order_by(TestSuite.test_object)
         )
-        if not suites:
+
+        if origin:
+            stmt = stmt.where(TestRun.test_origin == origin)
+        else:
+            stmt = stmt.where(TestRun.test_origin != "TAS")
+
+        test_objects = list(await db.scalars(stmt))
+        if not test_objects:
             logger.info("list_suites_with_latest_run query succeeded with 0 results")
         result: list[tuple[TestSuite, TestRun | None, list[float]]] = []
-        for suite in suites:
-            rows = list(
-                await db.scalars(
-                    select(TestRun)
-                    .where(TestRun.suite_id == suite.id)
-                    .order_by(TestRun.timestamp_end.desc().nullslast())
-                    .limit(TREND_WINDOW)
-                )
+        for test_object in test_objects:
+            stmt = (
+                select(TestRun, TestSuite)
+                .join(TestSuite, TestRun.suite_id == TestSuite.id)
+                .where(TestSuite.test_object == test_object)
+                .order_by(TestRun.timestamp_end.desc().nullslast())
+                .limit(TREND_WINDOW)
             )
+
+            if origin:
+                stmt = stmt.where(TestRun.test_origin == origin)
+            else:
+                stmt = stmt.where(TestRun.test_origin != "TAS")
+            
+            rows = (await db.execute(stmt)).all()
             if not rows:
                 logger.info("list_suites_with_latest_run query succeeded with 0 results")
-            latest = rows[0] if rows else None
+                continue
+            latest, suite = rows[0]
             trend: list[float] = []
-            for run in reversed(rows):
+            for run, _ in reversed(rows):
                 trend.append(round(run.passed_scenario / run.scenario_qty, 4) if run.scenario_qty and run.scenario_qty > 0 else 0.0)
             result.append((suite, latest, trend))
         return result

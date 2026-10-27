@@ -210,8 +210,9 @@ async def get_flaky_scenarios(
     return scenarios
 
 @router.get("/nrts-suites", response_model=list[NrtWithLatestRunOut])
-async def list_suites(db: DbDep) -> list[NrtWithLatestRunOut]:
-    pairs = await test_metrics_svc.list_suites_with_latest_run(db)
+async def list_suites(db: DbDep,
+    origin: Annotated[str | None, Query()] = None) -> list[NrtWithLatestRunOut]:
+    pairs = await test_metrics_svc.list_suites_with_latest_run(db, origin)
     return [
         NrtWithLatestRunOut(suite=suite, latest_run=run, trend=trend)
         for suite, run, trend in pairs
