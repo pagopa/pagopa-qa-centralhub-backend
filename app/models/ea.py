@@ -156,7 +156,6 @@ class EaQaSignal(Base):
     it_features: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     it_workflow: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     perf: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    e2e: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     sonar: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     central_suites: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
     nrt_suites: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)

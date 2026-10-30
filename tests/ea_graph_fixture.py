@@ -11,7 +11,6 @@ def _qa(score: int = 0, **kw: Any) -> dict[str, Any]:
         "it_repo": 0,
         "it_wf": False,
         "perf_repo": False,
-        "e2e_repo": False,
         "sonar": False,
         "central": [],
         "nrt": [],
