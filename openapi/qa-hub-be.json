@@ -4988,17 +4988,39 @@
         ],
         "summary": "List Suites",
         "operationId": "list_suites_api_v1_test_metrics_nrts_suites_get",
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Origin",
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/NrtWithLatestRunOut"
                   },
-                  "type": "array",
                   "title": "Response List Suites Api V1 Test Metrics Nrts Suites Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
