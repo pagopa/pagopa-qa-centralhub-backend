@@ -6,7 +6,6 @@ from app.models.bug import Bug
 from app.models.coverage import Coverage
 from app.models.dashboard import Dashboard, DashboardWidget
 from app.models.docs import DocItem  # noqa: F401
-from app.models.e2e import E2eRun, E2eSuite
 from app.models.ea import (  # noqa: F401
     EaChange,
     EaDocLink,
@@ -66,8 +65,6 @@ __all__ = [
     "DashboardWidget",
     "NotificationRule",
     "AuditLog",
-    "E2eSuite",
-    "E2eRun",
     "FeatureVisibility",
     "BddProject",
     "BddScenario",

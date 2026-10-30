@@ -8,14 +8,12 @@ from app.api.v1 import (
     dashboards,
     docs,
     dq,
-    e2e,
     ea,
     features,
     gpd_position,
     health,
     integrations,
     jira,
-    metrics,
     notifications,
     overview,
     perf,
@@ -24,10 +22,10 @@ from app.api.v1 import (
     roles,
     runs,
     sanp_health,
+    suites,
     test_metrics,
     tm,
     users,
-    suites,
 )
 
 router = APIRouter()
@@ -36,7 +34,6 @@ router.include_router(health.router, tags=["health"])
 router.include_router(bdd.router, prefix="/bdd", tags=["bdd"])
 router.include_router(overview.router, prefix="/overview", tags=["overview"])
 router.include_router(runs.router, prefix="/runs", tags=["runs"])
-router.include_router(e2e.router, prefix="/e2e", tags=["e2e"])
 router.include_router(features.router, prefix="/features", tags=["features"])
 router.include_router(psp_fee.router, prefix="/psp-fees", tags=["psp-fees"])
 router.include_router(gpd_position.router, prefix="/gpd-position", tags=["gpd-position"])

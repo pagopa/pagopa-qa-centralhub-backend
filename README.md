@@ -55,7 +55,6 @@ app/
 ├── deps.py                 # Shared FastAPI dependencies
 ├── api/v1/
 │   ├── bdd.py              # Gherkin Generator: projects, scenarios, generate (SSE), settings, Ollama controls
-│   ├── e2e.py              # E2E suites and runs (sync, CRUD, bulk delete)
 │   ├── jira.py             # Jira KPI: /overview /trend /sanp/overview /sanp/trend /data/overview /data/trend
 │   ├── gpd_position.py     # GPD Positions Data Hub: GET /snapshots, POST /sync
 │   ├── docs.py             # Docs & Knowledge Base CRUD + HTML proxy
@@ -82,7 +81,7 @@ app/
 │   ├── users.py            # sync_login, list_users, update_user
 │   ├── roles.py            # get_role_matrix, update_role_permissions
 │   └── ...
-└── tasks/                  # Celery/Arq background workers (sync_e2e, sync_gpd_position, ...)
+└── tasks/                  # Celery/Arq background workers (sync_gpd_position, ...)
 alembic/                    # DB migration scripts
 tests/                      # pytest test suite
 docker-compose.yml
@@ -284,7 +283,7 @@ L'autenticazione (Google SSO) e l'enforcement dei permessi avvengono lato `qa-hu
 
 ### Feature visibility
 
-Il catalogo delle pagine controllabili vive in `app/core/features.py`; include le pagine operative, API Docs e Settings E2E/Gherkin. Gli override globali sono persistiti nella tabella `feature_visibility` introdotta dalla migration `0015`. Una feature senza override è abilitata per default, incluse le voci aggiunte in seguito al catalogo.
+Il catalogo delle pagine controllabili vive in `app/core/features.py`; include le pagine operative, API Docs e Settings Gherkin. Gli override globali sono persistiti nella tabella `feature_visibility` introdotta dalla migration `0015`. Una feature senza override è abilitata per default, incluse le voci aggiunte in seguito al catalogo.
 
 - `GET /api/v1/features`: restituisce catalogo, route, permesso RBAC associato e stato effettivo;
 - `PATCH /api/v1/features/{feature_key}` con `{ "enabled": boolean }`: salva un override per l'ambiente corrente.

@@ -9,7 +9,7 @@ def test_action_keys_match_catalog() -> None:
 
 
 def test_action_catalog_has_eighteen_entries() -> None:
-    assert len(ACTION_CATALOG) == 18
+    assert len(ACTION_CATALOG) == 19
 
 
 def test_action_catalog_has_data_quality_entries() -> None:

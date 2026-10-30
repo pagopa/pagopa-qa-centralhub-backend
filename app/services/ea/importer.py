@@ -190,7 +190,6 @@ def _collect(kb: dict[str, Any]) -> _Collector:
                         it_features=int(qa.get("it_repo") or 0),
                         it_workflow=bool(qa.get("it_wf")),
                         perf=bool(qa.get("perf_repo")),
-                        e2e=bool(qa.get("e2e_repo")),
                         sonar=bool(qa.get("sonar")),
                         central_suites=list(qa.get("central") or []),
                         nrt_suites=list(qa.get("nrt") or []),

@@ -58,7 +58,6 @@ async def test_list_feature_visibility_defaults_all_features_to_enabled(
     assert enabled_by_key["psp_fees"] is True
     assert enabled_by_key["gpd_positions"] is True
     assert enabled_by_key["api_docs"] is True
-    assert enabled_by_key["settings_e2e"] is True
     assert enabled_by_key["settings_gherkin"] is True
 
 
