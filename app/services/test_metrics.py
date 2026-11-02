@@ -293,7 +293,7 @@ async def get_avg_pass_rate(db: AsyncSession) -> int | None:
             .where(
                 TestRun.scenario_qty > 0,
                 TestRun.test_origin.is_not(None),
-                TestRun.test_origin.not_in(("TAS", "QG")),
+                TestRun.test_origin.not_in(("TAS", "QG", "QA_GATE")),
             )
             .group_by(TestSuite.test_object)
             .cte("averages")
@@ -301,7 +301,7 @@ async def get_avg_pass_rate(db: AsyncSession) -> int | None:
         stmt = select(func.avg(averages.c.suite_avg))
         result = await db.execute(stmt)
         avg_rate = result.scalar()
-        return int(avg_rate) if avg_rate is not None else None
+        return round(float(avg_rate), 0) if avg_rate is not None else None
     except Exception:
         logger.exception("get_avg_pass_rate failed")
         raise

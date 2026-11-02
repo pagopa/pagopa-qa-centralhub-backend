@@ -218,8 +218,9 @@ async def list_suites(db: DbDep,
         for suite, run, trend in pairs
     ]
 
+
 @router.get("/avg-pass-rate", response_model=int)
-async def avg_pass_rate(db: DbDep) -> int:
+async def avg_pass_rate(db: DbDep) -> int | None:
     avg_rate = await test_metrics_svc.get_avg_pass_rate(db)
     if avg_rate is None:
         raise HTTPException(
