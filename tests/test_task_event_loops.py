@@ -12,7 +12,6 @@ from sqlalchemy.util.concurrency import greenlet_spawn
 TASKS = [
     ("sync_ea", "sync_ea"),
     ("sync_sanp_health", "sync_sanp_health"),
-    ("sync_e2e", "sync_e2e_runs"),
     ("sync_gpd_position", "sync_gpd_position_snapshots"),
     ("sync_psp_fee", "sync_psp_fee_services"),
 ]

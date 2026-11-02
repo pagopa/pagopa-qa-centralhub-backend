@@ -24,7 +24,7 @@
 - Modify `qa-hub-backend/README.md` and regenerate `qa-hub-backend/openapi/qa-hub-be.json` with `python -m scripts.generate_openapi`.
 - Create `qa-hub-backend/tests/test_feature_visibility_service.py` and `qa-hub-backend/tests/test_feature_visibility_api.py`.
 
-- [ ] Write tests first for: all catalog entries default enabled without rows, including `settings_e2e` and `settings_gherkin`; a stored false override is returned; valid updates persist; unknown keys are rejected; GET/PATCH API contracts and unknown-key error handling.
+- [ ] Write tests first for: all catalog entries default enabled without rows, including `settings_gherkin`; a stored false override is returned; valid updates persist; unknown keys are rejected; GET/PATCH API contracts and unknown-key error handling.
 - [ ] Run `cd qa-hub-backend && .venv/bin/pytest tests/test_feature_visibility_service.py tests/test_feature_visibility_api.py -q` and confirm expected RED failures.
 - [ ] Implement catalog, model, schema, service, router, registration, and migration with missing overrides interpreted as true.
 - [ ] Re-run the two test files and confirm GREEN.
@@ -51,7 +51,7 @@
 - Modify `qa-hub-frontend/src/components/auth/RouteGuard.tsx` to check feature visibility in addition to the existing RBAC action and render a neutral unavailable state for globally disabled pages without redirecting.
 - Create `qa-hub-frontend/src/components/auth/RouteGuard.test.tsx` and `qa-hub-frontend/src/components/shell/Sidebar.test.tsx`.
 
-- [ ] Write failing tests for: enabled feature plus allowed RBAC renders; disabled feature blocks even superadmin; enabled feature with denied RBAC remains blocked; each of the two Data Hub and Data Quality leaf routes can be toggled independently; Settings E2E and Settings Gherkin routes map to distinct toggles; disabled items disappear from the Sidebar; API Docs link follows its toggle.
+- [ ] Write failing tests for: enabled feature plus allowed RBAC renders; disabled feature blocks even superadmin; enabled feature with denied RBAC remains blocked; each of the two Data Hub and Data Quality leaf routes can be toggled independently; Settings Gherkin routes map to their toggle; disabled items disappear from the Sidebar; API Docs link follows its toggle.
 - [ ] Run `cd qa-hub-frontend && pnpm test -- RouteGuard.test.tsx Sidebar.test.tsx` and confirm RED.
 - [ ] Implement one shared feature-state query used by route guards and Sidebar; avoid changing or merging `roles.permissions`.
 - [ ] Re-run focused tests and confirm GREEN.

@@ -66,7 +66,6 @@ def qa_observed(repo: str, facts: Mapping[str, Any]) -> dict[str, Any]:
             "it_features": int(tests.get("features") or 0),
             "it_workflow": any(v.get("it") for v in wf.values()),
             "perf": int(tests.get("perf_files") or 0) > 0,
-            "e2e": int(tests.get("e2e_files") or 0) > 0,
             "sonar": any(v.get("sonar") for v in wf.values()),
             "central_suites": central,
             "nrt_suites": [k for k, suite in NRT_SUITES.items() if suite in central],
@@ -111,7 +110,7 @@ def guess_ctype(repo: str, facts: Mapping[str, Any]) -> str:
         fw = set(facts.get("fw") or [])
         if "mock" in name:
             return "mock"
-        if re.search(r"(^|-)(tests?|e2e|qa)(-|$)", name):
+        if re.search(r"(^|-)(tests?|qa)(-|$)", name):
             return "test"
         if "Azure Functions" in fw or name.endswith(("-function", "-functions")):
             return "fn"

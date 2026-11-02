@@ -30,7 +30,6 @@ _QA_FIELDS = (
     "it_features",
     "it_workflow",
     "perf",
-    "e2e",
     "sonar",
     "central_suites",
     "nrt_suites",

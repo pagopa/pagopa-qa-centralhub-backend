@@ -34,14 +34,6 @@ FEATURE_CATALOG: tuple[FeatureDefinition, ...] = (
         "external": False,
     },
     {
-        "key": "settings_e2e",
-        "label": "Settings E2E",
-        "route": "/settings/integrations",
-        "action": "manage:integrations",
-        "external": False,
-    },
-    {"key": "e2e", "label": "E2E", "route": "/e2e", "action": "view:e2e", "external": False},
-    {
         "key": "sanp_health",
         "label": "SANP Health",
         "route": "/sanp-health",

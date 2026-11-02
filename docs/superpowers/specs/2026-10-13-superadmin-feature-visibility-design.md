@@ -12,7 +12,6 @@ I toggle coprono le pagine operative presenti nella sidebar e il link API Docs:
 
 - Overview
 - Gherkin Generator
-- E2E
 - SANP Health
 - KPI Jira
 - Metriche
@@ -22,10 +21,9 @@ I toggle coprono le pagine operative presenti nella sidebar e il link API Docs:
 - Controlli per Dominio
 - Docs & Decks
 - API Docs (Swagger link)
-- Settings E2E
 - Settings Gherkin
 
-Coverage, Performance, Defect Tracker, Releases e Dashboards sono route placeholder non presenti nella sidebar e restano fuori da questa iterazione. Tra le impostazioni amministrative sono incluse solo Settings E2E e Settings Gherkin; Settings Utenti, Ruoli & Permessi, Risorse T&M e le azioni interne (per esempio sync) non hanno toggle.
+Coverage, Performance, Defect Tracker, Releases e Dashboards sono route placeholder non presenti nella sidebar e restano fuori da questa iterazione. Tra le impostazioni amministrative è inclusa solo Settings Gherkin; Settings Utenti, Ruoli & Permessi, Risorse T&M e le azioni interne (per esempio sync) non hanno toggle.
 
 ## Esperienza superadmin
 

@@ -77,7 +77,7 @@ Volumi attesi: ~300 nodi, qualche centinaio di legami, alcune migliaia di pagine
 
 | Gruppo | Colonne | Chi le scrive |
 |---|---|---|
-| Osservate | `unit_files`, `it_features`, `it_workflow`, `perf`, `e2e`, `sonar`, `central_suites text[]`, `nrt_suites text[]`, `nodo_bdd`, `tas_ci_observed`, `observed_at` | Solo la sync |
+| Osservate | `unit_files`, `it_features`, `it_workflow`, `perf`, `sonar`, `central_suites text[]`, `nrt_suites text[]`, `nodo_bdd`, `tas_ci_observed`, `observed_at` | Solo la sync |
 | Manuali | `under_qa bool null`, `tas_ci_override bool null`, `qa_owner`, `qa_notes`, `manual_updated_by/at` | Solo gli utenti |
 
 Il punteggio di maturità non si salva: si calcola nel servizio con la stessa formula della Guida, così una modifica alla formula vale subito per tutto.

@@ -109,7 +109,6 @@ def _mini_kb() -> dict[str, Any]:
                     "it_repo": 2,
                     "it_wf": False,
                     "perf_repo": True,
-                    "e2e_repo": False,
                     "sonar": True,
                     "central": ["integration/a"],
                     "nrt": ["a"],

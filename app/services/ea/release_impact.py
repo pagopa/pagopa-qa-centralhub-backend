@@ -33,7 +33,7 @@ CATEGORIES: list[tuple[str, str, int, re.Pattern[str]]] = [
         "Test",
         0,
         re.compile(
-            r"(^|/)(src/test|tests?|__tests__|e2e|integration-test|performance-test|load-test)/|\.(test|spec)\.[jt]sx?$|_test\.go$|\.feature$",
+            r"(^|/)(src/test|tests?|__tests__|integration-test|performance-test|load-test)/|\.(test|spec)\.[jt]sx?$|_test\.go$|\.feature$",
             re.I,
         ),
     ),

@@ -32,12 +32,6 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False},
     },
     {
-        "key": "view:e2e",
-        "label": "E2E Test Results",
-        "category": "Test Results",
-        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
-    },
-    {
         "key": "view:jira",
         "label": "KPI Jira",
         "category": "Project Tracking",

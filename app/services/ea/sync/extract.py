@@ -27,7 +27,6 @@ _UNIT_RX = re.compile(
     r"(src/test/|__tests__/|\.test\.(ts|tsx|js)$|\.spec\.(ts|tsx)$|_test\.go$|tests?/.*test_.*\.py$)"
 )
 _PERF_RX = re.compile(r"(performance-test|load-test|perf)", re.I)
-_E2E_RX = re.compile(r"(e2e|playwright|cypress)", re.I)
 _ROOT_FILES = (
     "pom.xml",
     "build.gradle",
@@ -193,7 +192,6 @@ def extract_repo(name: str, tree: list[str], files: Mapping[str, str]) -> dict[s
             "features": len(feat),
             "feature_dirs": sorted({os.path.dirname(x) for x in feat})[:10],
             "perf_files": sum(1 for x in tree if _PERF_RX.search(x)),
-            "e2e_files": sum(1 for x in tree if _E2E_RX.search(x)),
             "postman": sum(1 for x in tree if "postman" in x.lower() and x.endswith(".json")),
         }
 
