@@ -280,3 +280,28 @@ async def list_suites_with_latest_run(
     except Exception:
         logger.exception("list_suites_with_latest_run failed")
         raise
+
+
+async def get_avg_pass_rate(db: AsyncSession) -> int | None:
+    try:
+        averages = (
+            select(
+                TestSuite.test_object,
+                func.avg(TestRun.passed_scenario * 100.0 / TestRun.scenario_qty).label("suite_avg"),
+            )
+            .join(TestSuite, TestSuite.id == TestRun.suite_id)
+            .where(
+                TestRun.scenario_qty > 0,
+                TestRun.test_origin.is_not(None),
+                TestRun.test_origin.not_in(("TAS", "QG")),
+            )
+            .group_by(TestSuite.test_object)
+            .cte("averages")
+        )
+        stmt = select(func.avg(averages.c.suite_avg))
+        result = await db.execute(stmt)
+        avg_rate = result.scalar()
+        return int(avg_rate) if avg_rate is not None else None
+    except Exception:
+        logger.exception("get_avg_pass_rate failed")
+        raise
