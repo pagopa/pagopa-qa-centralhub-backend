@@ -217,3 +217,14 @@ async def list_suites(db: DbDep,
         NrtWithLatestRunOut(suite=suite, latest_run=run, trend=trend)
         for suite, run, trend in pairs
     ]
+
+
+@router.get("/avg-pass-rate", response_model=int)
+async def avg_pass_rate(db: DbDep) -> int | None:
+    avg_rate = await test_metrics_svc.get_avg_pass_rate(db)
+    if avg_rate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No pass rate data found",
+        )
+    return avg_rate
