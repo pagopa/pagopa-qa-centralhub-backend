@@ -25,7 +25,7 @@ async def create_test_suite(
     if body is None or (body.test_type == "" or body.test_object == "" or body.test_object_version == ""):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Request body cannot be None",
+            detail="Request body or one of its required fields (test_type, test_object and test_object_version) cannot be None",
         )
     model = TestSuite(**body.model_dump())
 
