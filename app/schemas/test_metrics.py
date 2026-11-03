@@ -41,14 +41,14 @@ class TestSuiteOut(BaseModel):
     id: uuid.UUID
     test_object: str
     test_type: str
-    suite_version: str
+    test_object_version: str
     owner_team: str | None = None
 
 
 class TestSuiteCreate(BaseModel):
     test_object: str
     test_type: str
-    suite_version: str
+    test_object_version: str
     owner_team: str | None = None
 
 class TestRunCreate(BaseModel):
@@ -163,7 +163,7 @@ class FlakyScenarioIn(BaseModel):
     suite_id: uuid.UUID
     test_object: str
     scenario_name: str
-    suite_version: str
+    test_object_version: str
     test_version: str
     inserted_at: datetime | None = None
     is_flaky: bool = Field(default=True)
@@ -175,7 +175,7 @@ class FlakyScenarioOut(BaseModel):
     suite_id: uuid.UUID
     test_object: str
     scenario_name: str
-    suite_version: str
+    test_object_version: str
     test_version: str
     inserted_at: datetime | None = None
     is_flaky: bool 

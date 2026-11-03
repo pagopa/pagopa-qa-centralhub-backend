@@ -22,7 +22,7 @@ async def create_test_suite(
     body: TestSuiteCreate,
     db: DbDep,
 ) -> TestSuiteOut:
-    if body is None or (body.test_type == "" or body.test_object == "" or body.suite_version == ""):
+    if body is None or (body.test_type == "" or body.test_object == "" or body.test_object_version == ""):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Request body cannot be None",
