@@ -39,7 +39,7 @@ async def create_test_suite(db: AsyncSession, test_suite: TestSuite):
 async def get_latest_test_suite_version(db: AsyncSession, test_object_in: str) -> TestSuite:
     try:
         result = await db.execute(
-            select(TestSuite).filter_by(test_object=test_object_in).order_by(TestSuite.suite_version.desc()).limit(1)
+            select(TestSuite).filter_by(test_object=test_object_in).order_by(TestSuite.test_object_version.desc()).limit(1)
         )
         suite = result.scalar_one_or_none()
         if suite is None:

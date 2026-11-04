@@ -38,14 +38,14 @@ class TestSuite(Base):
     __tablename__ = 'test_suites'
     __table_args__ = (
         # Vincolo di unicità composito per evitare anagrafiche duplicate
-        UniqueConstraint('test_object', 'test_type', 'suite_version', name='uix_qachub_suite_def'),
+        UniqueConstraint('test_object', 'test_type', 'test_object_version', name='uix_qachub_suite_def'),
         {'schema': 'qachub'}
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     test_object = Column(String, nullable=False) # NN
     test_type = Column(String, nullable=False)   # NN
-    suite_version = Column(String, nullable=False) # NN
+    test_object_version = Column(String, nullable=False) # NN
     owner_team = Column(String, nullable=True)
 
 class TestRun(Base):
@@ -129,7 +129,7 @@ class FlakyScenario(Base):
     suite_id = Column(UUID(as_uuid=True), ForeignKey('qachub.test_suites.id', ondelete="CASCADE"),  primary_key=True, nullable=False, index=True)
     test_object = Column(String, nullable=False)
     scenario_name = Column(String,  primary_key=True, nullable=False)
-    suite_version = Column(String,   nullable=False)
+    test_object_version = Column(String,   nullable=False)
     test_version = Column(String,  primary_key=True, nullable=False)
     inserted_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
     is_flaky = Column(Boolean, nullable=False, default=True, server_default='true')

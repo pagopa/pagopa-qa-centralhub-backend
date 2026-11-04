@@ -71,12 +71,12 @@ async def load(days: int, env: EnvEnum) -> int:
                 select(TestSuite).where(
                     TestSuite.test_object == obj,
                     TestSuite.test_type == ttype,
-                    TestSuite.suite_version == VERSION,
+                    TestSuite.test_object_version == VERSION,
                 )
             )
             if suite is None:
                 suite = TestSuite(
-                    test_object=obj, test_type=ttype, suite_version=VERSION, owner_team="demo"
+                    test_object=obj, test_type=ttype, test_object_version=VERSION, owner_team="demo"
                 )
                 db.add(suite)
                 await db.flush()
@@ -116,7 +116,7 @@ async def clear() -> int:
         result = await db.execute(delete(TestRun).where(TestRun.test_origin == ORIGIN))
         await db.execute(
             delete(TestSuite).where(
-                TestSuite.suite_version == VERSION,
+                TestSuite.test_object_version == VERSION,
                 TestSuite.owner_team == "demo",
                 ~select(TestRun.id).where(TestRun.suite_id == TestSuite.id).exists(),
             )
