@@ -1,7 +1,7 @@
 """rename test version field   
 
-Revision ID: 0027
-Revises: 0026
+Revision ID: 0028
+Revises: 0027
 Create Date: 2026-11-03 11:30:54.905569
 """
 from __future__ import annotations
@@ -13,8 +13,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '0027'
-down_revision: Union[str, None] = '0026'
+revision: str = '0028'
+down_revision: Union[str, None] = '0027'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
