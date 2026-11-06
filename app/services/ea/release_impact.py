@@ -271,7 +271,7 @@ def change_risk(cats: dict[str, dict[str, Any]]) -> str:
 
 
 def impact_rules() -> dict[str, Any]:
-    """The rules above in a form the Hub can show, so the guide never drifts from the code."""
+    """Expose the calculated risk, promotion and graph-depth rules consumed by the Hub."""
     risk_of = {k: risk for risk, keys in CHANGE_RISK_RULES for k in keys}
     return {
         "categories": [
@@ -483,11 +483,8 @@ def analyse(g: GraphIndex, cs: ChangeSet) -> dict[str, Any]:
             if g.label(pid) not in e["via"]:
                 e["via"].append(g.label(pid))
 
-    # promotion keeps counting the callers listed as impacted (empty for test/docs-only changes)
-    promo_callers = sum(1 for x in impacted if x["relation"] == "chiamante" and x["depth"] == 1)
-    promoted = risk == "medio" and promo_callers >= PROMOTE_MIN_DIRECT_CALLERS
-    # the explanation describes the component, so it counts the callers in the graph
     direct_callers = sum(1 for _ in g.callers(comp_id, depth=1))
+    promoted = risk == "medio" and direct_callers >= PROMOTE_MIN_DIRECT_CALLERS
     level = "alto" if promoted else risk
 
     prod = g.product_of(comp_id)

@@ -33,6 +33,18 @@ async def test_impact_validates_depth(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
+@pytest.mark.anyio
+async def test_release_impact_rules_returns_schema_payload(client: AsyncClient) -> None:
+    from app.schemas.ea import EaImpactRulesOut
+
+    response = await client.get("/api/v1/ea/impact/rules")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"categories", "change_risk", "promotion", "depth"}
+    assert isinstance(EaImpactRulesOut.model_validate(body), EaImpactRulesOut)
+
+
 # ── release impact and assistant ─────────────────────────────────────────────
 
 
