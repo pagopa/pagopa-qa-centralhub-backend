@@ -219,12 +219,22 @@ class EaReleaseImpactOut(BaseModel):
     change: dict[str, Any]
     component: dict[str, Any]
     risk: str
+    risk_explain: dict[str, Any]
     categories: list[dict[str, Any]]
     impacted: list[dict[str, Any]]
     suites: list[dict[str, Any]]
     gaps: list[dict[str, Any]]
     processes: list[dict[str, Any]]
     highlight: list[str]
+
+
+class EaImpactRulesOut(BaseModel):
+    """How the risk of a release is rated, straight from the rules the analysis applies."""
+
+    categories: list[dict[str, Any]]
+    change_risk: list[dict[str, Any]]
+    promotion: dict[str, Any]
+    depth: int
 
 
 class EaChatMessage(BaseModel):
