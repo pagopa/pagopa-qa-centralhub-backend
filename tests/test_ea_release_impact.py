@@ -184,11 +184,7 @@ def test_explain_says_which_files_decided_the_risk() -> None:
 
 def test_many_direct_callers_promote_a_medium_change(monkeypatch: pytest.MonkeyPatch) -> None:
     g = GraphIndex(kb())
-    direct = sum(
-        1
-        for x in ri.analyse(g, _cs("src/a.py"))["impacted"]
-        if x["relation"] == "chiamante" and x["depth"] == 1
-    )
+    direct = sum(1 for _ in g.callers("pagopa-debt-position", depth=1))
     assert direct >= 1
     monkeypatch.setattr(ri, "PROMOTE_MIN_DIRECT_CALLERS", direct)
     res = ri.analyse(g, _cs("src/a.py"))
@@ -197,3 +193,13 @@ def test_many_direct_callers_promote_a_medium_change(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(ri, "PROMOTE_MIN_DIRECT_CALLERS", direct + 1)
     res = ri.analyse(g, _cs("src/a.py"))
     assert res["risk"] == "medio" and res["risk_explain"]["promoted"] is False
+
+
+def test_explanation_counts_callers_of_the_component_even_without_impact() -> None:
+    g = GraphIndex(kb())
+    graph_callers = sum(1 for _ in g.callers("pagopa-debt-position", depth=1))
+    assert graph_callers >= 1
+    res = ri.analyse(g, _cs("README.md"))
+    assert res["impacted"] == [] and res["risk"] == "nessuno"
+    assert res["risk_explain"]["direct_callers"] == graph_callers
+    assert res["risk_explain"]["promoted"] is False

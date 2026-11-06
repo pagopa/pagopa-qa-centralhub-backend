@@ -483,8 +483,11 @@ def analyse(g: GraphIndex, cs: ChangeSet) -> dict[str, Any]:
             if g.label(pid) not in e["via"]:
                 e["via"].append(g.label(pid))
 
-    direct_callers = sum(1 for x in impacted if x["relation"] == "chiamante" and x["depth"] == 1)
-    promoted = risk == "medio" and direct_callers >= PROMOTE_MIN_DIRECT_CALLERS
+    # promotion keeps counting the callers listed as impacted (empty for test/docs-only changes)
+    promo_callers = sum(1 for x in impacted if x["relation"] == "chiamante" and x["depth"] == 1)
+    promoted = risk == "medio" and promo_callers >= PROMOTE_MIN_DIRECT_CALLERS
+    # the explanation describes the component, so it counts the callers in the graph
+    direct_callers = sum(1 for _ in g.callers(comp_id, depth=1))
     level = "alto" if promoted else risk
 
     prod = g.product_of(comp_id)
