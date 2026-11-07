@@ -67,6 +67,29 @@ CATEGORIES: list[tuple[str, str, int, re.Pattern[str]]] = [
     ),
     ("code", "Codice", 2, re.compile(r".*")),
 ]
+# Plain-language description of each category, shown in the guide and in the Impact view
+CATEGORY_HINTS: dict[str, str] = {
+    "test": "cartelle test/, tests/, __tests__/, file *.test.*, *.spec.*, *_test.go, *.feature",
+    "contract": "openapi/swagger/asyncapi (json, yaml), .proto, .wsdl, .xsd",
+    "data": "migration, liquibase, flyway, changelog, alembic/versions, file .sql",
+    "config": (
+        "helm/, infra/, charts/, .identity/, values-*.yaml, .tf, Dockerfile, "
+        "application*.yml/.properties, .env"
+    ),
+    "ci": ".github/, .devops/, azure-pipelines",
+    "docs": "file .md, .adoc, .txt, immagini, cartella docs/, CODEOWNERS, LICENSE",
+    "code": "ogni altro file: è la categoria di default",
+}
+
+# Risk of the change itself: the first rule whose categories are present wins
+CHANGE_RISK_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("alto", ("contract", "data")),
+    ("medio", ("code", "config")),
+    ("basso", ("ci",)),
+]
+# A medium-risk change to a component with at least this many direct callers is rated high
+PROMOTE_MIN_DIRECT_CALLERS = 5
+GRAPH_DEPTH = 3
 RISK_ORDER = {"nessuno": 0, "basso": 1, "medio": 2, "alto": 3}
 _LOWER = {"alto": "medio", "medio": "basso", "basso": "basso", "nessuno": "nessuno"}
 
@@ -237,17 +260,80 @@ def classify(files: list[ChangedFile]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _rule_for(cats: dict[str, dict[str, Any]]) -> tuple[str, tuple[str, ...]] | None:
+    return next((r for r in CHANGE_RISK_RULES if any(k in cats for k in r[1])), None)
+
+
 def change_risk(cats: dict[str, dict[str, Any]]) -> str:
     """Risk of the change itself: what kind of files it touches."""
-    if not cats:
-        return "nessuno"
-    if "contract" in cats or "data" in cats:
-        return "alto"
-    if "code" in cats or "config" in cats:
-        return "medio"
-    if "ci" in cats:
-        return "basso"
-    return "nessuno"
+    rule = _rule_for(cats)
+    return rule[0] if rule else "nessuno"
+
+
+def impact_rules() -> dict[str, Any]:
+    """Expose the calculated risk, promotion and graph-depth rules consumed by the Hub."""
+    risk_of = {k: risk for risk, keys in CHANGE_RISK_RULES for k in keys}
+    return {
+        "categories": [
+            {
+                "key": key,
+                "label": label,
+                "weight": weight,
+                "risk": risk_of.get(key, "nessuno"),
+                "hint": CATEGORY_HINTS[key],
+            }
+            for key, label, weight, _ in CATEGORIES
+        ],
+        "change_risk": [{"risk": r, "categories": list(keys)} for r, keys in CHANGE_RISK_RULES],
+        "promotion": {
+            "from": "medio",
+            "to": "alto",
+            "min_direct_callers": PROMOTE_MIN_DIRECT_CALLERS,
+        },
+        "depth": GRAPH_DEPTH,
+    }
+
+
+def explain_risk(
+    cats: dict[str, dict[str, Any]], files: int, direct_callers: int, promoted: bool
+) -> dict[str, Any]:
+    """Why the change got its risk level, in words, with the files that decided it."""
+    rule = _rule_for(cats)
+    trigger = (
+        [
+            {
+                "key": k,
+                "label": cats[k]["label"],
+                "files": cats[k]["files"],
+                "examples": cats[k]["examples"],
+            }
+            for k in rule[1]
+            if k in cats
+        ]
+        if rule
+        else []
+    )
+    labels = ", ".join(f"{t['label']} ({t['files']})" for t in trigger)
+    if promoted:
+        summary = (
+            f"La modifica tocca {labels}: rischio medio. Il componente ha {direct_callers} "
+            f"chiamanti diretti (soglia {PROMOTE_MIN_DIRECT_CALLERS}), "
+            "quindi il rischio sale ad alto."
+        )
+    elif rule:
+        summary = f"La modifica tocca {labels}: rischio {rule[0]}."
+    elif files:
+        summary = "Cambiano solo test o documentazione: nessun impatto sul comportamento."
+    else:
+        summary = "La modifica non contiene file."
+    return {
+        "change_risk": rule[0] if rule else "nessuno",
+        "trigger": trigger,
+        "promoted": promoted,
+        "direct_callers": direct_callers,
+        "promote_threshold": PROMOTE_MIN_DIRECT_CALLERS,
+        "summary": summary,
+    }
 
 
 def _hop_out(g: GraphIndex, hop: Hop, relation: str, risk: str, reason: str) -> dict[str, Any]:
@@ -302,7 +388,7 @@ def analyse(g: GraphIndex, cs: ChangeSet) -> dict[str, Any]:
 
     impacted: list[dict[str, Any]] = []
     if risk != "nessuno":
-        for hop in g.callers(comp_id, depth=3):
+        for hop in g.callers(comp_id, depth=GRAPH_DEPTH):
             r = risk if hop.depth == 1 else _LOWER[risk] if hop.depth == 2 else "basso"
             why = (
                 "chiama direttamente il componente modificato"
@@ -312,7 +398,7 @@ def analyse(g: GraphIndex, cs: ChangeSet) -> dict[str, Any]:
             if contract and hop.depth == 1:
                 why += ", il cui contratto o schema cambia"
             impacted.append(_hop_out(g, hop, "chiamante", r, why))
-        for hop in g.downstream_data(comp_id, depth=3):
+        for hop in g.downstream_data(comp_id, depth=GRAPH_DEPTH):
             r = "alto" if contract and hop.depth == 1 else "medio" if hop.depth == 1 else "basso"
             impacted.append(
                 _hop_out(
@@ -397,12 +483,9 @@ def analyse(g: GraphIndex, cs: ChangeSet) -> dict[str, Any]:
             if g.label(pid) not in e["via"]:
                 e["via"].append(g.label(pid))
 
-    level = risk
-    if (
-        risk == "medio"
-        and sum(1 for x in impacted if x["relation"] == "chiamante" and x["depth"] == 1) >= 5
-    ):
-        level = "alto"
+    direct_callers = sum(1 for _ in g.callers(comp_id, depth=1))
+    promoted = risk == "medio" and direct_callers >= PROMOTE_MIN_DIRECT_CALLERS
+    level = "alto" if promoted else risk
 
     prod = g.product_of(comp_id)
     return {
@@ -423,6 +506,7 @@ def analyse(g: GraphIndex, cs: ChangeSet) -> dict[str, Any]:
             "qa_score": (comp.get("qa") or {}).get("score", 0),
         },
         "risk": level,
+        "risk_explain": explain_risk(cats, len(cs.files), direct_callers, promoted),
         "categories": sorted(cats.values(), key=lambda c: (-c["weight"], -c["files"])),
         "impacted": impacted,
         "suites": suite_list,

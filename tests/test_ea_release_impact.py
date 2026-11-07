@@ -150,3 +150,56 @@ async def test_release_impact_checks_the_repo_before_calling_github() -> None:
     )
     assert fake.calls == [("cmp", "pagopa-debt-position", "a", "b")]
     assert res["risk"] == "medio"
+
+
+def test_rules_describe_every_category_and_match_change_risk() -> None:
+    rules = ri.impact_rules()
+    assert {c["key"] for c in rules["categories"]} == {k for k, *_ in ri.CATEGORIES}
+    assert all(c["hint"] for c in rules["categories"])
+    # the rating published for a category is the one the analysis gives to a change with only it
+    sample = {
+        "contract": "openapi/openapi.json",
+        "data": "db/migration/V1.sql",
+        "config": "helm/values-prod.yaml",
+        "code": "src/a.py",
+        "ci": ".github/workflows/ci.yml",
+        "docs": "README.md",
+        "test": "tests/x_test.py",
+    }
+    for c in rules["categories"]:
+        got = ri.change_risk(ri.classify([ri.ChangedFile(sample[c["key"]], "m")]))
+        assert got == c["risk"], c["key"]
+    assert rules["promotion"] == {"from": "medio", "to": "alto", "min_direct_callers": 5}
+
+
+def test_explain_says_which_files_decided_the_risk() -> None:
+    res = ri.analyse(GraphIndex(kb()), _cs("openapi/openapi.json", "src/main/java/A.java"))
+    ex = res["risk_explain"]
+    assert ex["change_risk"] == "alto" and ex["promoted"] is False
+    assert [t["key"] for t in ex["trigger"]] == ["contract"]
+    assert ex["trigger"][0]["examples"] == ["openapi/openapi.json"]
+    assert "Contratto API" in ex["summary"] and "alto" in ex["summary"]
+    assert ri.analyse(GraphIndex(kb()), _cs("README.md"))["risk_explain"]["trigger"] == []
+
+
+def test_many_direct_callers_promote_a_medium_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    g = GraphIndex(kb())
+    direct = sum(1 for _ in g.callers("pagopa-debt-position", depth=1))
+    assert direct >= 1
+    monkeypatch.setattr(ri, "PROMOTE_MIN_DIRECT_CALLERS", direct)
+    res = ri.analyse(g, _cs("src/a.py"))
+    assert res["risk"] == "alto" and res["risk_explain"]["promoted"] is True
+    assert f"{direct} chiamanti diretti" in res["risk_explain"]["summary"]
+    monkeypatch.setattr(ri, "PROMOTE_MIN_DIRECT_CALLERS", direct + 1)
+    res = ri.analyse(g, _cs("src/a.py"))
+    assert res["risk"] == "medio" and res["risk_explain"]["promoted"] is False
+
+
+def test_explanation_counts_callers_of_the_component_even_without_impact() -> None:
+    g = GraphIndex(kb())
+    graph_callers = sum(1 for _ in g.callers("pagopa-debt-position", depth=1))
+    assert graph_callers >= 1
+    res = ri.analyse(g, _cs("README.md"))
+    assert res["impacted"] == [] and res["risk"] == "nessuno"
+    assert res["risk_explain"]["direct_callers"] == graph_callers
+    assert res["risk_explain"]["promoted"] is False

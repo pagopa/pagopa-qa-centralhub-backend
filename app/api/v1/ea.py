@@ -25,6 +25,7 @@ from app.schemas.ea import (
     EaHistoryItem,
     EaImpactItem,
     EaImpactResponse,
+    EaImpactRulesOut,
     EaInfraResourceDetail,
     EaInfraViewOut,
     EaKbResponse,
@@ -157,6 +158,11 @@ async def update_assistant_settings(body: AssistantConfig, db: DbDep) -> Assista
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
     return assistant_settings_svc.public_settings(config)
+
+
+@router.get("/impact/rules", response_model=EaImpactRulesOut)
+async def release_impact_rules() -> EaImpactRulesOut:
+    return EaImpactRulesOut(**release_svc.impact_rules())
 
 
 @router.post("/impact/release", response_model=EaReleaseImpactOut)
