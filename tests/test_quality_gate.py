@@ -136,3 +136,71 @@ async def test_api_maps_errors(client: AsyncClient, error: Exception, status_cod
     ):
         response = await client.post("/api/v1/quality-gate/runs", json={"test_suite": "checkout"})
     assert response.status_code == status_code
+
+
+CID = "qg-" + "a" * 32
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("run", "state", "conclusion"),
+    [
+        (None, "pending", None),
+        ({"status": "queued", "conclusion": None}, "queued", None),
+        ({"status": "in_progress", "conclusion": None}, "in_progress", None),
+        ({"status": "completed", "conclusion": "failure"}, "completed", "failure"),
+        ({"status": "completed", "conclusion": "success"}, "completed", "success"),
+    ],
+)
+async def test_run_status_mapping(
+    configured: None, run: dict | None, state: str, conclusion: str | None
+) -> None:
+    with patch.object(
+        GitHubClient, "find_workflow_run_by_name", new_callable=AsyncMock, return_value=run
+    ) as find:
+        out = await svc.get_quality_gate_run_status(CID)
+    assert find.call_args.args[1] == f"tas-{CID}"
+    assert (out.state, out.conclusion) == (state, conclusion)
+
+
+@pytest.mark.anyio
+async def test_find_workflow_run_by_name_matches_display_title() -> None:
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.json = MagicMock(
+        return_value={
+            "workflow_runs": [{"display_title": "other"}, {"display_title": "tas-x", "id": 7}]
+        }
+    )
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=response):
+        run = await GitHubClient(token="t", repo="o/r").find_workflow_run_by_name("wf.yml", "tas-x")
+    assert run == {"display_title": "tas-x", "id": 7}
+
+
+@pytest.mark.anyio
+async def test_run_status_without_token_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "tas_github_token", "")
+    with pytest.raises(svc.QualityGateConfigError):
+        await svc.get_quality_gate_run_status(CID)
+
+
+@pytest.mark.anyio
+async def test_api_run_status_ok_and_rejects_bad_id(client: AsyncClient) -> None:
+    status_out = svc.QualityGateRunStatus(correlation_id=CID, run_name=f"tas-{CID}", state="queued")
+    with patch.object(svc, "get_quality_gate_run_status", AsyncMock(return_value=status_out)):
+        ok = await client.get(f"/api/v1/quality-gate/runs/{CID}")
+        bad = await client.get("/api/v1/quality-gate/runs/not-a-run")
+    assert ok.status_code == 200
+    assert ok.json()["state"] == "queued"
+    assert bad.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_api_run_status_maps_errors(client: AsyncClient) -> None:
+    for error, code in [
+        (svc.QualityGateConfigError("x"), 503),
+        (httpx.ConnectError("boom"), 502),
+    ]:
+        with patch.object(svc, "get_quality_gate_run_status", AsyncMock(side_effect=error)):
+            response = await client.get(f"/api/v1/quality-gate/runs/{CID}")
+        assert response.status_code == code
