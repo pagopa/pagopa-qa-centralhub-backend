@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import uuid
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -203,4 +205,127 @@ async def test_api_run_status_maps_errors(client: AsyncClient) -> None:
     ]:
         with patch.object(svc, "get_quality_gate_run_status", AsyncMock(side_effect=error)):
             response = await client.get(f"/api/v1/quality-gate/runs/{CID}")
+        assert response.status_code == code
+
+
+RUN_ID = "11111111-1111-1111-1111-111111111111"
+
+
+def _run(origin: str | None) -> MagicMock:
+    run = MagicMock()
+    run.test_origin = origin
+    run.suite_id = "s"
+    run.timestamp_start = "2026-01-01"
+    run.allure_url = "u"
+    run.revision_result = None
+    return run
+
+
+def _db_returning(run: MagicMock | None) -> MagicMock:
+    db = _fake_db()
+    result = MagicMock()
+    result.scalar_one_or_none = MagicMock(return_value=run)
+    db.execute = AsyncMock(return_value=result)
+    return db
+
+
+@pytest.mark.anyio
+async def test_delete_removes_qg_run_and_audits() -> None:
+    db = _db_returning(_run("QG"))
+    await svc.delete_quality_gate_run(db, uuid.UUID(RUN_ID))
+    assert db.execute.await_count == 2  # lookup + delete
+    assert db.add.call_args.args[0].action == svc.DELETE_AUDIT_ACTION
+    assert db.add.call_args.args[0].resource_id == RUN_ID
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("origin", ["TAS", "NRT", None])
+async def test_delete_refuses_non_qg_runs(origin: str | None) -> None:
+    db = _db_returning(_run(origin))
+    with pytest.raises(svc.NotAQualityGateRunError):
+        await svc.delete_quality_gate_run(db, uuid.UUID(RUN_ID))
+    assert db.execute.await_count == 1  # lookup only, nothing deleted
+    db.add.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_delete_missing_run() -> None:
+    with pytest.raises(svc.QualityGateRunNotFoundError):
+        await svc.delete_quality_gate_run(_db_returning(None), uuid.UUID(RUN_ID))
+
+
+@pytest.mark.anyio
+async def test_api_delete_maps_results(client: AsyncClient) -> None:
+    for error, code in [
+        (None, 204),
+        (svc.QualityGateRunNotFoundError("x"), 404),
+        (svc.NotAQualityGateRunError("x"), 403),
+    ]:
+        mock = AsyncMock(side_effect=error)
+        with patch.object(svc, "delete_quality_gate_run", mock):
+            response = await client.delete(f"/api/v1/quality-gate/test-runs/{RUN_ID}")
+        assert response.status_code == code
+    assert (await client.delete("/api/v1/quality-gate/test-runs/nope")).status_code == 422
+
+
+def _gh_run(name: str, status_: str, created: datetime, conclusion: str | None = None) -> dict:
+    return {
+        "display_title": name,
+        "status": status_,
+        "conclusion": conclusion,
+        "created_at": created.isoformat().replace("+00:00", "Z"),
+        "html_url": f"https://github.com/x/runs/{name}",
+    }
+
+
+@pytest.mark.anyio
+async def test_list_runs_keeps_only_recent_or_active_qg_runs(configured: None) -> None:
+    now = datetime.now(UTC)
+    runs = [
+        _gh_run("tas-qg-" + "a" * 32, "in_progress", now - timedelta(minutes=5)),
+        _gh_run("tas-qg-" + "b" * 32, "completed", now - timedelta(minutes=30), "failure"),
+        _gh_run("tas-qg-" + "c" * 32, "completed", now - timedelta(hours=3), "success"),
+        _gh_run("tas-qg-" + "d" * 32, "queued", now - timedelta(hours=5)),
+        _gh_run("tas-" + "e" * 32, "in_progress", now - timedelta(minutes=1)),
+        _gh_run("tas-12345", "in_progress", now - timedelta(minutes=2)),
+    ]
+    with patch.object(
+        GitHubClient, "list_dispatched_runs", new_callable=AsyncMock, return_value=runs
+    ):
+        out = await svc.list_quality_gate_runs()
+
+    assert [r.correlation_id for r in out] == [
+        "qg-" + "a" * 32,
+        "qg-" + "b" * 32,
+        "qg-" + "d" * 32,
+    ]
+    by_id = {r.correlation_id: r for r in out}
+    assert by_id["qg-" + "a" * 32].state == "in_progress"
+    assert by_id["qg-" + "b" * 32].conclusion == "failure"
+    assert "qg-" + "c" * 32 not in by_id
+    assert all(r.run_name.startswith("tas-qg-") for r in out)
+
+
+@pytest.mark.anyio
+async def test_list_runs_without_token_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "tas_github_token", "")
+    with pytest.raises(svc.QualityGateConfigError):
+        await svc.list_quality_gate_runs()
+
+
+@pytest.mark.anyio
+async def test_api_list_runs_maps_errors(client: AsyncClient) -> None:
+    ok = [svc.QualityGateRunStatus(correlation_id=CID, run_name=f"tas-{CID}", state="queued")]
+    for result, code in [
+        (ok, 200),
+        (svc.QualityGateConfigError("x"), 503),
+        (httpx.ConnectError("boom"), 502),
+    ]:
+        mock = (
+            AsyncMock(side_effect=result)
+            if isinstance(result, Exception)
+            else AsyncMock(return_value=result)
+        )
+        with patch.object(svc, "list_quality_gate_runs", mock):
+            response = await client.get("/api/v1/quality-gate/runs")
         assert response.status_code == code
