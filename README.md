@@ -92,6 +92,8 @@ docker-compose.yml
 
 `POST /api/v1/quality-gate/runs` lancia il workflow TAS (`test-automation-service.yml` di `pagopa/pagopa-platform-integration-test`) con `isQualityGateRun=true` tramite `workflow_dispatch`. Il backend fissa repository, workflow, ref e `caller_id`, genera il `correlation_id` (`qg-<uuid>`, quindi la run si chiama `tas-qg-<uuid>`) e valida gli input (`test_suite` come nome ben formato ed eventualmente nella lista `QG_LAUNCH_SUITES`, `test_type` in `integration|e2e|api`, `environment` in `dev|uat`, `tags` solo caratteri ammessi). Ogni richiesta scrive una riga in `audit_logs` (`quality_gate.run.dispatch`, esito `dispatched` o `failed`).
 
+`GET /api/v1/quality-gate/runs/{correlation_id}` restituisce lo stato live della run letto da GitHub Actions (cerca per run-name `tas-<correlation_id>` tra le run `workflow_dispatch`): `state` è `pending` (GitHub non l'ha ancora elencata), `queued`, `in_progress` o `completed`; `conclusion` (`success`, `failure`, `cancelled`, ...) è valorizzata solo a run completata. Accetta solo id nel formato `qg-<32 hex>`.
+
 Richiede `TAS_GITHUB_TOKEN` con **Actions: Read and write** sul repo TAS (503 se manca, 502 su errore GitHub). Le run QG sono lette con `origin=QG` da `/test-metrics/nrts`, `/nrts-suites` e `/suites/all`; senza `origin` le pagine NRT escludono sia TAS sia QG.
 
 > Finché `verify_jwt` non è implementato l'endpoint non ha autenticazione lato server: le uniche protezioni sono le guardie sugli input e l'audit log.

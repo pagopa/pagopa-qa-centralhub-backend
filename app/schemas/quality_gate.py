@@ -20,3 +20,22 @@ class QualityGateRunOut(BaseModel):
     correlation_id: str
     run_name: str
     actions_url: str
+
+
+CORRELATION_ID_PATTERN = r"^qg-[0-9a-f]{32}$"
+
+
+class QualityGateRunStatus(BaseModel):
+    """Live state of a launched run, read from GitHub Actions.
+
+    ``pending`` means GitHub has not listed the run yet (dispatch is asynchronous).
+    ``conclusion`` is only set once ``state`` is ``completed``.
+    """
+
+    correlation_id: str
+    run_name: str
+    state: Literal["pending", "queued", "in_progress", "completed"]
+    conclusion: str | None = None
+    html_url: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None

@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.audit_log import AuditLog
-from app.schemas.quality_gate import QualityGateRunCreate, QualityGateRunOut
+from app.schemas.quality_gate import (
+    QualityGateRunCreate,
+    QualityGateRunOut,
+    QualityGateRunStatus,
+)
 from app.services.github import GitHubClient
 
 logger = structlog.get_logger(__name__)
@@ -90,4 +94,36 @@ async def launch_quality_gate_run(
             f"https://github.com/{settings.tas_repo}/actions/workflows/"
             f"{settings.tas_workflow_file}"
         ),
+    )
+
+
+def _map_state(github_status: str | None) -> str:
+    if github_status == "completed":
+        return "completed"
+    if github_status == "in_progress":
+        return "in_progress"
+    # queued, waiting, requested, pending: the run exists but has not started yet.
+    return "queued"
+
+
+async def get_quality_gate_run_status(correlation_id: str) -> QualityGateRunStatus:
+    if not settings.tas_github_token:
+        raise QualityGateConfigError("TAS_GITHUB_TOKEN is not configured")
+
+    run_name = f"tas-{correlation_id}"
+    client = GitHubClient(token=settings.tas_github_token, repo=settings.tas_repo)
+    run = await client.find_workflow_run_by_name(settings.tas_workflow_file, run_name)
+    if run is None:
+        return QualityGateRunStatus(
+            correlation_id=correlation_id, run_name=run_name, state="pending"
+        )
+    state = _map_state(run.get("status"))
+    return QualityGateRunStatus(
+        correlation_id=correlation_id,
+        run_name=run_name,
+        state=state,  # type: ignore[arg-type]
+        conclusion=run.get("conclusion") if state == "completed" else None,
+        html_url=run.get("html_url"),
+        created_at=run.get("created_at"),
+        updated_at=run.get("updated_at"),
     )
