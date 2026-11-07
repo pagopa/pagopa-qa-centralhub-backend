@@ -18,6 +18,7 @@ from app.api.v1 import (
     overview,
     perf,
     psp_fee,
+    quality_gate,
     releases,
     roles,
     runs,
@@ -53,3 +54,4 @@ router.include_router(notifications.router, prefix="/notifications", tags=["noti
 router.include_router(tm.router, prefix="/tm", tags=["tm"])
 router.include_router(test_metrics.router, prefix="/test-metrics", tags=["test-metrics"])
 router.include_router(suites.router, prefix="/suites", tags=["suites"])
+router.include_router(quality_gate.router, prefix="/quality-gate", tags=["quality-gate"])

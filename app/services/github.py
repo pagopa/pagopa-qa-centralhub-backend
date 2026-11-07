@@ -174,3 +174,21 @@ class GitHubClient:
         except Exception:
             logger.exception("GitHubClient.get_job_log failed")
             raise
+
+    async def dispatch_workflow(
+        self, workflow_file: str, *, ref: str, inputs: dict[str, str]
+    ) -> None:
+        """Trigger a workflow_dispatch event. GitHub answers 204 with no run id."""
+        try:
+            url = f"{self.BASE_URL}/repos/{self.repo}/actions/workflows/{workflow_file}/dispatches"
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    url,
+                    json={"ref": ref, "inputs": inputs},
+                    headers=self._headers(),
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+        except Exception:
+            logger.exception("GitHubClient.dispatch_workflow failed")
+            raise

@@ -117,6 +117,13 @@ FEATURE_CATALOG: tuple[FeatureDefinition, ...] = (
         "action": "view:tas_nrts",
         "external": False,
     },
+    {
+        "key": "qg_nrts",
+        "label": "Quality Gate",
+        "route": "/quality-gate",
+        "action": "view:qg_nrts",
+        "external": False,
+    },
 )
 
 FEATURE_KEYS = frozenset(feature["key"] for feature in FEATURE_CATALOG)

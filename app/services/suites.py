@@ -14,7 +14,7 @@ async def get_suites(db: AsyncSession, origin: str | None = None) -> list[str]:
         if origin:
             stmt = stmt.join(TestRun, TestSuite.id == TestRun.suite_id).where(TestRun.test_origin == origin)
         else:
-            stmt = stmt.join(TestRun, TestSuite.id == TestRun.suite_id).where(TestRun.test_origin != "TAS")
+            stmt = stmt.join(TestRun, TestSuite.id == TestRun.suite_id).where(TestRun.test_origin.not_in(("TAS", "QG")))
             
         result = await db.execute(stmt)
         suites = list(result.scalars().all())

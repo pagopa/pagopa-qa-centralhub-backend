@@ -116,6 +116,7 @@ microservice-chart:
     JWT_SECRET: "qa-centralhub-jwt-secret" # (Not yet used) Must be 32 chars for HS256. used to sign JWTs for API authentication/authorization
     ENCRYPTION_KEY: "qa-centralhub-encryption-key" # Must be 32 chars for AES-256. used to encrypt sensitive data before storing in DB (e.g. Jira API token)
     GITHUB_TOKEN: "qa-centralhub-github-token"
+    TAS_GITHUB_TOKEN: "pagopa-platform-tas-github-bot-pat"
     JIRA_API_TOKEN: "qa-centralhub-jira-api-token"
     SUPERSET_PASSWORD: "qa-superset-password"
     GEMINI_API_KEY: "qa-centralhub-gemini-api-key"
