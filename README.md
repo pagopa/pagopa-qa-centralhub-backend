@@ -94,6 +94,10 @@ docker-compose.yml
 
 `GET /api/v1/quality-gate/runs/{correlation_id}` restituisce lo stato live della run letto da GitHub Actions (cerca per run-name `tas-<correlation_id>` tra le run `workflow_dispatch`): `state` è `pending` (GitHub non l'ha ancora elencata), `queued`, `in_progress` o `completed`; `conclusion` (`success`, `failure`, `cancelled`, ...) è valorizzata solo a run completata. Accetta solo id nel formato `qg-<32 hex>`.
 
+`GET /api/v1/quality-gate/runs` elenca le run lanciate dall'Hub (nome `tas-qg-…`) che sono in corso o partite nell'ultima ora, dalla più recente (max 20), con lo stesso payload dello stato singolo. Non salva nulla: GitHub è la fonte di verità, quindi una run fallita o annullata prima di scrivere il report resta visibile per un'ora. Le run lanciate a mano dal repository TAS non hanno il prefisso `tas-qg-` e non compaiono.
+
+`DELETE /api/v1/quality-gate/test-runs/{run_id}` elimina una singola run (le righe in `test_executions` seguono per cascade). Funziona solo per run con `test_origin = QG` (403 per TAS/NRT, 404 se non esiste) e scrive una riga in `audit_logs` (`quality_gate.run.delete`). Il report Allure già pubblicato non viene rimosso.
+
 Richiede `TAS_GITHUB_TOKEN` con **Actions: Read and write** sul repo TAS (503 se manca, 502 su errore GitHub). Le run QG sono lette con `origin=QG` da `/test-metrics/nrts`, `/nrts-suites` e `/suites/all`; senza `origin` le pagine NRT escludono sia TAS sia QG.
 
 > Finché `verify_jwt` non è implementato l'endpoint non ha autenticazione lato server: le uniche protezioni sono le guardie sugli input e l'audit log.

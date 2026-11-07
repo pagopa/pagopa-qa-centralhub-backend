@@ -111,6 +111,23 @@ class GitHubClient:
             logger.exception("GitHubClient.find_workflow_run_by_name failed")
             raise
 
+    async def list_dispatched_runs(self, workflow_file: str, *, per_page: int = 50) -> list[dict]:
+        """Return the most recent ``workflow_dispatch`` runs of a workflow, newest first."""
+        try:
+            url = f"{self.BASE_URL}/repos/{self.repo}/actions/workflows/{workflow_file}/runs"
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    url,
+                    params={"event": "workflow_dispatch", "per_page": per_page},
+                    headers=self._headers(),
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+                return (resp.json() or {}).get("workflow_runs", [])
+        except Exception:
+            logger.exception("GitHubClient.list_dispatched_runs failed")
+            raise
+
     async def list_run_artifacts(
         self, run_id: int, *, per_page: int = 100, page: int = 1
     ) -> list[dict]:
