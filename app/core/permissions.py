@@ -98,6 +98,18 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
     },
     {
+        "key": "view:qg_nrts",
+        "label": "Quality Gate (visualizza)",
+        "category": "Quality Gate",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
+    },
+    {
+        "key": "run:qg",
+        "label": "Quality Gate (lancia esecuzione)",
+        "category": "Quality Gate",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False},
+    },
+    {
         "key": "view:nrts",
         "label": "NRTs (visualizza)",
         "category": "Test Results",

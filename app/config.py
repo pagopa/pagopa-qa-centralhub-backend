@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     # GitHub integration
     github_token: str = ""
 
+    # Quality Gate launch (TAS workflow dispatch). The token needs Actions: Read and write on
+    # the TAS repository and is kept separate from the read-only github_token.
+    tas_github_token: str = ""
+    tas_repo: str = "pagopa/pagopa-platform-integration-test"
+    tas_workflow_file: str = "test-automation-service.yml"
+    tas_ref: str = "main"
+    # Comma-separated suites that can be launched; empty means any well-formed suite name.
+    qg_launch_suites: str = ""
+
     # EA Map, infrastructure view: also store VNet/subnet address prefixes (off: IPs, CIDRs
     # and subscription ids are never ingested, see docs/ea-map/DESIGN-infra.md §4)
     ea_infra_include_network_details: bool = False

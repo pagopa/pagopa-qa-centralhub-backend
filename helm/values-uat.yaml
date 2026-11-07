@@ -109,6 +109,7 @@ microservice-chart:
     JWT_SECRET: "qa-centralhub-jwt-secret"
     ENCRYPTION_KEY: "qa-centralhub-encryption-key"
     GITHUB_TOKEN: "qa-centralhub-github-token"
+    TAS_GITHUB_TOKEN: "pagopa-platform-tas-github-bot-pat"
     JIRA_API_TOKEN: "qa-centralhub-jira-api-token"
     SUPERSET_PASSWORD: "qa-superset-password"
     GEMINI_API_KEY: "qa-centralhub-gemini-api-key"

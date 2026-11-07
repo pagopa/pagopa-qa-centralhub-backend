@@ -95,8 +95,8 @@ async def get_nrts(db: AsyncSession, test_object: str | None, origin: str | None
             count_stmt = count_stmt.where(TestRun.test_origin == origin)
             stmt = stmt.where(TestRun.test_origin == origin)
         else:
-            count_stmt = count_stmt.where(TestRun.test_origin != "TAS")
-            stmt = stmt.where(TestRun.test_origin != "TAS")
+            count_stmt = count_stmt.where(TestRun.test_origin.not_in(("TAS", "QG")))
+            stmt = stmt.where(TestRun.test_origin.not_in(("TAS", "QG")))
 
         total: int = await db.scalar(count_stmt) or 0
         if total == 0:
@@ -247,7 +247,7 @@ async def list_suites_with_latest_run(
         if origin:
             stmt = stmt.where(TestRun.test_origin == origin)
         else:
-            stmt = stmt.where(TestRun.test_origin != "TAS")
+            stmt = stmt.where(TestRun.test_origin.not_in(("TAS", "QG")))
 
         test_objects = list(await db.scalars(stmt))
         if not test_objects:
@@ -265,7 +265,7 @@ async def list_suites_with_latest_run(
             if origin:
                 stmt = stmt.where(TestRun.test_origin == origin)
             else:
-                stmt = stmt.where(TestRun.test_origin != "TAS")
+                stmt = stmt.where(TestRun.test_origin.not_in(("TAS", "QG")))
             
             rows = (await db.execute(stmt)).all()
             if not rows:
