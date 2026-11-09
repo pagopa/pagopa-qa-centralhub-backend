@@ -386,3 +386,15 @@ async def test_api_scenarios_maps_results(client: AsyncClient) -> None:
         ok = await client.get(url)
     assert ok.status_code == 200
     assert ok.json() == []
+
+
+@pytest.mark.anyio
+async def test_list_scenarios_does_not_load_the_allure_payload() -> None:
+    from sqlalchemy.dialects import postgresql
+
+    db = _scenario_db(_run("QG"), [])
+    await svc.list_quality_gate_run_scenarios(db, uuid.UUID(RUN_ID))
+    query = db.execute.await_args_list[1].args[0]
+    sql = str(query.compile(dialect=postgresql.dialect()))
+    assert "allure_report" not in sql
+    assert "scenario_name" in sql

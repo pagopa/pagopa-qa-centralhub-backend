@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.config import settings
 from app.models.audit_log import AuditLog
@@ -225,6 +226,8 @@ async def list_quality_gate_run_scenarios(
         raise NotAQualityGateRunError(str(run_id))
     result = await db.execute(
         select(TestExecution)
+        # The raw Allure JSONB is large and the report never reads it: do not fetch it.
+        .options(defer(TestExecution.allure_report))
         .where(TestExecution.run_id == run_id)
         .order_by(TestExecution.scenario_name)
     )
