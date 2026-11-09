@@ -14,6 +14,7 @@ from app.api.v1 import (
     health,
     integrations,
     jira,
+    meta,
     notifications,
     overview,
     perf,
@@ -55,3 +56,4 @@ router.include_router(tm.router, prefix="/tm", tags=["tm"])
 router.include_router(test_metrics.router, prefix="/test-metrics", tags=["test-metrics"])
 router.include_router(suites.router, prefix="/suites", tags=["suites"])
 router.include_router(quality_gate.router, prefix="/quality-gate", tags=["quality-gate"])
+router.include_router(meta.router, prefix="/meta", tags=["meta"])
