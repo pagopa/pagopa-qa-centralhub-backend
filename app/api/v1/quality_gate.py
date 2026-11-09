@@ -13,6 +13,7 @@ from app.schemas.quality_gate import (
     QualityGateRunStatus,
     QualityGateScenarioOut,
 )
+from app.schemas.test_metrics import NrtListObject
 from app.services import quality_gate as quality_gate_svc
 
 router = APIRouter()
@@ -78,6 +79,19 @@ async def delete_run(run_id: uuid.UUID, db: DbDep) -> None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only Quality Gate runs can be deleted",
+        ) from exc
+
+
+@router.get("/test-runs/{run_id}", response_model=NrtListObject)
+async def get_run(run_id: uuid.UUID, db: DbDep) -> NrtListObject:
+    try:
+        return await quality_gate_svc.get_quality_gate_run(db, run_id)
+    except quality_gate_svc.QualityGateRunNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found") from exc
+    except quality_gate_svc.NotAQualityGateRunError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Quality Gate runs have a report",
         ) from exc
 
 

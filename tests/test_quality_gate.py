@@ -398,3 +398,33 @@ async def test_list_scenarios_does_not_load_the_allure_payload() -> None:
     sql = str(query.compile(dialect=postgresql.dialect()))
     assert "allure_report" not in sql
     assert "scenario_name" in sql
+
+
+@pytest.mark.anyio
+async def test_get_run_returns_run_and_suite_and_refuses_others() -> None:
+    def _db(row: tuple | None) -> MagicMock:
+        db = _fake_db()
+        result = MagicMock()
+        result.one_or_none = MagicMock(return_value=row)
+        db.execute = AsyncMock(return_value=result)
+        return db
+
+    with pytest.raises(svc.QualityGateRunNotFoundError):
+        await svc.get_quality_gate_run(_db(None), uuid.UUID(RUN_ID))
+    with pytest.raises(svc.NotAQualityGateRunError):
+        await svc.get_quality_gate_run(_db((_run("TAS"), MagicMock())), uuid.UUID(RUN_ID))
+
+
+@pytest.mark.anyio
+async def test_api_get_run_maps_results(client: AsyncClient) -> None:
+    url = f"/api/v1/quality-gate/test-runs/{RUN_ID}"
+    for error, code in [
+        (svc.QualityGateRunNotFoundError("x"), 404),
+        (svc.NotAQualityGateRunError("x"), 403),
+    ]:
+        with patch.object(svc, "get_quality_gate_run", AsyncMock(side_effect=error)):
+            assert (await client.get(url)).status_code == code
+    with patch.object(
+        svc, "get_quality_gate_run", AsyncMock(return_value={"test_run": None, "test_suite": None})
+    ):
+        assert (await client.get(url)).status_code == 200

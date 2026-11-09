@@ -11,12 +11,13 @@ from sqlalchemy.orm import defer
 
 from app.config import settings
 from app.models.audit_log import AuditLog
-from app.models.test_metrics import TestExecution, TestRun
+from app.models.test_metrics import TestExecution, TestRun, TestSuite
 from app.schemas.quality_gate import (
     QualityGateRunCreate,
     QualityGateRunOut,
     QualityGateRunStatus,
 )
+from app.schemas.test_metrics import NrtListObject, TestRunOut, TestSuiteOut
 from app.services.github import GitHubClient
 
 logger = structlog.get_logger(__name__)
@@ -232,3 +233,26 @@ async def list_quality_gate_run_scenarios(
         .order_by(TestExecution.scenario_name)
     )
     return list(result.scalars().all())
+
+
+async def get_quality_gate_run(db: AsyncSession, run_id: uuid.UUID) -> NrtListObject:
+    """A single Quality Gate run with its suite, in the same shape as the runs list.
+
+    It backs the shareable report page, which opens from a link and cannot rely on the list.
+    """
+    row = (
+        await db.execute(
+            select(TestRun, TestSuite)
+            .join(TestSuite, TestRun.suite_id == TestSuite.id)
+            .where(TestRun.id == run_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise QualityGateRunNotFoundError(str(run_id))
+    run, suite = row
+    if run.test_origin != "QG":
+        raise NotAQualityGateRunError(str(run_id))
+    return NrtListObject(
+        test_run=TestRunOut.model_validate(run),
+        test_suite=TestSuiteOut.model_validate(suite),
+    )
