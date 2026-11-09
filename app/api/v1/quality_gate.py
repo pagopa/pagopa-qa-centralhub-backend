@@ -12,6 +12,7 @@ from app.schemas.quality_gate import (
     QualityGateRunOut,
     QualityGateRunStatus,
     QualityGateScenarioOut,
+    QualityGateSuitesOut,
 )
 from app.schemas.test_metrics import NrtListObject
 from app.services import quality_gate as quality_gate_svc
@@ -32,11 +33,27 @@ async def launch_run(body: QualityGateRunCreate, db: DbDep) -> QualityGateRunOut
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Suite '{exc}' cannot be launched from the Hub",
         ) from exc
+    except quality_gate_svc.QualityGateSuiteTypeError as exc:
+        if exc.available:
+            detail = (
+                f"Suite '{exc.suite}' has no '{exc.test_type}' tests "
+                f"(available: {', '.join(exc.available)})"
+            )
+        else:
+            detail = f"Suite '{exc.suite}' does not exist in the TAS repository"
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail
+        ) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="GitHub dispatch failed",
         ) from exc
+
+
+@router.get("/suites", response_model=QualityGateSuitesOut)
+async def list_suites() -> QualityGateSuitesOut:
+    return await quality_gate_svc.list_quality_gate_suites()
 
 
 @router.get("/runs", response_model=list[QualityGateRunStatus])

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +18,7 @@ from app.schemas.quality_gate import (
     QualityGateRunCreate,
     QualityGateRunOut,
     QualityGateRunStatus,
+    QualityGateSuitesOut,
 )
 from app.schemas.test_metrics import NrtListObject, TestRunOut, TestSuiteOut
 from app.services.github import GitHubClient
@@ -44,6 +47,54 @@ class NotAQualityGateRunError(Exception):
 
 class QualityGateSuiteNotAllowedError(Exception):
     """The requested suite is not in the configured allowlist."""
+
+
+class QualityGateSuiteTypeError(Exception):
+    """The suite has no tests of the requested type in the TAS repository."""
+
+    def __init__(self, suite: str, test_type: str, available: list[str]) -> None:
+        super().__init__(suite)
+        self.suite = suite
+        self.test_type = test_type
+        self.available = available
+
+
+TEST_TYPES = ("integration", "e2e", "api")
+SUITE_CATALOG_TTL_SECONDS = 60.0
+_suite_catalog_cache: tuple[float, dict[str, list[str]]] | None = None
+
+
+async def get_suite_catalog() -> dict[str, list[str]] | None:
+    """Map each suite to the test types it has under `src/<type>/<suite>` in the TAS repository.
+
+    Returns None when the repository cannot be read (missing permission, GitHub outage): callers
+    must then skip the validation rather than block launches. Successful lookups are cached
+    briefly, as the launch form and the launch itself both need them.
+    """
+    global _suite_catalog_cache  # noqa: PLW0603
+    now = time.monotonic()
+    if _suite_catalog_cache and now - _suite_catalog_cache[0] < SUITE_CATALOG_TTL_SECONDS:
+        return _suite_catalog_cache[1]
+
+    client = GitHubClient(token=settings.tas_github_token, repo=settings.tas_repo)
+    catalog: dict[str, list[str]] = {}
+    try:
+        for test_type in TEST_TYPES:
+            try:
+                entries = await client.list_directory(f"src/{test_type}", ref=settings.tas_ref)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == httpx.codes.NOT_FOUND:
+                    continue  # that test type has no folder at all
+                raise
+            for entry in entries:
+                if entry.get("type") == "dir" and entry.get("name"):
+                    catalog.setdefault(str(entry["name"]), []).append(test_type)
+    except httpx.HTTPError:
+        logger.warning("quality_gate suite catalog unavailable, skipping suite validation")
+        return None
+
+    _suite_catalog_cache = (now, catalog)
+    return catalog
 
 
 def _allowed_suites() -> set[str]:
@@ -79,6 +130,14 @@ async def launch_quality_gate_run(
     allowed = _allowed_suites()
     if allowed and body.test_suite not in allowed:
         raise QualityGateSuiteNotAllowedError(body.test_suite)
+
+    # A suite/type pair that does not exist would only fail later inside the workflow, after
+    # wasting a run: reject it here. When the repository cannot be read the check is skipped.
+    catalog = await get_suite_catalog()
+    if catalog is not None and body.test_type not in catalog.get(body.test_suite, []):
+        raise QualityGateSuiteTypeError(
+            body.test_suite, body.test_type, catalog.get(body.test_suite, [])
+        )
 
     # The workflow run-name is "tas-<correlation_id>", so this yields "tas-qg-<hex>".
     correlation_id = f"qg-{uuid.uuid4().hex}"
@@ -256,3 +315,17 @@ async def get_quality_gate_run(db: AsyncSession, run_id: uuid.UUID) -> NrtListOb
         test_run=TestRunOut.model_validate(run),
         test_suite=TestSuiteOut.model_validate(suite),
     )
+
+
+async def list_quality_gate_suites() -> QualityGateSuitesOut:
+    """Launchable suites with their test types, for the launch form."""
+    catalog = await get_suite_catalog()
+    if catalog is None:
+        return QualityGateSuitesOut(available=False, suites={})
+    allowed = _allowed_suites()
+    suites = {
+        name: sorted(types, key=TEST_TYPES.index)
+        for name, types in sorted(catalog.items())
+        if not allowed or name in allowed
+    }
+    return QualityGateSuitesOut(available=True, suites=suites)
