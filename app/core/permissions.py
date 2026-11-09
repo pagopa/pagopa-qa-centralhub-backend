@@ -104,6 +104,12 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
     },
     {
+        "key": "view:qg_report",
+        "label": "Quality Gate (report della singola run)",
+        "category": "Quality Gate",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": True},
+    },
+    {
         "key": "run:qg",
         "label": "Quality Gate (lancia esecuzione)",
         "category": "Quality Gate",
