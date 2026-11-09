@@ -23,6 +23,17 @@ class QualityGateRunOut(BaseModel):
     actions_url: str
 
 
+class QualityGateSuitesOut(BaseModel):
+    """Suites that can be launched and the test types each one has in the TAS repository.
+
+    `available` is false when the repository could not be read: the client must then not
+    restrict the choice, because the launch itself does not validate in that case either.
+    """
+
+    available: bool
+    suites: dict[str, list[str]]
+
+
 CORRELATION_ID_PATTERN = r"^qg-[0-9a-f]{32}$"
 
 

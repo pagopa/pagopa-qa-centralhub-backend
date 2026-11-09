@@ -25,6 +25,13 @@ def _fake_db() -> MagicMock:
     return db
 
 
+@pytest.fixture(autouse=True)
+def _no_suite_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """By default the TAS repository cannot be read, so launches are not validated."""
+    monkeypatch.setattr(svc, "_suite_catalog_cache", None)
+    monkeypatch.setattr(svc, "get_suite_catalog", AsyncMock(return_value=None))
+
+
 @pytest.fixture
 def configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "tas_github_token", "tok")
@@ -428,3 +435,99 @@ async def test_api_get_run_maps_results(client: AsyncClient) -> None:
         svc, "get_quality_gate_run", AsyncMock(return_value={"test_run": None, "test_suite": None})
     ):
         assert (await client.get(url)).status_code == 200
+
+
+CATALOG = {"checkout": ["e2e"], "wisp": ["integration", "e2e"]}
+
+
+@pytest.mark.anyio
+async def test_launch_rejects_a_suite_without_the_requested_test_type(
+    configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(svc, "get_suite_catalog", AsyncMock(return_value=CATALOG))
+    with patch.object(GitHubClient, "dispatch_workflow", new_callable=AsyncMock) as dispatch:
+        with pytest.raises(svc.QualityGateSuiteTypeError) as caught:
+            await svc.launch_quality_gate_run(
+                _fake_db(), QualityGateRunCreate(test_suite="checkout", test_type="integration")
+            )
+        with pytest.raises(svc.QualityGateSuiteTypeError) as unknown:
+            await svc.launch_quality_gate_run(_fake_db(), QualityGateRunCreate(test_suite="nope"))
+        await svc.launch_quality_gate_run(
+            _fake_db(), QualityGateRunCreate(test_suite="checkout", test_type="e2e")
+        )
+    assert caught.value.available == ["e2e"]
+    assert unknown.value.available == []
+    assert dispatch.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_suite_catalog_maps_suites_to_types_and_caches(
+    configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.undo()
+    monkeypatch.setattr(svc, "_suite_catalog_cache", None)
+    monkeypatch.setattr(settings, "tas_github_token", "tok")
+    not_found = httpx.HTTPStatusError(
+        "nf", request=MagicMock(), response=MagicMock(status_code=404)
+    )
+    listing = {
+        "src/integration": [{"type": "dir", "name": "wisp"}, {"type": "file", "name": "x.py"}],
+        "src/e2e": [{"type": "dir", "name": "checkout"}, {"type": "dir", "name": "wisp"}],
+    }
+
+    async def fake_list(_self: GitHubClient, path: str, ref: str = "gh-pages") -> list[dict]:
+        if path not in listing:
+            raise not_found
+        return listing[path]
+
+    with patch.object(GitHubClient, "list_directory", fake_list):
+        first = await svc.get_suite_catalog()
+    with patch.object(GitHubClient, "list_directory", AsyncMock(side_effect=AssertionError)):
+        second = await svc.get_suite_catalog()
+    assert first == {"wisp": ["integration", "e2e"], "checkout": ["e2e"]}
+    assert second == first
+
+
+@pytest.mark.anyio
+async def test_suite_catalog_is_none_when_the_repository_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.undo()
+    monkeypatch.setattr(svc, "_suite_catalog_cache", None)
+    boom = AsyncMock(side_effect=httpx.ConnectError("x"))
+    with patch.object(GitHubClient, "list_directory", boom):
+        assert await svc.get_suite_catalog() is None
+
+
+@pytest.mark.anyio
+async def test_list_suites_filters_by_allowlist_and_reports_unavailability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(svc, "get_suite_catalog", AsyncMock(return_value=CATALOG))
+    monkeypatch.setattr(settings, "qg_launch_suites", "wisp")
+    out = await svc.list_quality_gate_suites()
+    assert out.available is True
+    assert out.suites == {"wisp": ["integration", "e2e"]}
+    monkeypatch.setattr(svc, "get_suite_catalog", AsyncMock(return_value=None))
+    assert (await svc.list_quality_gate_suites()).available is False
+
+
+@pytest.mark.anyio
+async def test_api_maps_a_suite_type_mismatch_to_422_with_a_hint(client: AsyncClient) -> None:
+    error = svc.QualityGateSuiteTypeError("checkout", "integration", ["e2e"])
+    with patch.object(svc, "launch_quality_gate_run", AsyncMock(side_effect=error)):
+        response = await client.post("/api/v1/quality-gate/runs", json={"test_suite": "checkout"})
+    assert response.status_code == 422
+    assert "available: e2e" in response.json()["detail"]
+    unknown = svc.QualityGateSuiteTypeError("nope", "api", [])
+    with patch.object(svc, "launch_quality_gate_run", AsyncMock(side_effect=unknown)):
+        response = await client.post("/api/v1/quality-gate/runs", json={"test_suite": "nope"})
+    assert "does not exist" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_api_lists_suites(client: AsyncClient) -> None:
+    out = svc.QualityGateSuitesOut(available=True, suites={"wisp": ["e2e"]})
+    with patch.object(svc, "list_quality_gate_suites", AsyncMock(return_value=out)):
+        response = await client.get("/api/v1/quality-gate/suites")
+    assert response.json() == {"available": True, "suites": {"wisp": ["e2e"]}}
