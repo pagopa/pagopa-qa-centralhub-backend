@@ -11,6 +11,7 @@ from app.schemas.quality_gate import (
     QualityGateRunCreate,
     QualityGateRunOut,
     QualityGateRunStatus,
+    QualityGateScenarioOut,
 )
 from app.services import quality_gate as quality_gate_svc
 
@@ -78,3 +79,17 @@ async def delete_run(run_id: uuid.UUID, db: DbDep) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only Quality Gate runs can be deleted",
         ) from exc
+
+
+@router.get("/test-runs/{run_id}/scenarios", response_model=list[QualityGateScenarioOut])
+async def list_run_scenarios(run_id: uuid.UUID, db: DbDep) -> list[QualityGateScenarioOut]:
+    try:
+        scenarios = await quality_gate_svc.list_quality_gate_run_scenarios(db, run_id)
+    except quality_gate_svc.QualityGateRunNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found") from exc
+    except quality_gate_svc.NotAQualityGateRunError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Quality Gate runs have a report",
+        ) from exc
+    return [QualityGateScenarioOut.model_validate(s) for s in scenarios]

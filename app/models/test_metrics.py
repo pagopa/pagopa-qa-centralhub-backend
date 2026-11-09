@@ -89,6 +89,7 @@ class TestRun(Base):
     qa_issue = Column(String, nullable=True)
     product_issue_status = Column(String, nullable=True)
     qa_issue_status = Column(String, nullable=True)
+    gha_run_url = Column(String, nullable=True)
 
 class TestExecution(Base):
     __tablename__ = 'test_executions'

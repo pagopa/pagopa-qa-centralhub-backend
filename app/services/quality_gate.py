@@ -7,10 +7,11 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.config import settings
 from app.models.audit_log import AuditLog
-from app.models.test_metrics import TestRun
+from app.models.test_metrics import TestExecution, TestRun
 from app.schemas.quality_gate import (
     QualityGateRunCreate,
     QualityGateRunOut,
@@ -212,3 +213,22 @@ async def delete_quality_gate_run(db: AsyncSession, run_id: uuid.UUID) -> None:
     await db.commit()
     await _audit(db, str(run_id), detail, action=DELETE_AUDIT_ACTION)
     logger.info("quality_gate run deleted", run_id=str(run_id))
+
+
+async def list_quality_gate_run_scenarios(
+    db: AsyncSession, run_id: uuid.UUID
+) -> list[TestExecution]:
+    """All scenarios of a Quality Gate run (passed ones included), for the run report."""
+    run = (await db.execute(select(TestRun).where(TestRun.id == run_id))).scalar_one_or_none()
+    if run is None:
+        raise QualityGateRunNotFoundError(str(run_id))
+    if run.test_origin != "QG":
+        raise NotAQualityGateRunError(str(run_id))
+    result = await db.execute(
+        select(TestExecution)
+        # The raw Allure JSONB is large and the report never reads it: do not fetch it.
+        .options(defer(TestExecution.allure_report))
+        .where(TestExecution.run_id == run_id)
+        .order_by(TestExecution.scenario_name)
+    )
+    return list(result.scalars().all())

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SUITE_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,63}$"
 TAGS_PATTERN = r"^[@A-Za-z0-9_,.~-]{0,200}$"
@@ -39,3 +40,23 @@ class QualityGateRunStatus(BaseModel):
     html_url: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+class QualityGateScenarioOut(BaseModel):
+    """A scenario of a Quality Gate run, without the (large) raw Allure payload."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    scenario_name: str | None = None
+    status: str | None = None
+    duration_ms: int | None = None
+    retries: int | None = None
+    error_message: str | None = None
+    allure_url: str | None = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _status_value(cls, value: object) -> object:
+        # The ORM exposes an Enum member; the API returns its plain value (e.g. "FAILED").
+        return getattr(value, "value", value)

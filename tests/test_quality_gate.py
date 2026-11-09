@@ -329,3 +329,72 @@ async def test_api_list_runs_maps_errors(client: AsyncClient) -> None:
         with patch.object(svc, "list_quality_gate_runs", mock):
             response = await client.get("/api/v1/quality-gate/runs")
         assert response.status_code == code
+
+
+def _scenario_db(run: MagicMock | None, scenarios: list[MagicMock]) -> MagicMock:
+    db = _fake_db()
+    lookup = MagicMock()
+    lookup.scalar_one_or_none = MagicMock(return_value=run)
+    listing = MagicMock()
+    listing.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=scenarios)))
+    db.execute = AsyncMock(side_effect=[lookup, listing])
+    return db
+
+
+@pytest.mark.anyio
+async def test_list_scenarios_returns_every_status_for_a_qg_run() -> None:
+    scenarios = [MagicMock(), MagicMock()]
+    db = _scenario_db(_run("QG"), scenarios)
+    out = await svc.list_quality_gate_run_scenarios(db, uuid.UUID(RUN_ID))
+    assert out == scenarios
+
+
+@pytest.mark.anyio
+async def test_list_scenarios_refuses_non_qg_and_missing_runs() -> None:
+    with pytest.raises(svc.NotAQualityGateRunError):
+        await svc.list_quality_gate_run_scenarios(_scenario_db(_run("TAS"), []), uuid.UUID(RUN_ID))
+    with pytest.raises(svc.QualityGateRunNotFoundError):
+        await svc.list_quality_gate_run_scenarios(_scenario_db(None, []), uuid.UUID(RUN_ID))
+
+
+def test_scenario_schema_flattens_enum_status() -> None:
+    from app.models.test_metrics import ScenarioStatusEnum
+    from app.schemas.quality_gate import QualityGateScenarioOut
+
+    row = MagicMock(
+        id=uuid.UUID(RUN_ID),
+        scenario_name="s",
+        status=ScenarioStatusEnum.FAILED,
+        duration_ms=5,
+        retries=0,
+        error_message="boom",
+        allure_url=None,
+    )
+    assert QualityGateScenarioOut.model_validate(row).status == "FAILED"
+
+
+@pytest.mark.anyio
+async def test_api_scenarios_maps_results(client: AsyncClient) -> None:
+    url = f"/api/v1/quality-gate/test-runs/{RUN_ID}/scenarios"
+    for error, code in [
+        (svc.QualityGateRunNotFoundError("x"), 404),
+        (svc.NotAQualityGateRunError("x"), 403),
+    ]:
+        with patch.object(svc, "list_quality_gate_run_scenarios", AsyncMock(side_effect=error)):
+            assert (await client.get(url)).status_code == code
+    with patch.object(svc, "list_quality_gate_run_scenarios", AsyncMock(return_value=[])):
+        ok = await client.get(url)
+    assert ok.status_code == 200
+    assert ok.json() == []
+
+
+@pytest.mark.anyio
+async def test_list_scenarios_does_not_load_the_allure_payload() -> None:
+    from sqlalchemy.dialects import postgresql
+
+    db = _scenario_db(_run("QG"), [])
+    await svc.list_quality_gate_run_scenarios(db, uuid.UUID(RUN_ID))
+    query = db.execute.await_args_list[1].args[0]
+    sql = str(query.compile(dialect=postgresql.dialect()))
+    assert "allure_report" not in sql
+    assert "scenario_name" in sql
