@@ -31,7 +31,9 @@ uv run uvicorn app.main:app --reload --port 8000
 ```
 
 API docs: http://localhost:8000/docs  
-OpenAPI JSON: http://localhost:8000/openapi.json
+OpenAPI JSON: http://localhost:8000/api/v1/openapi.json
+
+Behind Azure APIM only the operations imported from `openapi/qa-hub-be.json` are reachable, so the built-in `/docs` and `/api/v1/openapi.json` are not. The portal's "API Docs" page therefore reads the specification from the regular endpoint `GET /api/v1/meta/openapi`, which is part of the imported specification: after adding it, re-import the specification in APIM. (`/api/v1/docs` is the Knowledge Base API, not Swagger UI.)
 
 ## Run tests
 
