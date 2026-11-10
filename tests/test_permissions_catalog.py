@@ -9,7 +9,7 @@ def test_action_keys_match_catalog() -> None:
 
 
 def test_action_catalog_size() -> None:
-    assert len(ACTION_CATALOG) == 22
+    assert len(ACTION_CATALOG) == 24
 
 
 def test_quality_gate_report_is_readable_by_every_role_including_guest() -> None:
@@ -18,6 +18,14 @@ def test_quality_gate_report_is_readable_by_every_role_including_guest() -> None
     # The list stays hidden from guests: only the single-run report is open to them.
     qg_list = next(e for e in ACTION_CATALOG if e["key"] == "view:qg_nrts")
     assert qg_list["defaults"]["guest"] is False
+
+
+def test_tas_and_nrt_reports_are_readable_by_every_role_including_guest() -> None:
+    for report, listing in [("view:tas_report", "view:tas_nrts"), ("view:nrts_report", "view:nrts")]:
+        entry = next(e for e in ACTION_CATALOG if e["key"] == report)
+        assert all(entry["defaults"].values())
+        list_entry = next(e for e in ACTION_CATALOG if e["key"] == listing)
+        assert list_entry["defaults"]["guest"] is False
 
 
 def test_action_catalog_has_data_quality_entries() -> None:

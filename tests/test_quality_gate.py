@@ -437,6 +437,49 @@ async def test_api_get_run_maps_results(client: AsyncClient) -> None:
         assert (await client.get(url)).status_code == 200
 
 
+@pytest.mark.anyio
+async def test_report_services_accept_the_requested_origin() -> None:
+    scenarios = [MagicMock()]
+    out = await svc.list_quality_gate_run_scenarios(
+        _scenario_db(_run("TAS"), scenarios), uuid.UUID(RUN_ID), origin="TAS"
+    )
+    assert out == scenarios
+    with pytest.raises(svc.NotAQualityGateRunError):
+        await svc.list_quality_gate_run_scenarios(
+            _scenario_db(_run("QG"), []), uuid.UUID(RUN_ID), origin="TAS"
+        )
+
+
+def test_origin_matches_nrt_means_any_origin_but_tas_and_qg() -> None:
+    assert svc.origin_matches("TAS", "TAS")
+    assert not svc.origin_matches("QG", "TAS")
+    for nrt in ("GHA", "ea-live-demo", None):
+        assert svc.origin_matches(nrt, "NRT")
+    for other in ("TAS", "QG"):
+        assert not svc.origin_matches(other, "NRT")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("prefix", "origin"), [("tas", "TAS"), ("nrts", "NRT")])
+async def test_api_run_report_maps_results_and_asks_for_its_origin(
+    client: AsyncClient, prefix: str, origin: str
+) -> None:
+    base = f"/api/v1/test-metrics/{prefix}/test-runs/{RUN_ID}"
+    for name, url, ok_value in [
+        ("get_quality_gate_run", base, {"test_run": None, "test_suite": None}),
+        ("list_quality_gate_run_scenarios", f"{base}/scenarios", []),
+    ]:
+        for error, code in [
+            (svc.QualityGateRunNotFoundError("x"), 404),
+            (svc.NotAQualityGateRunError("x"), 403),
+        ]:
+            with patch.object(svc, name, AsyncMock(side_effect=error)):
+                assert (await client.get(url)).status_code == code
+        with patch.object(svc, name, AsyncMock(return_value=ok_value)) as mock:
+            assert (await client.get(url)).status_code == 200
+        assert mock.await_args.kwargs["origin"] == origin
+
+
 CATALOG = {"checkout": ["e2e"], "wisp": ["integration", "e2e"]}
 
 

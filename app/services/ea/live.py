@@ -42,6 +42,8 @@ class RunRow:
     skipped: int
     duration_ms: int | None
     allure_url: str | None
+    run_id: str | None = None
+    origin: str | None = None
 
 
 def run_status(r: RunRow) -> str:
@@ -135,6 +137,8 @@ def summarise(g: GraphIndex, rows: list[RunRow], now: datetime) -> dict[str, Any
                 "failed": r.failed + r.broken,
                 "total": r.total,
                 "allure_url": r.allure_url,
+                "run_id": r.run_id,
+                "origin": r.origin,
                 "nodes": object_nodes(g, r.test_object),
             }
             for r in rows
@@ -169,6 +173,8 @@ async def run_columns(db: AsyncSession) -> set[str]:
 
 async def load_runs(db: AsyncSession, env: str, since: datetime) -> list[RunRow]:
     cols = [
+        TestRun.id,
+        TestRun.test_origin,
         TestRun.trigger_type,
         TestRun.env,
         TestRun.timestamp_start,
@@ -206,6 +212,8 @@ async def load_runs(db: AsyncSession, env: str, since: datetime) -> list[RunRow]
                 skipped=m["skipped_scenario"] or 0,
                 duration_ms=m["duration_ms"],
                 allure_url=m["allure_url"] if with_allure else None,
+                run_id=str(m["id"]),
+                origin=m["test_origin"],
             )
         )
     return out
