@@ -98,6 +98,12 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
     },
     {
+        "key": "view:tas_report",
+        "label": "TAS (report della singola run)",
+        "category": "Test automation service - Test Results",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": True},
+    },
+    {
         "key": "view:qg_nrts",
         "label": "Quality Gate (visualizza)",
         "category": "Quality Gate",
@@ -120,6 +126,12 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "label": "NRTs (visualizza)",
         "category": "Test Results",
         "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
+    },
+    {
+        "key": "view:nrts_report",
+        "label": "NRTs (report della singola run)",
+        "category": "Test Results",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": True},
     },
     {
         "key": "view:ea_map",

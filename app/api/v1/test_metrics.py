@@ -11,6 +11,8 @@ from app.deps import DbDep
 from app.models.test_metrics import TestSuite, TestExecution, TestRun, FlakyScenario
 from app.schemas.test_metrics import NrtDetailsObject, TestExecutionCreate, TestExecutionOut, FlakyScenarioIn, FlakyScenarioOut
 from app.schemas.test_metrics import TestSuiteOut, TestSuiteCreate, TestRunCreate, TestRunOut, NrtListObject, UpdateNrtsObject, NrtWithLatestRunOut
+from app.schemas.quality_gate import QualityGateScenarioOut
+from app.services import quality_gate as quality_gate_svc
 from app.services import test_metrics as test_metrics_svc
 from app.schemas.common import PaginatedResponse
 
@@ -228,3 +230,57 @@ async def avg_pass_rate(db: DbDep) -> int | None:
             detail="No pass rate data found",
         )
     return avg_rate
+
+
+# ── TAS and NRT run reports ────────────────────────────────────────
+# The single-run report of a TAS or NRT run (linked from the EA map «Live» panel) is the
+# same one the Quality Gate has: it reuses its service with the TAS origin, or with "NRT"
+# (any origin other than TAS and QG, like the NRT list). 404 if the run does not exist,
+# 403 if it is of another origin.
+
+
+async def _run_report(db: DbDep, run_id: uuid.UUID, origin: str) -> NrtListObject:
+    try:
+        return await quality_gate_svc.get_quality_gate_run(db, run_id, origin=origin)
+    except quality_gate_svc.QualityGateRunNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found") from exc
+    except quality_gate_svc.NotAQualityGateRunError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=f"Not a {origin} run"
+        ) from exc
+
+
+async def _run_report_scenarios(
+    db: DbDep, run_id: uuid.UUID, origin: str
+) -> list[QualityGateScenarioOut]:
+    try:
+        scenarios = await quality_gate_svc.list_quality_gate_run_scenarios(
+            db, run_id, origin=origin
+        )
+    except quality_gate_svc.QualityGateRunNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found") from exc
+    except quality_gate_svc.NotAQualityGateRunError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=f"Not a {origin} run"
+        ) from exc
+    return [QualityGateScenarioOut.model_validate(s) for s in scenarios]
+
+
+@router.get("/tas/test-runs/{run_id}", response_model=NrtListObject)
+async def get_tas_run(run_id: uuid.UUID, db: DbDep) -> NrtListObject:
+    return await _run_report(db, run_id, "TAS")
+
+
+@router.get("/tas/test-runs/{run_id}/scenarios", response_model=list[QualityGateScenarioOut])
+async def list_tas_run_scenarios(run_id: uuid.UUID, db: DbDep) -> list[QualityGateScenarioOut]:
+    return await _run_report_scenarios(db, run_id, "TAS")
+
+
+@router.get("/nrts/test-runs/{run_id}", response_model=NrtListObject)
+async def get_nrt_run(run_id: uuid.UUID, db: DbDep) -> NrtListObject:
+    return await _run_report(db, run_id, quality_gate_svc.NRT_ORIGIN)
+
+
+@router.get("/nrts/test-runs/{run_id}/scenarios", response_model=list[QualityGateScenarioOut])
+async def list_nrt_run_scenarios(run_id: uuid.UUID, db: DbDep) -> list[QualityGateScenarioOut]:
+    return await _run_report_scenarios(db, run_id, quality_gate_svc.NRT_ORIGIN)

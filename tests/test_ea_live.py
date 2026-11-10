@@ -35,6 +35,8 @@ def _run(
         skipped=0,
         duration_ms=1000,
         allure_url=f"https://allure/{obj}/{hours_ago}",
+        run_id=f"run-{obj}-{hours_ago}",
+        origin="TAS",
     )
 
 
@@ -82,6 +84,9 @@ def test_summarise_last_outcome_history_and_feed() -> None:
     assert out["counts"] == {"passed": 2, "partial": 0, "failed": 1}
     assert [f["test_object"] for f in out["feed"]][:2] == ["wisp", "mystery"]
     assert out["feed"][0]["nodes"] == ["pagopa-wisp-converter"]
+    # Each feed item names its run and origin, so the panel can open the run report.
+    assert out["feed"][0]["run_id"].startswith("run-wisp-")
+    assert out["feed"][0]["origin"] == "TAS"
 
 
 def test_old_failure_is_not_fresh() -> None:

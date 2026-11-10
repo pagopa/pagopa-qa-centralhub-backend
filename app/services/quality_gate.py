@@ -41,8 +41,21 @@ class QualityGateRunNotFoundError(Exception):
     """No test run exists with the given id."""
 
 
+# Origins with their own pages: every other run is an NRT run (the ``/nrts`` list).
+DEDICATED_ORIGINS = ("TAS", "QG")
+NRT_ORIGIN = "NRT"
+
+
+def origin_matches(run_origin: str | None, origin: str) -> bool:
+    """Whether a run of ``run_origin`` belongs to the report asked for: ``QG``, ``TAS``, or
+    ``NRT`` (any origin other than TAS and QG, as the NRT list shows them)."""
+    if origin == NRT_ORIGIN:
+        return run_origin not in DEDICATED_ORIGINS
+    return run_origin == origin
+
+
 class NotAQualityGateRunError(Exception):
-    """The test run exists but was not produced by a Quality Gate."""
+    """The test run exists but was not produced by a Quality Gate (or by the origin asked for)."""
 
 
 class QualityGateSuiteNotAllowedError(Exception):
@@ -276,13 +289,17 @@ async def delete_quality_gate_run(db: AsyncSession, run_id: uuid.UUID) -> None:
 
 
 async def list_quality_gate_run_scenarios(
-    db: AsyncSession, run_id: uuid.UUID
+    db: AsyncSession, run_id: uuid.UUID, origin: str = "QG"
 ) -> list[TestExecution]:
-    """All scenarios of a Quality Gate run (passed ones included), for the run report."""
+    """All scenarios of a run (passed ones included), for the run report.
+
+    The report is shared by Quality Gate, TAS and NRT runs: ``origin`` is the one accepted
+    (see :func:`origin_matches`).
+    """
     run = (await db.execute(select(TestRun).where(TestRun.id == run_id))).scalar_one_or_none()
     if run is None:
         raise QualityGateRunNotFoundError(str(run_id))
-    if run.test_origin != "QG":
+    if not origin_matches(run.test_origin, origin):
         raise NotAQualityGateRunError(str(run_id))
     result = await db.execute(
         select(TestExecution)
@@ -294,8 +311,11 @@ async def list_quality_gate_run_scenarios(
     return list(result.scalars().all())
 
 
-async def get_quality_gate_run(db: AsyncSession, run_id: uuid.UUID) -> NrtListObject:
-    """A single Quality Gate run with its suite, in the same shape as the runs list.
+async def get_quality_gate_run(
+    db: AsyncSession, run_id: uuid.UUID, origin: str = "QG"
+) -> NrtListObject:
+    """A single run of ``origin`` (Quality Gate by default, TAS or NRT) with its suite, in the
+    same shape as the runs list.
 
     It backs the shareable report page, which opens from a link and cannot rely on the list.
     """
@@ -309,7 +329,7 @@ async def get_quality_gate_run(db: AsyncSession, run_id: uuid.UUID) -> NrtListOb
     if row is None:
         raise QualityGateRunNotFoundError(str(run_id))
     run, suite = row
-    if run.test_origin != "QG":
+    if not origin_matches(run.test_origin, origin):
         raise NotAQualityGateRunError(str(run_id))
     return NrtListObject(
         test_run=TestRunOut.model_validate(run),
