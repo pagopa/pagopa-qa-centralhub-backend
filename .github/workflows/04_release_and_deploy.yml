@@ -1,15 +1,25 @@
 name: Release And Deploy
 
-# Standard PagoPA "Release And Deploy" pipeline.
+# Release and deploy pipeline of the backend.
 # Triggers:
-#   - PR merged on main      → auto release + deploy on dev
+#   - PR merged on main      → release (type from the PR labels) + deploy on dev
 #   - merge_group on main    → CI dry-run
-#   - workflow_dispatch      → manual run, pick env (dev/uat/prod) and bump
-#   - workflow_call          → invoked by other workflows
+#   - workflow_dispatch      → manual run: pick the environment (dev/uat/prod) and the release type
+#   - workflow_call          → invoked by other workflows (release type: skip)
+#
+# Release type (SemVer bump):
+#   - patch | minor | major → bump the version, tag, create the GitHub release, build the image
+#   - skip                  → no bump: the current version (latest stable tag) is rebuilt,
+#                             pushed to the registry and deployed with Helm
+# On a merged PR the type comes from the PR labels (skip > major > minor > patch; no label = skip).
+# On a manual run the default is skip; patch/minor/major stay available on every environment.
+# A run on a branch other than main never touches stable versions: it always publishes a
+# beta prerelease, whatever the requested type.
 on:
   merge_group:
     branches: [main]
   pull_request:
+    branches: [main]
     types: [closed]
 
   workflow_dispatch:
@@ -22,15 +32,17 @@ on:
           - dev
           - uat
           - prod
+        default: dev
       version:
         required: false
         type: choice
-        description: Select the version
+        description: Release type (skip = rebuild and deploy the current version)
         options:
+          - skip
           - patch
-          - skip_or_promote
-          - new_release
-          - breaking_change
+          - minor
+          - major
+        default: skip
       beta:
         required: false
         type: boolean
@@ -55,8 +67,8 @@ jobs:
     name: Setup
     runs-on: ubuntu-latest
     outputs:
-      semver: ${{ steps.get_semver.outputs.semver }}
-      environment: ${{ steps.get_env.outputs.environment }}
+      semver: ${{ steps.params.outputs.semver }}
+      environment: ${{ steps.params.outputs.environment }}
     steps:
       - name: pull request rejected
         if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged != true
@@ -64,59 +76,86 @@ jobs:
           echo "❌ PR was closed without a merge"
           exit 1
 
-      # ---- Determine SemVer bump --------------------------------------------------
-      - run: echo "SEMVER=patch" >> $GITHUB_ENV
+      - id: params
+        name: Resolve environment and release type
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_ENV: ${{ inputs.environment }}
+          INPUT_VERSION: ${{ inputs.version }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
 
-      - if: ${{ (github.event.pull_request.merged && contains(github.event.pull_request.labels.*.name, 'skip')) }}
-        run: echo "SEMVER=skip" >> $GITHUB_ENV
-      - if: ${{ (github.event.pull_request.merged && contains(github.event.pull_request.labels.*.name, 'patch')) }}
-        run: echo "SEMVER=patch" >> $GITHUB_ENV
-      - if: ${{ (github.event.pull_request.merged && contains(github.event.pull_request.labels.*.name, 'minor')) }}
-        run: echo "SEMVER=minor" >> $GITHUB_ENV
-      - if: ${{ (github.event.pull_request.merged && contains(github.event.pull_request.labels.*.name, 'major')) }}
-        run: echo "SEMVER=major" >> $GITHUB_ENV
+          ENV="${INPUT_ENV:-dev}"
+          SEMVER="skip"
 
-      - if: ${{ inputs.version == 'new_release' }}
-        run: echo "SEMVER=minor" >> $GITHUB_ENV
-      - if: ${{ inputs.version == 'breaking_change' }}
-        run: echo "SEMVER=major" >> $GITHUB_ENV
-      - if: ${{ github.ref_name != 'main' }}
-        run: echo "SEMVER=buildNumber" >> $GITHUB_ENV
-      - if: ${{ inputs.version == 'skip_or_promote' }}
-        run: echo "SEMVER=skip" >> $GITHUB_ENV
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            SEMVER="${INPUT_VERSION:-skip}"
+          elif [ "$EVENT_NAME" = "pull_request" ]; then
+            # "skip" is an explicit opt-out and wins over any other label;
+            # otherwise the highest level wins (major > minor > patch).
+            has_label() { echo "$PR_LABELS" | jq -e --arg l "$1" 'index($l) != null' > /dev/null; }
+            if has_label skip; then
+              SEMVER="skip"
+            elif has_label major; then
+              SEMVER="major"
+            elif has_label minor; then
+              SEMVER="minor"
+            elif has_label patch; then
+              SEMVER="patch"
+            fi
+          fi
 
-      - id: get_semver
-        name: Set Output
-        run: echo "semver=${{ env.SEMVER }}" >> $GITHUB_OUTPUT
+          # A merged PR always targets main (see the trigger filter); otherwise use the run ref.
+          if [ "$EVENT_NAME" != "pull_request" ] && [ "$REF_NAME" != "main" ]; then
+            # Never create or overwrite a stable version from a branch: publish a beta instead.
+            SEMVER="buildNumber"
+          fi
 
-      # ---- Determine target environment ------------------------------------------
-      - run: echo "ENVIRNOMENT=${{ inputs.environment }}" >> $GITHUB_ENV
-      - if: ${{ inputs.environment == null }}
-        run: echo "ENVIRNOMENT=dev" >> $GITHUB_ENV
-      - id: get_env
-        name: Set Output
-        run: echo "environment=${{ env.ENVIRNOMENT }}" >> $GITHUB_OUTPUT
+          case "$ENV" in dev|uat|prod) ;; *) echo "::error::Invalid environment: $ENV"; exit 1 ;; esac
+          case "$SEMVER" in skip|patch|minor|major|buildNumber) ;; *) echo "::error::Invalid release type: $SEMVER"; exit 1 ;; esac
+
+          echo "Deploying to $ENV with release type $SEMVER"
+          {
+            echo "environment=$ENV"
+            echo "semver=$SEMVER"
+          } >> "$GITHUB_OUTPUT"
 
   release:
     name: Create a New Release
     runs-on: ubuntu-latest
     needs: [setup]
-    if: ${{ needs.setup.outputs.semver != 'skip' }}
     outputs:
       version: ${{ steps.export.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          # A merged PR runs on a pull request ref: use the target branch instead.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.ref }}
           fetch-depth: 0    # full history + all tags, needed by github-tag-action
           token: ${{ secrets.BOT_TOKEN_GITHUB }}
 
+      # skip: keep the current version, i.e. the latest stable tag (X.Y.Z, no prerelease).
+      - name: Resolve current version (skip)
+        if: ${{ needs.setup.outputs.semver == 'skip' }}
+        id: current
+        run: |
+          set -euo pipefail
+          VERSION="$(git tag --list | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)"
+          if [ -z "$VERSION" ]; then
+            echo "::error::No stable version tag found: run with patch, minor or major to create the first release"
+            exit 1
+          fi
+          echo "Current version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       # Map our semver values to github-tag-action's `default_bump` input.
-      # - patch/minor/major  → bump that segment
+      # - patch/minor/major  → bump that segment (main only)
       # - buildNumber        → on non-main branches, force a prerelease tag
-      # - skip               → handled by the job-level `if` above
       - name: Bump tag (release branch)
-        if: ${{ github.ref_name == 'main' }}
+        if: ${{ contains(fromJSON('["patch","minor","major"]'), needs.setup.outputs.semver) }}
         id: bump_main
         uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
         with:
@@ -125,7 +164,7 @@ jobs:
           tag_prefix: ""
 
       - name: Bump tag (feature branch — prerelease)
-        if: ${{ github.ref_name != 'main' }}
+        if: ${{ needs.setup.outputs.semver == 'buildNumber' }}
         id: bump_feature
         uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
         with:
@@ -136,7 +175,7 @@ jobs:
           append_to_pre_release_tag: "beta"
 
       - name: Create GitHub Release
-        if: ${{ github.ref_name == 'main' }}
+        if: ${{ steps.bump_main.outcome == 'success' }}
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ steps.bump_main.outputs.new_tag }}
@@ -147,18 +186,23 @@ jobs:
 
       - name: Export version
         id: export
+        env:
+          CURRENT_VERSION: ${{ steps.current.outputs.version }}
+          MAIN_VERSION: ${{ steps.bump_main.outputs.new_version }}
+          BETA_VERSION: ${{ steps.bump_feature.outputs.new_version }}
         run: |
-          if [[ "${{ github.ref_name }}" == "main" ]]; then
-            echo "version=${{ steps.bump_main.outputs.new_version }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${{ steps.bump_feature.outputs.new_version }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          VERSION="${CURRENT_VERSION:-${MAIN_VERSION:-$BETA_VERSION}}"
+          if [ -z "$VERSION" ]; then
+            echo "::error::Unable to determine the version to deploy"
+            exit 1
           fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   image:
     needs: [setup, release]
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    if: ${{ needs.setup.outputs.semver != 'skip' }}
     steps:
       - name: Build and Push
         id: semver
@@ -171,11 +215,11 @@ jobs:
   deploy_aks:
     name: Deploy on AKS
     needs: [setup, release, image]
-    if: ${{ always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     uses: ./.github/workflows/04_deploy_with_github_runner.yml
     with:
       environment: ${{ needs.setup.outputs.environment }}
       image_tag: ${{ needs.release.outputs.version }}
+      branch: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.ref_name }}
     secrets: inherit
 
   notify:
@@ -196,4 +240,3 @@ jobs:
           icon_success: ':white_check_mark:'
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL_DEPLOY }}
-
