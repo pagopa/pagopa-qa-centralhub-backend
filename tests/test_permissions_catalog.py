@@ -9,7 +9,7 @@ def test_action_keys_match_catalog() -> None:
 
 
 def test_action_catalog_size() -> None:
-    assert len(ACTION_CATALOG) == 24
+    assert len(ACTION_CATALOG) == 26
 
 
 def test_quality_gate_report_is_readable_by_every_role_including_guest() -> None:
@@ -59,3 +59,9 @@ def test_compute_role_matrix_superadmin_is_always_true() -> None:
     matrix = compute_role_matrix([role])
     assert all(matrix["superadmin"].values())
     assert set(matrix["superadmin"].keys()) == ACTION_KEYS
+
+
+def test_run_actions_mirror_run_qg_defaults() -> None:
+    by_key = {e["key"]: e for e in ACTION_CATALOG}
+    for key in ("run:tas", "run:nrt"):
+        assert by_key[key]["defaults"] == by_key["run:qg"]["defaults"]

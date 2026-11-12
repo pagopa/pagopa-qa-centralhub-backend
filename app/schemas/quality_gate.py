@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -15,6 +15,37 @@ class QualityGateRunCreate(BaseModel):
     environment: Literal["dev", "uat"] = "uat"
     tags: str = Field(default="@runnable", pattern=TAGS_PATTERN)
     allure: bool = True
+
+
+class NrtRunCreate(BaseModel):
+    """Launch of the NRT workflow: every suite configured for the environment, or a selection."""
+
+    suites: Literal["all"] | list[Annotated[str, Field(pattern=SUITE_PATTERN)]] = "all"
+    target_env: Literal["dev", "uat"] = "uat"
+
+    @field_validator("suites")
+    @classmethod
+    def _not_empty(cls, value: object) -> object:
+        if isinstance(value, list) and not value:
+            raise ValueError("select at least one suite or use 'all'")
+        return value
+
+
+class NrtSuiteOut(BaseModel):
+    id: str
+    label: str
+    envs: list[str]
+
+
+class NrtLaunchOptionsOut(BaseModel):
+    """Suites the NRT workflow can run, with the environments each one supports.
+
+    `available` is false when the registry could not be read: the client must then not
+    restrict the choice, because the launch does not validate in that case either.
+    """
+
+    available: bool
+    suites: list[NrtSuiteOut]
 
 
 class QualityGateRunOut(BaseModel):

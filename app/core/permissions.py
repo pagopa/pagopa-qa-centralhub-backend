@@ -122,6 +122,18 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False},
     },
     {
+        "key": "run:tas",
+        "label": "TAS (lancia ed elimina esecuzione)",
+        "category": "Test automation service - Test Results",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False},
+    },
+    {
+        "key": "run:nrt",
+        "label": "NRTs (lancia ed elimina esecuzione)",
+        "category": "Test Results",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False},
+    },
+    {
         "key": "view:nrts",
         "label": "NRTs (visualizza)",
         "category": "Test Results",

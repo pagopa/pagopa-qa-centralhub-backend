@@ -77,6 +77,7 @@ class TestRunCreate(BaseModel):
     qa_issue: str | None = None
     qa_issue_status: str | None = None
     gha_run_url: str | None = None
+    note: str | None = None
 
 class TestRunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -105,6 +106,7 @@ class TestRunOut(BaseModel):
     qa_issue: str | None = None
     qa_issue_status: str | None = None
     gha_run_url: str | None = None
+    note: str | None = None
 
 
 class TestExecutionOut(BaseModel):

@@ -22,6 +22,7 @@ from app.api.v1 import (
     quality_gate,
     releases,
     roles,
+    run_launch,
     runs,
     sanp_health,
     suites,
@@ -54,6 +55,7 @@ router.include_router(roles.router, prefix="/roles", tags=["roles"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 router.include_router(tm.router, prefix="/tm", tags=["tm"])
 router.include_router(test_metrics.router, prefix="/test-metrics", tags=["test-metrics"])
+router.include_router(run_launch.router, prefix="/test-metrics", tags=["test-metrics"])
 router.include_router(suites.router, prefix="/suites", tags=["suites"])
 router.include_router(quality_gate.router, prefix="/quality-gate", tags=["quality-gate"])
 router.include_router(meta.router, prefix="/meta", tags=["meta"])
