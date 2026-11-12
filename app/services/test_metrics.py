@@ -151,10 +151,13 @@ async def update_nrt(db: AsyncSession, nrt: UpdateNrtsObject) -> UpdateNrtsObjec
             run.revision_date = revision_date
             test_run_updates.append(
                 run.model_dump(
-                    include={"id", "revisioned", "revision_date", "revisioned_by", "revision_result", "product_issue","qa_issue","product_issue_status","qa_issue_status"},
+                    include={"id", "revisioned", "revision_date", "revisioned_by", "revision_result", "product_issue","qa_issue","product_issue_status","qa_issue_status","note"},
                     exclude_unset=True,
                 )
             )
+            if "note" in test_run_updates[-1]:
+                # An empty note clears it.
+                test_run_updates[-1]["note"] = test_run_updates[-1]["note"] or None
         test_execution_fields = { "revision_note"}
         test_execution_updates = [
             values

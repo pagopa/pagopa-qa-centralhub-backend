@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     tas_github_token: str = ""
     tas_repo: str = "pagopa/pagopa-platform-integration-test"
     tas_workflow_file: str = "test-automation-service.yml"
+    nrt_workflow_file: str = "nrt-main-dispatch-tests.yml"
     tas_ref: str = "main"
     # Comma-separated suites that can be launched; empty means any well-formed suite name.
     qg_launch_suites: str = ""
