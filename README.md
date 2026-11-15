@@ -185,7 +185,7 @@ Il sync manuale e quello schedulato condividono lo stesso servizio e sono serial
 
 ### Indicatori dell'Overview
 
-La pagina Overview del portale legge `GET /api/v1/test-metrics/avg-pass-rate` (pass rate medio delle suite NRT) e `GET /api/v1/test-metrics/pending-runs`, che conta le run con esito di revisione `PENDING` da analizzare: `{ "total", "nrt", "qg" }`. Contano le run NRT (origine diversa da TAS e Quality Gate, come nella lista `/nrts`) e Quality Gate (`QG`, `QA_GATE`); le TAS sono escluse perché nel portale sono in sola lettura e non si possono revisionare.
+La pagina Overview del portale legge `GET /api/v1/test-metrics/avg-pass-rate` (pass rate medio delle suite NRT) e `GET /api/v1/test-metrics/pending-runs`, che conta le run con esito di revisione `PENDING` da analizzare: `{ "total", "nrt", "qg" }`. Valgono le stesse regole delle liste NRT e Quality Gate, così il numero corrisponde alle run che il revisore ritrova: run terminate negli ultimi 30 giorni (`NRT_LIST_WINDOW_DAYS`), NRT con origine diversa da `TAS` e `QG`, Quality Gate con origine `QG`; le TAS sono escluse perché nel portale sono in sola lettura e non si possono revisionare.
 
 ### Scenari flaky
 

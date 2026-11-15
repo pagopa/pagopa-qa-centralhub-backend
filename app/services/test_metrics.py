@@ -76,19 +76,27 @@ async def create_test_execution(db: AsyncSession, test_execution: list[TestExecu
         logger.exception("create_test_execution failed")
         raise
 
+NRT_LIST_WINDOW_DAYS = 30
+
+
+def _list_window_start() -> datetime:
+    """Oldest end time of the runs shown in the NRT, TAS and Quality Gate lists."""
+    return datetime.now(timezone.utc) - timedelta(days=NRT_LIST_WINDOW_DAYS)
+
+
 async def get_nrts(db: AsyncSession, test_object: str | None, origin: str | None, page:int = 1, size:int = 20) -> list[NrtListObject]:
     try:
         stmt = (
             select(TestRun, TestSuite)
             .join(TestSuite, TestRun.suite_id == TestSuite.id)
-            .where(TestRun.timestamp_end > datetime.now(timezone.utc) - timedelta(days=30))
+            .where(TestRun.timestamp_end > _list_window_start())
             .order_by(TestRun.timestamp_end.desc())
             .offset((page - 1) * size)
             .limit(size)
         )
 
         count_stmt = (
-                select(func.count()).select_from(TestRun).where(TestRun.timestamp_end > datetime.now(timezone.utc) - timedelta(days=30))
+                select(func.count()).select_from(TestRun).where(TestRun.timestamp_end > _list_window_start())
         )
 
         if test_object:
@@ -295,18 +303,16 @@ async def list_suites_with_latest_run(
         raise
 
 
-QUALITY_GATE_ORIGINS = ("QG", "QA_GATE")
-
-
 async def get_pending_runs(db: AsyncSession) -> PendingRunsOut:
-    """Count NRT and Quality Gate runs still PENDING review.
+    """Count the runs PENDING review that reviewers find in the NRT and Quality Gate lists.
 
+    Same rules as the lists (`get_nrts`): finished in the last `NRT_LIST_WINDOW_DAYS` days;
+    NRT runs are those whose origin is neither TAS nor QG, Quality Gate runs have origin QG.
     TAS runs are excluded: they are read-only in the portal, so nobody can review them.
-    NRT runs are the ones with an origin other than TAS and Quality Gate, as in the NRT list.
     """
     try:
-        is_qg = TestRun.test_origin.in_(QUALITY_GATE_ORIGINS)
-        is_nrt = TestRun.test_origin.not_in(("TAS", *QUALITY_GATE_ORIGINS))
+        is_qg = TestRun.test_origin == "QG"
+        is_nrt = TestRun.test_origin.not_in(("TAS", "QG"))
         row = (
             await db.execute(
                 select(
@@ -315,6 +321,7 @@ async def get_pending_runs(db: AsyncSession) -> PendingRunsOut:
                 ).where(
                     TestRun.revision_result == RevisionResultEnum.PENDING,
                     TestRun.test_origin.is_not(None),
+                    TestRun.timestamp_end > _list_window_start(),
                 )
             )
         ).one()
