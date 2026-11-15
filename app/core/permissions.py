@@ -146,6 +146,18 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": True},
     },
     {
+        "key": "view:flaky",
+        "label": "Scenari flaky (visualizza)",
+        "category": "Test Results",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": True},
+    },
+    {
+        "key": "manage:flaky",
+        "label": "Scenari flaky (marca/smarca, ricalcola)",
+        "category": "Test Results",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
+    },
+    {
         "key": "view:ea_map",
         "label": "EA Map (visualizza)",
         "category": "Architettura",

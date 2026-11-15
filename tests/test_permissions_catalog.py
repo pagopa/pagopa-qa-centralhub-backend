@@ -9,7 +9,7 @@ def test_action_keys_match_catalog() -> None:
 
 
 def test_action_catalog_size() -> None:
-    assert len(ACTION_CATALOG) == 26
+    assert len(ACTION_CATALOG) == 28
 
 
 def test_quality_gate_report_is_readable_by_every_role_including_guest() -> None:
@@ -26,6 +26,18 @@ def test_tas_and_nrt_reports_are_readable_by_every_role_including_guest() -> Non
         assert all(entry["defaults"].values())
         list_entry = next(e for e in ACTION_CATALOG if e["key"] == listing)
         assert list_entry["defaults"]["guest"] is False
+
+
+def test_flaky_actions_defaults() -> None:
+    by_key = {e["key"]: e for e in ACTION_CATALOG}
+    assert by_key["view:flaky"]["defaults"] == {
+        "qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": True,
+    }
+    assert by_key["manage:flaky"]["defaults"] == {
+        "qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False,
+    }
+    assert by_key["view:flaky"]["category"] == "Test Results"
+    assert by_key["manage:flaky"]["category"] == "Test Results"
 
 
 def test_action_catalog_has_data_quality_entries() -> None:
