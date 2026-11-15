@@ -195,7 +195,7 @@ async def save_flaky_scenarios(
 @router.get("/flaky-scenarios", response_model=list[FlakyScenarioOut])
 async def get_flaky_scenarios(
     db: DbDep,
-    test_object: Annotated[uuid.UUID | None, Query()] = None,
+    test_object: Annotated[str | None, Query()] = None,
 ) -> list[FlakyScenarioOut]:
     try:
         scenarios = await test_metrics_svc.get_flaky_scenarios(db, test_object)

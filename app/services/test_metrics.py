@@ -9,9 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 # to import models
-from app.models.test_metrics import FlakyScenario, TestExecution, TestRun, TestSuite
+from app.models.flaky import FlakyRegistry
+from app.models.test_metrics import TestExecution, TestRun, TestSuite
+from app.services import flaky as flaky_svc
 from app.schemas.test_metrics import (
     FlakyScenarioIn,
+    FlakyScenarioOut,
     NrtDetailsObject,
     NrtListObject,
     TestExecutionOut,
@@ -179,15 +182,16 @@ async def update_nrt(db: AsyncSession, nrt: UpdateNrtsObject) -> UpdateNrtsObjec
         raise
 
 
-async def get_flaky_scenarios(db: AsyncSession, test_object: str) -> list[FlakyScenario] | None:
+async def get_flaky_scenarios(db: AsyncSession, test_object: str | None) -> list[FlakyScenarioOut]:
+    """Flagged scenarios from the flaky registry; version fields are left empty."""
     try:
-        stmt = select(FlakyScenario).where(FlakyScenario.is_flaky == True)
-
+        stmt = select(FlakyRegistry).where(FlakyRegistry.is_flaky.is_(True))
         if test_object:
-            stmt = stmt.where(FlakyScenario.test_object == test_object)
-
-        result = await db.execute(stmt)
-        scenarios = result.scalars().all() if result is not None else None
+            stmt = stmt.where(FlakyRegistry.test_object == test_object)
+        result = await db.execute(
+            stmt.order_by(FlakyRegistry.test_type, FlakyRegistry.scenario_name)
+        )
+        scenarios = [_registry_to_flaky_out(row) for row in result.scalars().all()]
         if not scenarios:
             logger.info("get_flaky_scenarios query succeeded with 0 results", test_object=test_object)
         return scenarios
@@ -196,43 +200,48 @@ async def get_flaky_scenarios(db: AsyncSession, test_object: str) -> list[FlakyS
         raise
 
 
-async def save_or_update_flaky_scenarios(db: AsyncSession, flaky_scenarios: list[FlakyScenarioIn]) -> list[FlakyScenario] | None:
+def _registry_to_flaky_out(registry: FlakyRegistry) -> FlakyScenarioOut:
+    return FlakyScenarioOut(
+        id=registry.id,
+        test_object=registry.test_object,
+        test_type=registry.test_type,
+        scenario_name=registry.scenario_name,
+        inserted_at=registry.inserted_at,
+        is_flaky=registry.is_flaky,
+    )
+
+
+async def save_or_update_flaky_scenarios(
+    db: AsyncSession, flaky_scenarios: list[FlakyScenarioIn]
+) -> list[FlakyScenarioOut] | None:
+    """Write NRT/TAS/QG panel flags into the flaky registry (legacy table no longer written)."""
     try:
         if not flaky_scenarios:
             logger.info("save_or_update_flaky_scenarios: no input records to save")
             return None
-        processed_scenarios = []
+        processed: list[FlakyScenarioOut] = []
         for scenario in flaky_scenarios:
-            existing_scenario = await db.execute(
-                select(FlakyScenario).where(
-                    FlakyScenario.scenario_name == scenario.scenario_name,
-                    FlakyScenario.suite_id == scenario.suite_id,
-                    FlakyScenario.test_version == scenario.test_version,
-                )
+            test_type = scenario.test_type
+            if not test_type:
+                suite = await db.get(TestSuite, scenario.suite_id)
+                if suite is None:
+                    logger.info(
+                        "save_or_update_flaky_scenarios suite query succeeded with 0 results",
+                        suite_id=str(scenario.suite_id),
+                    )
+                    raise LookupError(f"Unknown suite: {scenario.suite_id}")
+                test_type = suite.test_type
+            registry = await flaky_svc.apply_flag(
+                db,
+                key=(scenario.test_object, test_type, scenario.scenario_name),
+                is_flaky=scenario.is_flaky,
+                user=scenario.user,
             )
-            existing_scenario = existing_scenario.scalars().first()
-            values = scenario.model_dump(by_alias=False, exclude={"id"})
-            if values["inserted_at"] is None:
-                values.pop("inserted_at")
-            if existing_scenario:
-                for key, value in values.items():
-                    setattr(existing_scenario, key, value)
-                existing_scenario.inserted_at = datetime.now()
-                processed_scenarios.append(existing_scenario)
-            else:
-                logger.info("save_or_update_flaky_scenarios query succeeded with 0 results; inserting scenario", suite_id=str(scenario.suite_id), scenario_name=scenario.scenario_name, test_version=scenario.test_version)
-                model = FlakyScenario(**values)
-                model.inserted_at = datetime.now()
-                db.add(model)
-                processed_scenarios.append(model)
-        await db.commit()
-        for scenario in processed_scenarios:
-            await db.refresh(scenario)
-        return processed_scenarios
+            processed.append(_registry_to_flaky_out(registry))
+        return processed
     except Exception:
         logger.exception("save_or_update_flaky_scenarios failed")
         raise
-
 
 
 async def list_suites_with_latest_run(

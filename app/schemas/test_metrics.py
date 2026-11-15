@@ -5,7 +5,7 @@ from datetime import datetime, date
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional
 
 
@@ -161,28 +161,43 @@ class UpdateNrtsObject(BaseModel):
     scenarios: list[TestExecutionOut] | None = None
 
 class FlakyScenarioIn(BaseModel):
+    """Flag sent by the NRT/TAS/QG report panels.
+
+    Flags belong to the scenario (test_object + test_type + scenario_name): version fields are
+    accepted for compatibility, and test_type is resolved from suite_id when missing.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: Optional[uuid.UUID] = None
-    suite_id: uuid.UUID
+    suite_id: uuid.UUID | None = None
     test_object: str
+    test_type: str | None = None
     scenario_name: str
-    test_object_version: str
-    test_version: str
+    test_object_version: str | None = None
+    test_version: str | None = None
     inserted_at: datetime | None = None
     is_flaky: bool = Field(default=True)
+    user: str | None = None
+
+    @model_validator(mode="after")
+    def _needs_test_type_or_suite(self) -> FlakyScenarioIn:
+        if not self.test_type and self.suite_id is None:
+            raise ValueError("A flaky scenario needs a test_type or suite_id")
+        return self
 
 class FlakyScenarioOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: Optional[uuid.UUID] = None
-    suite_id: uuid.UUID
+    suite_id: uuid.UUID | None = None
     test_object: str
+    test_type: str
     scenario_name: str
-    test_object_version: str
-    test_version: str
+    test_object_version: str | None = None
+    test_version: str | None = None
     inserted_at: datetime | None = None
-    is_flaky: bool 
+    is_flaky: bool
 
 class NrtWithLatestRunOut(BaseModel):
     suite: TestSuiteOut
