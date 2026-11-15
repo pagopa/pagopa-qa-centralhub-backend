@@ -74,3 +74,14 @@ def test_helm_queue_matches_for_api_worker_and_beat(environment: str) -> None:
         assert values["microservice-chart"]["envConfig"]["CELERY_QUEUE"] == (
             f"qa-centralhub-{environment}"
         )
+
+
+def test_flaky_beat_entry_runs_at_noon_rome() -> None:
+    from zoneinfo import ZoneInfo
+
+    entry = schedule.celery_app.conf.beat_schedule["recompute-flaky-scores-daily"]
+    assert entry["task"] == "app.tasks.recompute_flaky_scores.recompute_flaky_scores"
+    sched = entry["schedule"]
+    assert sched.hour == {12}
+    assert sched.minute == {0}
+    assert sched.nowfun().tzinfo == ZoneInfo("Europe/Rome")
