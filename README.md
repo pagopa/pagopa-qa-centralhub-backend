@@ -183,6 +183,10 @@ Endpoint disponibili sotto `/api/v1/sanp-health`:
 
 Il sync manuale e quello schedulato condividono lo stesso servizio e sono serializzati. Un errore GitHub o di un artifact non elimina l'ultimo report completo; i run parziali vengono ritentati finché gli artifact restano disponibili.
 
+### Indicatori dell'Overview
+
+La pagina Overview del portale legge `GET /api/v1/test-metrics/avg-pass-rate` (pass rate medio delle suite NRT) e `GET /api/v1/test-metrics/pending-runs`, che conta le run con esito di revisione `PENDING` da analizzare: `{ "total", "nrt", "qg" }`. Contano le run NRT (origine diversa da TAS e Quality Gate, come nella lista `/nrts`) e Quality Gate (`QG`, `QA_GATE`); le TAS sono escluse perché nel portale sono in sola lettura e non si possono revisionare.
+
 ### Scenari flaky
 
 Design: [docs/superpowers/specs/2026-11-14-flaky-scenarios-management-design.md](docs/superpowers/specs/2026-11-14-flaky-scenarios-management-design.md).

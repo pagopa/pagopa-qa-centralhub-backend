@@ -10,12 +10,13 @@ from sqlalchemy.orm import Session
 
 # to import models
 from app.models.flaky import FlakyRegistry
-from app.models.test_metrics import TestExecution, TestRun, TestSuite
+from app.models.test_metrics import RevisionResultEnum, TestExecution, TestRun, TestSuite
 from app.services import flaky as flaky_svc
 from app.schemas.test_metrics import (
     FlakyScenarioIn,
     FlakyScenarioOut,
     NrtDetailsObject,
+    PendingRunsOut,
     NrtListObject,
     TestExecutionOut,
     TestRunOut,
@@ -291,6 +292,35 @@ async def list_suites_with_latest_run(
         return result
     except Exception:
         logger.exception("list_suites_with_latest_run failed")
+        raise
+
+
+QUALITY_GATE_ORIGINS = ("QG", "QA_GATE")
+
+
+async def get_pending_runs(db: AsyncSession) -> PendingRunsOut:
+    """Count NRT and Quality Gate runs still PENDING review.
+
+    TAS runs are excluded: they are read-only in the portal, so nobody can review them.
+    NRT runs are the ones with an origin other than TAS and Quality Gate, as in the NRT list.
+    """
+    try:
+        is_qg = TestRun.test_origin.in_(QUALITY_GATE_ORIGINS)
+        is_nrt = TestRun.test_origin.not_in(("TAS", *QUALITY_GATE_ORIGINS))
+        row = (
+            await db.execute(
+                select(
+                    func.count().filter(is_nrt).label("nrt"),
+                    func.count().filter(is_qg).label("qg"),
+                ).where(
+                    TestRun.revision_result == RevisionResultEnum.PENDING,
+                    TestRun.test_origin.is_not(None),
+                )
+            )
+        ).one()
+        return PendingRunsOut(total=row.nrt + row.qg, nrt=row.nrt, qg=row.qg)
+    except Exception:
+        logger.exception("get_pending_runs failed")
         raise
 
 

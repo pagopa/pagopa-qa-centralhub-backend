@@ -204,4 +204,10 @@ class NrtWithLatestRunOut(BaseModel):
     latest_run: TestRunOut | None
     trend: list[float]  # pass rate 0.0–1.0, ultimi N run, ordine cronologico
 
-    
+
+class PendingRunsOut(BaseModel):
+    """Runs waiting for review (revision result PENDING) that reviewers can act on in the portal."""
+
+    total: int
+    nrt: int
+    qg: int
