@@ -3,6 +3,7 @@ from __future__ import annotations
 # ruff: noqa: S101
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -39,30 +40,37 @@ async def suite(db: AsyncSession) -> AsyncIterator[SuiteModel]:
     await db.commit()
 
 
-async def test_pending_runs_count_nrt_and_quality_gate_only(
+async def test_pending_runs_match_the_nrt_and_quality_gate_lists(
     db: AsyncSession, suite: SuiteModel
 ) -> None:
+    """Only runs a reviewer can find in the lists: same origins and same 30-day window."""
     before = await get_pending_runs(db)
+    recent = datetime.now(UTC) - timedelta(days=2)
+    old = datetime.now(UTC) - timedelta(days=31)
     runs = [
-        ("NRT", RevisionResultEnum.PENDING),
-        ("NRT", RevisionResultEnum.PENDING),
-        ("NRT", RevisionResultEnum.OK),
-        ("QG", RevisionResultEnum.PENDING),
-        ("QA_GATE", RevisionResultEnum.PENDING),
-        ("TAS", RevisionResultEnum.PENDING),
-        (None, RevisionResultEnum.PENDING),
-        ("NRT", None),
+        ("NRT", RevisionResultEnum.PENDING, recent),
+        ("NRT", RevisionResultEnum.PENDING, recent),
+        ("NRT", RevisionResultEnum.OK, recent),
+        ("NRT", None, recent),
+        ("NRT", RevisionResultEnum.PENDING, old),  # outside the list window
+        ("NRT", RevisionResultEnum.PENDING, None),  # never finished: not listed
+        ("QG", RevisionResultEnum.PENDING, recent),
+        ("QG", RevisionResultEnum.PENDING, old),
+        # Not sent by the ingestion; the NRT list shows it, so it counts as NRT.
+        ("QA_GATE", RevisionResultEnum.PENDING, recent),
+        ("TAS", RevisionResultEnum.PENDING, recent),
+        (None, RevisionResultEnum.PENDING, recent),
     ]
     db.add_all(
-        RunModel(suite_id=suite.id, test_origin=origin, revision_result=result)
-        for origin, result in runs
+        RunModel(suite_id=suite.id, test_origin=origin, revision_result=result, timestamp_end=end)
+        for origin, result, end in runs
     )
     await db.commit()
 
     after = await get_pending_runs(db)
 
-    assert after.nrt - before.nrt == 2
-    assert after.qg - before.qg == 2
+    assert after.nrt - before.nrt == 3
+    assert after.qg - before.qg == 1
     assert after.total == after.nrt + after.qg
 
 
