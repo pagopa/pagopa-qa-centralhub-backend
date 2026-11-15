@@ -11,6 +11,7 @@ from app.deps import DbDep
 from app.models.test_metrics import TestSuite, TestExecution, TestRun, FlakyScenario
 from app.schemas.test_metrics import NrtDetailsObject, TestExecutionCreate, TestExecutionOut, FlakyScenarioIn, FlakyScenarioOut
 from app.schemas.test_metrics import TestSuiteOut, TestSuiteCreate, TestRunCreate, TestRunOut, NrtListObject, UpdateNrtsObject, NrtWithLatestRunOut
+from app.schemas.test_metrics import PendingRunsOut
 from app.schemas.quality_gate import QualityGateScenarioOut
 from app.services import quality_gate as quality_gate_svc
 from app.services import test_metrics as test_metrics_svc
@@ -219,6 +220,11 @@ async def list_suites(db: DbDep,
         NrtWithLatestRunOut(suite=suite, latest_run=run, trend=trend)
         for suite, run, trend in pairs
     ]
+
+
+@router.get("/pending-runs", response_model=PendingRunsOut)
+async def pending_runs(db: DbDep) -> PendingRunsOut:
+    return await test_metrics_svc.get_pending_runs(db)
 
 
 @router.get("/avg-pass-rate", response_model=int)
