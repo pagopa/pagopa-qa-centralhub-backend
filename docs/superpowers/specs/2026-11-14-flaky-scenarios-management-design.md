@@ -147,7 +147,10 @@ Same pattern as `sanp_health_sync_status`: `last_attempt_at`, `last_success_at`,
 
 - Executions joined to their run, for scenarios matching the key.
 - Only runs with `trigger_type` in `CRON`, `CI_PIPELINE`, `TAS`. Excluded: `MANUAL` (developer
-  reruns) and `QA_GATE` (release candidates, where a failure is usually a real regression).
+  reruns) and Quality Gate runs (release candidates, where a failure is usually a real
+  regression). The ingestion sends Quality Gate runs with trigger `CI_PIPELINE` and origin `QG`
+  (it never sends the `TAS` and `QA_GATE` triggers), so they are excluded by `test_origin`
+  (fixed on 2026-11-15: the first version filtered on the `QA_GATE` trigger and kept them).
   *(Constant list in one place, easy to change.)*
 - Window: `timestamp_start` in the **last 30 days**, then at most the **30 most recent** executions
   per scenario and env.
@@ -299,7 +302,7 @@ intermediate level colors defined next to them in `globals.css`, for both light 
 Backend (pytest, existing style):
 - Algorithm unit tests on synthetic outcome sequences: always P → level 1; strict alternation →
   level 5; all R → high retry-pass; last 5 F → BROKEN; < 5 runs → INSUFFICIENT_DATA; MANUAL and
-  QA_GATE runs ignored; SKIPPED ignored; executions older than 30 days ignored; recency weighting
+  Quality Gate (origin QG) runs ignored; SKIPPED ignored; executions older than 30 days ignored; recency weighting
   makes an old burst count less than a recent one.
 - Migration test: duplicated `flaky_scenarios` rows across versions collapse into one registry row
   with the latest `is_flaky`.
@@ -326,7 +329,7 @@ between the two deploys.
 - Scenario key `test_object + test_type + scenario_name` (product version also dropped from the
   key, not only `test_version`).
 - Flag is environment-independent; score is per environment, default view UAT.
-- Excluded triggers: `MANUAL` and `QA_GATE`.
+- Excluded runs: trigger `MANUAL` and origin `QG` (Quality Gate).
 - Window 30 days / max 30 runs, half-life 14 days, minimum 5 runs, level thresholds 5/15/30/50.
 - "Da smarcare" requires level 1 on at least 10 runs.
 - Permissions enforced in the frontend only, like every other section (the backend has no auth

@@ -149,6 +149,26 @@ async def test_manual_and_qa_gate_runs_are_ignored(db: AsyncSession, seed: Seed)
     assert await seed.scores() == []
 
 
+async def test_quality_gate_runs_are_ignored(db: AsyncSession, seed: Seed) -> None:
+    # The ingestion sends Quality Gate runs with trigger CI_PIPELINE and origin QG.
+    await seed.executions("PFPFPF", trigger=TriggerTypeEnum.CI_PIPELINE, origin="QG")
+
+    await recompute_scores(db, trigger="MANUAL", requested_by=None, now=NOW)
+
+    assert await seed.scores() == []
+
+
+async def test_quality_gate_runs_are_left_out_of_the_history(db: AsyncSession, seed: Seed) -> None:
+    nrt = await seed.executions("PF", trigger=TriggerTypeEnum.CRON, origin="NRT")
+    await seed.executions("F", trigger=TriggerTypeEnum.CI_PIPELINE, origin="QG")
+
+    history = await get_history(
+        db, env=EnvEnum.UAT, test_object=seed.test_object, test_type="e2e", scenario_name="S"
+    )
+
+    assert [item.run_id for item in history] == [nrt[1].id, nrt[0].id]
+
+
 async def test_eligible_triggers_and_skipped(db: AsyncSession, seed: Seed) -> None:
     await seed.executions("PP", trigger=TriggerTypeEnum.CRON)
     await seed.executions("PP", trigger=TriggerTypeEnum.CI_PIPELINE)

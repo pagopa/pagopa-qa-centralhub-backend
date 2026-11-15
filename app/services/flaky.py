@@ -51,6 +51,9 @@ logger = structlog.get_logger(__name__)
 
 RECOMPUTE_LOCK_ID = 670
 ELIGIBLE_TRIGGERS = (TriggerTypeEnum.CRON, TriggerTypeEnum.CI_PIPELINE, TriggerTypeEnum.TAS)
+# Quality Gate runs test release candidates, where a failure is usually a real regression. The
+# ingestion sends them with trigger CI_PIPELINE, so they are excluded by origin.
+EXCLUDED_ORIGINS = ("QG",)
 
 ScenarioKey = tuple[str, str, str]  # test_object, test_type, scenario_name
 RecomputeTrigger = Literal["SCHEDULE", "MANUAL"]
@@ -101,6 +104,7 @@ def _eligible_executions(now: datetime) -> Subquery:
         .join(TestSuite, TestSuite.id == TestRun.suite_id)
         .where(
             TestRun.trigger_type.in_(ELIGIBLE_TRIGGERS),
+            or_(TestRun.test_origin.is_(None), TestRun.test_origin.not_in(EXCLUDED_ORIGINS)),
             TestRun.env.is_not(None),
             TestRun.timestamp_start.is_not(None),
             TestRun.timestamp_start >= now - timedelta(days=settings.flaky_window_days),
