@@ -10,6 +10,7 @@ from app.api.v1 import (
     dq,
     ea,
     features,
+    flaky,
     gpd_position,
     health,
     integrations,
@@ -58,4 +59,5 @@ router.include_router(test_metrics.router, prefix="/test-metrics", tags=["test-m
 router.include_router(run_launch.router, prefix="/test-metrics", tags=["test-metrics"])
 router.include_router(suites.router, prefix="/suites", tags=["suites"])
 router.include_router(quality_gate.router, prefix="/quality-gate", tags=["quality-gate"])
+router.include_router(flaky.router, prefix="/flaky", tags=["flaky"])
 router.include_router(meta.router, prefix="/meta", tags=["meta"])

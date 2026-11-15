@@ -111,6 +111,13 @@ FEATURE_CATALOG: tuple[FeatureDefinition, ...] = (
         "external": False,
     },
     {
+        "key": "flaky_scenarios",
+        "label": "Scenari flaky",
+        "route": "/flaky-scenarios",
+        "action": "view:flaky",
+        "external": False,
+    },
+    {
         "key": "tas_nrts",
         "label": "Test automation service (TAS)",
         "route": "/tas-nrts",

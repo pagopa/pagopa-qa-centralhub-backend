@@ -45,6 +45,23 @@ class Settings(BaseSettings):
     # Comma-separated suites that can be launched; empty means any well-formed suite name.
     qg_launch_suites: str = ""
 
+    # Flaky scenarios scoring (design: docs/superpowers/specs/2026-11-14-flaky-*-design.md)
+    flaky_window_days: int = 30
+    flaky_max_runs: int = 30
+    flaky_half_life_days: float = 14.0
+    flaky_min_runs: int = 5
+    flaky_broken_streak: int = 5
+    flaky_unmark_min_runs: int = 10
+    # Comma-separated lower bounds of levels 2, 3, 4 and 5 (score 0-100)
+    flaky_level_thresholds: str = "5,15,30,50"
+
+    @property
+    def flaky_level_bounds(self) -> tuple[int, int, int, int]:
+        values = tuple(int(part) for part in self.flaky_level_thresholds.split(","))
+        if len(values) != 4:
+            raise ValueError("flaky_level_thresholds must contain exactly four values")
+        return values  # type: ignore[return-value]
+
     # EA Map, infrastructure view: also store VNet/subnet address prefixes (off: IPs, CIDRs
     # and subscription ids are never ingested, see docs/ea-map/DESIGN-infra.md §4)
     ea_infra_include_network_details: bool = False

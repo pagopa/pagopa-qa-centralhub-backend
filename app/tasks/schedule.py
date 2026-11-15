@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from celery.schedules import crontab
 
 from app.tasks import (
     celery_app,
+    recompute_flaky_scores,  # noqa: F401  (registers the task with celery_app)
     sync_ea,  # noqa: F401  (registers the task with celery_app)
     sync_gpd_position,  # noqa: F401  (registers the task with celery_app)
     sync_psp_fee,  # noqa: F401  (registers the task with celery_app)
     sync_sanp_health,  # noqa: F401  (registers the task with celery_app)
 )
+
+ROME = ZoneInfo("Europe/Rome")
+
+
+def _now_rome() -> datetime:
+    """Evaluate the flaky recompute crontab in Italian time without changing Celery's timezone."""
+    return datetime.now(ROME)
+
 
 celery_app.conf.beat_schedule = {
     "sync-psp-fee-services-daily": {
@@ -26,5 +38,9 @@ celery_app.conf.beat_schedule = {
     "sync-ea-map-weekly": {
         "task": "app.tasks.sync_ea.sync_ea",
         "schedule": crontab(minute=17, hour=4, day_of_week="mon"),  # lunedì 04:17 UTC
+    },
+    "recompute-flaky-scores-daily": {
+        "task": "app.tasks.recompute_flaky_scores.recompute_flaky_scores",
+        "schedule": crontab(minute=0, hour=12, nowfun=_now_rome),  # 12:00 Europe/Rome
     },
 }

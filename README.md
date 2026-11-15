@@ -183,6 +183,24 @@ Endpoint disponibili sotto `/api/v1/sanp-health`:
 
 Il sync manuale e quello schedulato condividono lo stesso servizio e sono serializzati. Un errore GitHub o di un artifact non elimina l'ultimo report completo; i run parziali vengono ritentati finché gli artifact restano disponibili.
 
+### Scenari flaky
+
+Design: [docs/superpowers/specs/2026-11-14-flaky-scenarios-management-design.md](docs/superpowers/specs/2026-11-14-flaky-scenarios-management-design.md).
+
+Il flag flaky appartiene allo scenario (`test_object` + `test_type` + `scenario_name`), non alla versione: tabella `qachub.flaky_registry` (migrazione 0031, che copia i flag di `flaky_scenarios`, ora non più scritta). L'indice di flakiness è calcolato per ambiente in `qachub.flaky_scores` da `app/services/flaky_scoring.py`: run CRON, CI_PIPELINE e TAS degli ultimi `FLAKY_WINDOW_DAYS` giorni (max `FLAKY_MAX_RUNS` per scenario), flip rate e pass-on-retry pesati per recenza (`FLAKY_HALF_LIFE_DAYS`), punteggio 0–100 e livello 1–5 (`FLAKY_LEVEL_THRESHOLDS`), stato `BROKEN` con le ultime `FLAKY_BROKEN_STREAK` run fallite, `INSUFFICIENT_DATA` sotto `FLAKY_MIN_RUNS` run.
+
+Il ricalcolo gira ogni giorno alle 12:00 ora italiana (Celery beat `recompute-flaky-scores-daily`) oppure da `POST /recompute`; i due sono serializzati da un advisory lock e l'esito è in `qachub.flaky_recompute_status`.
+
+Endpoint disponibili sotto `/api/v1/flaky` (frontend: `view:flaky` per leggere, `manage:flaky` per flag e ricalcolo; l'utente viaggia nel body come `user`):
+
+- `GET /scenarios`: lista paginata con filtri `env`, `test_object` (ripetibile), `scenario_name` (ripetibile, nome esatto), `flag`, `min_level`, `hint` (`to_mark`, `to_unmark`, `broken`), `q`;
+- `GET /summary`: conteggi dei box di hint con gli stessi filtri (escluso `hint`);
+- `GET /scenarios/history`: esecuzioni usate per il calcolo di uno scenario in un ambiente;
+- `PUT /scenarios/flag`: marca o smarca uno scenario, con audit log `flaky.mark` / `flaky.unmark`;
+- `POST /recompute` e `GET /recompute/status`: ricalcolo manuale (409 se già in corso) e ultimo esito.
+
+Gli endpoint storici `POST /test-metrics/flaky-scenarios/save` e `GET /test-metrics/flaky-scenarios` mantengono il contratto ma leggono e scrivono il registro.
+
 ### EA Map
 
 Mappa di Enterprise Architecture della piattaforma pagoPA (Blueprint, Architettura, Data Lake, Infrastruttura, Matrice QA, Guida). Il design completo è in `docs/ea-map/DESIGN.md`; la parte Data Lake in `docs/ea-map/DESIGN-data-lake.md`; la vista Infrastruttura in `docs/ea-map/DESIGN-infra.md`.
