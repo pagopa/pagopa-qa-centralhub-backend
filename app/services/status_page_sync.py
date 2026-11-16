@@ -239,6 +239,20 @@ async def _run_locked(db: AsyncSession, *, trigger: str, requested_by: str | Non
         readings = await _read_all(applications)
         checked_at = _utcnow()
 
+        # The reads can take minutes: lock the applications that still exist and drop the
+        # ones deleted meanwhile, so their readings cannot violate the foreign keys and
+        # fail the whole synchronization.
+        surviving_ids = set(
+            await db.scalars(
+                select(SpApplication.id)
+                .where(SpApplication.id.in_([app.id for app in applications]))
+                .order_by(SpApplication.id)
+                .with_for_update()
+            )
+        )
+        applications = [app for app in applications if app.id in surviving_ids]
+        readings = [(app, reading) for app, reading in readings if app.id in surviving_ids]
+
         ids = [app.id for app in applications]
         states: dict[tuple[uuid.UUID, str], SpVersionState] = {}
         if ids:

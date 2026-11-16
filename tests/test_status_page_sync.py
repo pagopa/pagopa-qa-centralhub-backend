@@ -232,6 +232,34 @@ async def test_run_sync_second_run_creates_no_events(catalog: list[SpApplication
 
 
 @pytest.mark.asyncio
+async def test_run_sync_skips_application_deleted_during_reads(
+    catalog: list[SpApplication],
+) -> None:
+    kept, deleted = catalog
+    p1, p2, p3 = _patch_sources(catalog)
+    deleted_once = False
+
+    async def delete_while_reading(client: Any, repository: str) -> Reading:
+        nonlocal deleted_once
+        if repository == deleted.repository and not deleted_once:
+            deleted_once = True
+            async with TestSession() as other:
+                await other.execute(delete(SpApplication).where(SpApplication.id == deleted.id))
+                await other.commit()
+        return ok("1.0.0", "REPO")
+
+    with p1, p2, p3, patch.object(svc, "read_repo", AsyncMock(side_effect=delete_while_reading)):
+        async with TestSession() as db:
+            status = await run_sync(db, trigger="SCHEDULED", requested_by=None)
+
+    assert deleted_once
+    assert status.status == "OK"
+    assert status.applications_checked == 1 and status.reads_failed == 0
+    assert await _counts([kept.id]) == (4, 4)
+    assert await _counts([deleted.id]) == (0, 0)
+
+
+@pytest.mark.asyncio
 async def test_run_sync_partial(catalog: list[SpApplication]) -> None:
     p1, p2, p3 = _patch_sources(catalog, fail_for=catalog[0].product_key)
     with p1, p2, p3:
