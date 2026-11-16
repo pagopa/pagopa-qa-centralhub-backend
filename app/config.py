@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     status_page_sync_concurrency: int = 10
     status_page_http_timeout_s: float = 10.0
     status_page_sync_interval_s: float = 900.0
+    # When False, runs are linked to a deployed version by test_object, environment and the
+    # time window the version was deployed in, ignoring test_object_version (unreliable today).
+    status_page_runs_match_version: bool = False
 
     # Quality Gate launch (TAS workflow dispatch). The token needs Actions: Read and write on
     # the TAS repository and is kept separate from the read-only github_token.

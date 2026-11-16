@@ -145,7 +145,10 @@ STATUS_PAGE_INFO_PATH=/shared/statuspage/v1/info
 STATUS_PAGE_SYNC_CONCURRENCY=10
 STATUS_PAGE_HTTP_TIMEOUT_S=10.0
 STATUS_PAGE_SYNC_INTERVAL_S=900.0
+STATUS_PAGE_RUNS_MATCH_VERSION=false
 ```
+
+- **Test linkage**: runs are found through the application's `test_object`. With `STATUS_PAGE_RUNS_MATCH_VERSION=false` (default) `test_object_version` is ignored: a deployed version gets the runs started on that environment while it was deployed, from the moment the previous version was last seen until the next deploy. Set it to `true` to match the run's `test_object_version` against the deployed version instead.
 
 **Network requirement**: the backend must reach `https://api.{dev.,uat.,}platform.pagopa.it/shared/statuspage/v1/info` for all three environments. To check it from a backend pod (the image has no curl):
 

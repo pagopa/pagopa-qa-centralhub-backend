@@ -11,6 +11,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import delete, event
 
+from app.config import settings
 from app.models.status_page import SpApplication, SpDeployEvent, SpProduct, SpVersionState
 from app.models.test_metrics import TestRun, TestSuite
 from app.services import status_page as read_model
@@ -202,10 +203,41 @@ async def row(w: World, app_id: uuid.UUID) -> Any:
     raise AssertionError("application not found")
 
 
+@pytest.fixture
+def match_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "status_page_runs_match_version", True)
+
+
+async def add_event(
+    app_id: uuid.UUID,
+    target: str,
+    version: str,
+    detected: int,
+    previous: str | None = None,
+    previous_seen: int | None = None,
+) -> None:
+    """Deploy event at T0 + ``detected`` minutes (a baseline when ``previous`` is None)."""
+    async with TestSession() as db:
+        db.add(
+            SpDeployEvent(
+                application_id=app_id,
+                target=target,
+                previous_version=previous,
+                version=version,
+                detected_at=T0 + timedelta(minutes=detected),
+                previous_seen_at=(
+                    T0 + timedelta(minutes=previous_seen) if previous_seen is not None else None
+                ),
+                is_baseline=previous is None,
+            )
+        )
+        await db.commit()
+
+
 # ---------------------------------------------------------------------- tests
 
 
-async def test_linkage_normalizes_and_filters_env(world: World) -> None:
+async def test_linkage_normalizes_and_filters_env(world: World, match_version: None) -> None:
     p = await add_product(world, "p")
     obj = world.name("obj")
     a = await add_app(world, p, "a", obj, states("1.4.2", "1.4.2", "1.4.2", "1.4.2"))
@@ -334,7 +366,7 @@ async def test_summary_matches_flags(world: World) -> None:
     assert base.aligned >= 1 and base.drift >= 1
 
 
-async def test_detail_history(world: World) -> None:
+async def test_detail_history(world: World, match_version: None) -> None:
     p = await add_product(world, "p")
     obj = world.name("obj")
     a = await add_app(world, p, "a", obj, states("1.4.2", "1.4.2", "1.4.1", "1.4.2"))
@@ -427,7 +459,7 @@ async def test_never_synced_app_has_null_cells_and_no_flags(world: World) -> Non
 
 
 async def test_runs_of_non_deployed_versions_are_not_loaded(
-    world: World, monkeypatch: pytest.MonkeyPatch
+    world: World, monkeypatch: pytest.MonkeyPatch, match_version: None
 ) -> None:
     p = await add_product(world, "p")
     obj = world.name("obj")
@@ -453,7 +485,7 @@ async def test_runs_of_non_deployed_versions_are_not_loaded(
 
 
 async def test_detail_loads_runs_of_event_versions_only(
-    world: World, monkeypatch: pytest.MonkeyPatch
+    world: World, monkeypatch: pytest.MonkeyPatch, match_version: None
 ) -> None:
     p = await add_product(world, "p")
     obj = world.name("obj")
@@ -497,3 +529,55 @@ async def test_detail_loads_runs_of_event_versions_only(
     assert detail is not None
     assert [r.run_id for r in detail.history["UAT"][1].runs] == [old]
     assert {key[1] for key in loaded} == {"1.1.0"}
+
+
+# ------------------------------------------------- runs linked without test_object_version
+
+
+async def test_cell_links_runs_of_any_version_within_the_deploy_window(world: World) -> None:
+    p = await add_product(world, "p")
+    obj = world.name("obj")
+    a = await add_app(world, p, "a", obj, states("1.4.2", "1.4.2", "1.4.2", "1.4.2"))
+    await add_event(a, "UAT", "1.4.1", detected=0)
+    await add_event(a, "UAT", "1.4.2", detected=20, previous="1.4.1", previous_seen=10)
+    await add_run(world, obj, "1.4.2", "UAT", origin="QG", minutes=5)  # before the window
+    in_window = await add_run(world, obj, "unknown-version", "UAT", minutes=15)
+    dev = await add_run(world, obj, "0.0.1", "DEV", minutes=1)  # DEV has no events: unbounded
+    r = await row(world, a)
+    assert [t.run_id for t in r.envs["UAT"].tests] == [in_window]
+    assert [t.run_id for t in r.envs["DEV"].tests] == [dev]
+    assert r.envs["PROD"].tests == []
+    assert "UNTESTED" in r.flags  # PROD has no run
+
+
+async def test_untested_when_no_run_since_the_current_deploy(world: World) -> None:
+    p = await add_product(world, "p")
+    obj = world.name("obj")
+    a = await add_app(world, p, "a", obj, states("1.1.0", "1.1.0", "1.1.0", "1.1.0"))
+    for target in ("UAT", "PROD"):
+        await add_event(a, target, "1.1.0", detected=60, previous="1.0.0", previous_seen=50)
+        await add_run(world, obj, "1.1.0", target, minutes=30)  # older deploy
+    r = await row(world, a)
+    assert r.envs["UAT"].tests == [] and r.envs["PROD"].tests == []
+    assert "UNTESTED" in r.flags
+    await add_run(world, obj, "whatever", "UAT", minutes=55)
+    await add_run(world, obj, "whatever", "PROD", minutes=70)
+    assert "UNTESTED" not in (await row(world, a)).flags
+
+
+async def test_detail_splits_runs_by_deploy_window(world: World) -> None:
+    p = await add_product(world, "p")
+    obj = world.name("obj")
+    a = await add_app(world, p, "a", obj, states("1.4.2", "1.4.2", "1.4.2", "1.4.2"))
+    await add_event(a, "UAT", "1.4.1", detected=0)
+    await add_event(a, "UAT", "1.4.2", detected=20, previous="1.4.1", previous_seen=10)
+    old = await add_run(world, obj, "x", "UAT", minutes=5)
+    uncertain = await add_run(world, obj, "x", "UAT", minutes=15)  # between seen and detected
+    new = await add_run(world, obj, "x", "UAT", minutes=25)
+    async with TestSession() as db:
+        detail = await get_application_detail(db, a)
+    assert detail is not None
+    upgrade, baseline = detail.history["UAT"]
+    assert [r.run_id for r in upgrade.runs] == [new, uncertain]
+    assert [r.run_id for r in baseline.runs] == [old]
+    assert [t.run_id for t in detail.application.envs["UAT"].tests] == [new]
