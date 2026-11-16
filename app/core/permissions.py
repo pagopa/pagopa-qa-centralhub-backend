@@ -181,6 +181,18 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "category": "Architettura",
         "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": False, "guest": False},
     },
+    {
+        "key": "view:status_page",
+        "label": "Release Status (visualizza)",
+        "category": "Release Status",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": True},
+    },
+    {
+        "key": "manage:status_page",
+        "label": "Release Status (gestione catalogo)",
+        "category": "Release Status",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": False, "guest": False},
+    },
 ]
 
 ACTION_KEYS: set[str] = {entry["key"] for entry in ACTION_CATALOG}

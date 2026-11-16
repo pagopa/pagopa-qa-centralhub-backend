@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     # GitHub integration
     github_token: str = ""
 
+    # Release Status (status page port): per-environment platform info endpoints and sync tuning.
+    status_page_dev_base_url: str = "https://api.dev.platform.pagopa.it"
+    status_page_uat_base_url: str = "https://api.uat.platform.pagopa.it"
+    status_page_prod_base_url: str = "https://api.platform.pagopa.it"
+    status_page_info_path: str = "/shared/statuspage/v1/info"
+    status_page_sync_concurrency: int = 10
+    status_page_http_timeout_s: float = 10.0
+    status_page_sync_interval_s: float = 900.0
+
     # Quality Gate launch (TAS workflow dispatch). The token needs Actions: Read and write on
     # the TAS repository and is kept separate from the read-only github_token.
     tas_github_token: str = ""

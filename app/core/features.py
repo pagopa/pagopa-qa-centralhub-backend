@@ -41,6 +41,13 @@ FEATURE_CATALOG: tuple[FeatureDefinition, ...] = (
         "external": False,
     },
     {
+        "key": "release_status",
+        "label": "Release Status",
+        "route": "/releases",
+        "action": "view:status_page",
+        "external": False,
+    },
+    {
         "key": "nrt_metrics",
         "label": "NRT Metrics",
         "route": "/nrt-metrics",

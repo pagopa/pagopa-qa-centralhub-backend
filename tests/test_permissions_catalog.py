@@ -9,7 +9,7 @@ def test_action_keys_match_catalog() -> None:
 
 
 def test_action_catalog_size() -> None:
-    assert len(ACTION_CATALOG) == 28
+    assert len(ACTION_CATALOG) == 30
 
 
 def test_quality_gate_report_is_readable_by_every_role_including_guest() -> None:
@@ -77,3 +77,21 @@ def test_run_actions_mirror_run_qg_defaults() -> None:
     by_key = {e["key"]: e for e in ACTION_CATALOG}
     for key in ("run:tas", "run:nrt"):
         assert by_key[key]["defaults"] == by_key["run:qg"]["defaults"]
+
+
+def test_status_page_actions_defaults() -> None:
+    by_key = {e["key"]: e for e in ACTION_CATALOG}
+    assert by_key["view:status_page"]["defaults"] == {
+        "qa_manager": True,
+        "qa_analyst": True,
+        "qa_engineer": True,
+        "guest": True,
+    }
+    assert by_key["manage:status_page"]["defaults"] == {
+        "qa_manager": True,
+        "qa_analyst": False,
+        "qa_engineer": False,
+        "guest": False,
+    }
+    assert by_key["view:status_page"]["category"] == "Release Status"
+    assert by_key["manage:status_page"]["category"] == "Release Status"
