@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from collections.abc import Sequence
 from typing import Any, cast
 
 import structlog
@@ -36,7 +37,7 @@ HUB_PATHS = {"QG": "/quality-gate/report", "TAS": "/tas-nrts/report", "NRT": "/n
 AREA_ORDER = {"CORE": 0, "TOUCHPOINT": 1}
 MAX_RUNS_PER_VERSION = 20
 
-RunIndex = dict[tuple[str, str, str], list[TestRun]]
+RunIndex = dict[tuple[str, str, str], list[Any]]
 
 
 def run_kind(test_origin: str | None) -> str:
@@ -70,7 +71,7 @@ def _outcome(run: Any) -> tuple[str, bool]:
     return ("PASSED" if bad == 0 else "FAILED"), needs_review
 
 
-def _run_ref(source: TestRun) -> RunRefOut:
+def _run_ref(source: Any) -> RunRefOut:
     run: Any = source
     kind = run_kind(run.test_origin)
     outcome, needs_review = _outcome(run)
@@ -90,41 +91,85 @@ def _run_ref(source: TestRun) -> RunRefOut:
     )
 
 
-def _sorted_newest(runs: list[TestRun]) -> list[TestRun]:
-    def key(run: TestRun) -> tuple[bool, float]:
+def _sorted_newest(runs: list[Any]) -> list[Any]:
+    def key(run: Any) -> tuple[bool, float]:
         ts: Any = run.timestamp_start
         return (ts is not None, ts.timestamp() if ts is not None else 0.0)
 
     return sorted(runs, key=key, reverse=True)
 
 
-def _latest_per_kind(runs: list[TestRun]) -> list[RunRefOut]:
-    latest: dict[str, TestRun] = {}
+def _latest_per_kind(runs: list[Any]) -> list[RunRefOut]:
+    latest: dict[str, Any] = {}
     for run in _sorted_newest(runs):
         origin: Any = run.test_origin
         latest.setdefault(run_kind(origin), run)
     return [_run_ref(latest[k]) for k in KIND_ORDER if k in latest]
 
 
-async def _fetch_runs(db: AsyncSession, test_objects: set[str]) -> RunIndex:
+RUN_COLUMNS = (
+    TestRun.id,
+    TestRun.suite_id,
+    TestRun.env,
+    TestRun.test_origin,
+    TestRun.revisioned,
+    TestRun.revision_result,
+    TestRun.passed_scenario,
+    TestRun.failed_scenario,
+    TestRun.broken_scenario,
+    TestRun.trigger_type,
+    TestRun.timestamp_start,
+    TestRun.allure_url,
+    TestRun.gha_run_url,
+)
+
+
+async def _fetch_runs(db: AsyncSession, needed: dict[str, set[str]]) -> RunIndex:
+    """Load the runs of the given test objects, restricted to the needed (normalized) versions.
+
+    ``needed`` maps a ``test_object`` to the normalized versions whose runs are shown.
+    Only the columns used by ``_run_ref`` and ``_outcome`` are selected.
+    """
     index: RunIndex = defaultdict(list)
-    if not test_objects:
+    needed = {obj: versions for obj, versions in needed.items() if versions}
+    if not needed:
+        return index
+    suites = await db.execute(
+        select(TestSuite.id, TestSuite.test_object, TestSuite.test_object_version).where(
+            TestSuite.test_object.in_(needed)
+        )
+    )
+    suite_keys: dict[Any, tuple[str, str]] = {}
+    for suite_id, test_object, version in suites.all():
+        normalized = normalize_version(version)
+        if normalized in needed[test_object]:
+            suite_keys[suite_id] = (test_object, normalized)
+    if not suite_keys:
         return index
     result = await db.execute(
-        select(TestSuite.test_object, TestSuite.test_object_version, TestRun)
-        .join(TestRun, TestRun.suite_id == TestSuite.id)
-        .where(
-            TestSuite.test_object.in_(test_objects),
+        select(*RUN_COLUMNS).where(
+            TestRun.suite_id.in_(suite_keys),
             TestRun.env.in_([EnvEnum.DEV, EnvEnum.UAT, EnvEnum.PROD]),
         )
     )
-    for test_object, version, run in result.all():
-        env = _enum_value(run.env)
-        index[(test_object, normalize_version(version), env)].append(run)
+    for run in result.all():
+        test_object, version = suite_keys[run.suite_id]
+        index[(test_object, version, _enum_value(run.env))].append(run)
     return index
 
 
-def _linked(runs: RunIndex, app: SpApplication, env: str, version: str | None) -> list[TestRun]:
+def _needed_versions(
+    pairs: Sequence[tuple[SpApplication, str | None]],
+) -> dict[str, set[str]]:
+    """Group the normalized versions whose runs are needed by ``test_object``."""
+    needed: dict[str, set[str]] = defaultdict(set)
+    for app, version in pairs:
+        if app.test_object is not None and version:
+            needed[app.test_object].add(normalize_version(version))
+    return needed
+
+
+def _linked(runs: RunIndex, app: SpApplication, env: str, version: str | None) -> list[Any]:
     if app.test_object is None or not version:
         return []
     return runs.get((app.test_object, normalize_version(version), env), [])
@@ -210,7 +255,13 @@ async def _load_all(
     states: dict[uuid.UUID, dict[str, SpVersionState]] = defaultdict(dict)
     for state in (await db.execute(select(SpVersionState))).scalars():
         states[state.application_id][state.target] = state
-    runs = await _fetch_runs(db, {a.test_object for a, _ in pairs if a.test_object})
+    deployed = [
+        (app, state.version)
+        for app, _ in pairs
+        for target, state in states.get(app.id, {}).items()
+        if target in ENV_TARGETS
+    ]
+    runs = await _fetch_runs(db, _needed_versions(deployed))
     return pairs, states, runs
 
 
@@ -304,7 +355,11 @@ async def get_application_detail(
             .scalars()
             .all()
         )
-        runs = await _fetch_runs(db, {app.test_object} if app.test_object else set())
+        versions: list[tuple[SpApplication, str | None]] = [
+            (app, ev.version) for ev in events if ev.target in ENV_TARGETS
+        ]
+        versions += [(app, st.version) for t, st in states.items() if t in ENV_TARGETS]
+        runs = await _fetch_runs(db, _needed_versions(versions))
         history: dict[str, list[DeployEventOut]] = {t: [] for t in ALL_TARGETS}
         for ev in events:
             linked: list[RunRefOut] = []

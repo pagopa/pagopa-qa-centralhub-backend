@@ -7,11 +7,13 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import delete, event
 
 from app.models.status_page import SpApplication, SpDeployEvent, SpProduct, SpVersionState
 from app.models.test_metrics import TestRun, TestSuite
+from app.services import status_page as read_model
 from app.services.status_page import (
     get_application_detail,
     get_status,
@@ -372,3 +374,105 @@ async def test_detail_history(world: World) -> None:
     assert detail.application.id == a
     async with TestSession() as db:
         assert await get_application_detail(db, uuid.uuid4()) is None
+
+
+async def test_flags_prod_ahead_is_drift(world: World) -> None:
+    p = await add_product(world, "p")
+    a = await add_app(world, p, "ahead", None, states("1.0.0", "1.0.0", "1.0.0", "1.1.0"))
+    r = await row(world, a)
+    assert r.envs["PROD"].drift == "AHEAD"
+    assert r.flags == ["DRIFT"]
+
+
+async def test_flags_uat_or_prod_error_is_unreachable(world: World) -> None:
+    p = await add_product(world, "p")
+    for target in ("UAT", "PROD"):
+        st = states("1.0.0", "1.0.0", "1.0.0", "1.0.0")
+        st[target] = ("1.0.0", "ERROR")
+        a = await add_app(world, p, f"err-{target}", None, st)
+        r = await row(world, a)
+        assert "UNREACHABLE" in r.flags, target
+        assert "ALIGNED" not in r.flags, target
+
+
+async def test_never_synced_app_has_null_cells_and_no_flags(world: World) -> None:
+    p = await add_product(world, "p")
+    a = await add_app(world, p, "fresh", world.name("obj"))
+    r = await row(world, a)
+    assert r.repo is None
+    assert all(r.envs[t] is None for t in ("DEV", "UAT", "PROD"))
+    assert "UNREACHABLE" not in r.flags
+    assert "ALIGNED" not in r.flags
+
+
+async def test_runs_of_non_deployed_versions_are_not_loaded(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    p = await add_product(world, "p")
+    obj = world.name("obj")
+    a = await add_app(world, p, "a", obj, states("1.1.0", "1.0.0", "1.0.0", "1.0.0"))
+    deployed = await add_run(world, obj, "v1.0.0", "UAT")
+    await add_run(world, obj, "0.9.0", "UAT", minutes=5)
+    await add_run(world, obj, "1.1.0", "UAT", minutes=6)  # REPO only, not deployed
+
+    loaded: list[Any] = []
+    original = read_model._fetch_runs
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        index = await original(*args, **kwargs)
+        loaded.extend(index.items())
+        return index
+
+    monkeypatch.setattr(read_model, "_fetch_runs", spy)
+    r = await row(world, a)
+    assert [t.run_id for t in r.envs["UAT"].tests] == [deployed]
+    mine = {key: runs for key, runs in loaded if key[0] == obj}
+    assert set(mine) == {(obj, "1.0.0", "UAT")}
+    assert [run.id for run in mine[(obj, "1.0.0", "UAT")]] == [deployed]
+
+
+async def test_detail_loads_runs_of_event_versions_only(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    p = await add_product(world, "p")
+    obj = world.name("obj")
+    a = await add_app(world, p, "a", obj, states("1.2.0", "1.2.0", "1.2.0", "1.2.0"))
+    async with TestSession() as db:
+        db.add(
+            SpDeployEvent(
+                application_id=a,
+                target="UAT",
+                previous_version="1.1.0",
+                version="1.2.0",
+                detected_at=T0,
+                is_baseline=False,
+            )
+        )
+        db.add(
+            SpDeployEvent(
+                application_id=a,
+                target="UAT",
+                previous_version=None,
+                version="1.1.0",
+                detected_at=T0 - timedelta(days=1),
+                is_baseline=True,
+            )
+        )
+        await db.commit()
+    old = await add_run(world, obj, "1.1.0", "UAT")
+    await add_run(world, obj, "1.0.0", "UAT")  # never deployed
+
+    loaded: list[Any] = []
+    original = read_model._fetch_runs
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        index = await original(*args, **kwargs)
+        loaded.extend(index)
+        return index
+
+    monkeypatch.setattr(read_model, "_fetch_runs", spy)
+    async with TestSession() as db:
+        detail = await get_application_detail(db, a)
+    assert detail is not None
+    assert [r.run_id for r in detail.history["UAT"][1].runs] == [old]
+    assert {key[1] for key in loaded} == {"1.1.0"}
