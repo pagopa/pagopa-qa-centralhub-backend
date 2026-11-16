@@ -71,6 +71,13 @@ def _outcome(run: Any) -> tuple[str, bool]:
     return ("PASSED" if bad == 0 else "FAILED"), needs_review
 
 
+def _failed_count(run: Any) -> int | None:
+    """Failed plus broken scenarios, as counted by ``_outcome``; None when neither is set."""
+    if run.failed_scenario is None and run.broken_scenario is None:
+        return None
+    return int((run.failed_scenario or 0) + (run.broken_scenario or 0))
+
+
 def _run_ref(source: Any) -> RunRefOut:
     run: Any = source
     kind = run_kind(run.test_origin)
@@ -84,7 +91,7 @@ def _run_ref(source: Any) -> RunRefOut:
         trigger_type=str(trigger) if trigger is not None else None,
         timestamp_start=run.timestamp_start,
         passed=run.passed_scenario,
-        failed=run.failed_scenario,
+        failed=_failed_count(run),
         allure_url=run.allure_url,
         gha_run_url=run.gha_run_url,
         hub_url=f"{HUB_PATHS[kind]}/{run.id}",

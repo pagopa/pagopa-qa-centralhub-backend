@@ -15,6 +15,7 @@ from app.models.status_page import SpApplication, SpDeployEvent, SpProduct, SpVe
 from app.models.test_metrics import TestRun, TestSuite
 from app.services import status_page as read_model
 from app.services.status_page import (
+    _run_ref,
     get_application_detail,
     get_status,
     get_summary,
@@ -374,6 +375,26 @@ async def test_detail_history(world: World) -> None:
     assert detail.application.id == a
     async with TestSession() as db:
         assert await get_application_detail(db, uuid.uuid4()) is None
+
+
+def test_run_ref_failed_counts_broken_scenarios() -> None:
+    def ref(failed: int | None, broken: int | None) -> Any:
+        return _run_ref(
+            _run(
+                id=uuid.uuid4(),
+                failed_scenario=failed,
+                broken_scenario=broken,
+                trigger_type=None,
+                timestamp_start=T0,
+                allure_url=None,
+                gha_run_url=None,
+            )
+        )
+
+    assert ref(1, 2).failed == 3
+    assert ref(None, 2).failed == 2
+    assert ref(1, None).failed == 1
+    assert ref(None, None).failed is None
 
 
 async def test_flags_prod_ahead_is_drift(world: World) -> None:
