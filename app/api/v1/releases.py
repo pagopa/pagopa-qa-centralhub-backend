@@ -96,9 +96,17 @@ async def trigger_sync(body: ManualSyncIn, db: DbDep) -> SyncStatusOut:
 
     from app.tasks.sync_status_page import sync_status_page
 
-    task = sync_status_page.apply_async(
-        kwargs={"trigger": "MANUAL", "requested_by": body.user}, retry=False
-    )
+    try:
+        task = sync_status_page.apply_async(
+            kwargs={"trigger": "MANUAL", "requested_by": body.user}, retry=False
+        )
+    except Exception as exc:
+        logger.exception("status_page_sync_enqueue_failed", requested_by=body.user)
+        await sync_svc.mark_enqueue_failed(db, "Impossibile accodare la sincronizzazione")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Impossibile avviare la sincronizzazione, riprova più tardi",
+        ) from exc
     logger.info("status_page_sync_dispatched", task_id=task.id, requested_by=body.user)
     await sync_svc.set_sync_task_id(db, task.id)
     return result

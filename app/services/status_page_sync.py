@@ -168,6 +168,11 @@ async def _record_failed_sync_status(db: AsyncSession, *, error: str) -> None:
         raise
 
 
+async def mark_enqueue_failed(db: AsyncSession, error: str) -> None:
+    """Release a QUEUED manual sync whose Celery task could not be enqueued."""
+    await _record_failed_sync_status(db, error=error)
+
+
 async def _load_applications(db: AsyncSession) -> list[SpApplication]:
     result = await db.scalars(select(SpApplication).order_by(SpApplication.name))
     return list(result)

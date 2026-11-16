@@ -326,3 +326,26 @@ async def test_static_catalog_routes_not_shadowed(client: AsyncClient) -> None:
     assert r.status_code == 200
     assert r.json() == [{"id": "c1", "name": "Comp"}]
     assert ea.await_args_list[0].args[1] == "co"
+
+
+@pytest.mark.anyio
+async def test_manual_sync_enqueue_failure_is_503_and_marks_failed(client: AsyncClient) -> None:
+    with (
+        patch(
+            "app.services.status_page_sync.request_manual_sync",
+            new_callable=AsyncMock,
+            return_value=_sync_row(),
+        ),
+        patch("app.services.status_page_sync.mark_enqueue_failed", new_callable=AsyncMock) as mark,
+        patch("app.services.status_page_sync.set_sync_task_id", new_callable=AsyncMock) as store,
+        patch(
+            "app.tasks.sync_status_page.sync_status_page.apply_async",
+            side_effect=ConnectionError("broker down"),
+        ),
+    ):
+        response = await client.post(f"{BASE}/sync", json={"user": USER})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Impossibile avviare la sincronizzazione, riprova più tardi"
+    assert mark.await_args_list[0].args[1] == "Impossibile accodare la sincronizzazione"
+    store.assert_not_called()

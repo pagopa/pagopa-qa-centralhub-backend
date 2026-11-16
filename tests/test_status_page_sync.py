@@ -367,3 +367,19 @@ async def test_set_sync_task_id_stores_id(catalog: list[SpApplication]) -> None:
         row = await db.get(SpSyncStatus, 1)
         assert row is not None
         assert row.celery_task_id == "task-123"
+
+
+@pytest.mark.asyncio
+async def test_mark_enqueue_failed_releases_the_queue(catalog: list[SpApplication]) -> None:
+    from app.services.status_page_sync import mark_enqueue_failed
+
+    async with TestSession() as db:
+        await request_manual_sync(db, user="a@b.c")
+        await mark_enqueue_failed(db, "Impossibile accodare la sincronizzazione")
+    async with TestSession() as db:
+        row = await db.get(SpSyncStatus, 1)
+        assert row is not None
+        assert row.status == "FAILED"
+        assert row.errors == ["Impossibile accodare la sincronizzazione"]
+        # a new manual sync is no longer blocked
+        assert (await request_manual_sync(db, user="a@b.c")).status == "QUEUED"
