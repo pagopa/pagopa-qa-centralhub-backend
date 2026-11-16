@@ -5,12 +5,14 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, cast
 
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.status_page import SpApplication, SpDeployEvent, SpProduct, SpVersionState
 from app.models.test_metrics import EnvEnum, TestRun, TestSuite
 from app.schemas.status_page import (
@@ -38,6 +40,9 @@ AREA_ORDER = {"CORE": 0, "TOUCHPOINT": 1}
 MAX_RUNS_PER_VERSION = 20
 
 RunIndex = dict[tuple[str, str, str], list[Any]]
+# [since, until) of a deployed version: None means unbounded
+Window = tuple[datetime | None, datetime | None]
+ANY_VERSION = "*"
 
 
 def run_kind(test_origin: str | None) -> str:
@@ -134,7 +139,9 @@ RUN_COLUMNS = (
 async def _fetch_runs(db: AsyncSession, needed: dict[str, set[str]]) -> RunIndex:
     """Load the runs of the given test objects, restricted to the needed (normalized) versions.
 
-    ``needed`` maps a ``test_object`` to the normalized versions whose runs are shown.
+    ``needed`` maps a ``test_object`` to the normalized versions whose runs are shown. When
+    ``status_page_runs_match_version`` is off, every version of the test object is loaded under
+    ``ANY_VERSION`` and the runs are narrowed by deploy window instead (see ``_linked``).
     Only the columns used by ``_run_ref`` and ``_outcome`` are selected.
     """
     index: RunIndex = defaultdict(list)
@@ -147,7 +154,11 @@ async def _fetch_runs(db: AsyncSession, needed: dict[str, set[str]]) -> RunIndex
         )
     )
     suite_keys: dict[Any, tuple[str, str]] = {}
+    match_version = settings.status_page_runs_match_version
     for suite_id, test_object, version in suites.all():
+        if not match_version:
+            suite_keys[suite_id] = (test_object, ANY_VERSION)
+            continue
         normalized = normalize_version(version)
         if normalized in needed[test_object]:
             suite_keys[suite_id] = (test_object, normalized)
@@ -176,16 +187,68 @@ def _needed_versions(
     return needed
 
 
-def _linked(runs: RunIndex, app: SpApplication, env: str, version: str | None) -> list[Any]:
+def _in_window(ts: datetime | None, window: Window) -> bool:
+    since, until = window
+    if ts is None:
+        return since is None and until is None
+    return (since is None or ts >= since) and (until is None or ts < until)
+
+
+def _linked(
+    runs: RunIndex,
+    app: SpApplication,
+    env: str,
+    version: str | None,
+    window: Window = (None, None),
+) -> list[Any]:
+    """Runs of the application's test object on ``env`` for ``version``.
+
+    With version matching off the runs are those started while ``version`` was deployed.
+    """
     if app.test_object is None or not version:
         return []
-    return runs.get((app.test_object, normalize_version(version), env), [])
+    if settings.status_page_runs_match_version:
+        return runs.get((app.test_object, normalize_version(version), env), [])
+    return [
+        run
+        for run in runs.get((app.test_object, ANY_VERSION, env), [])
+        if _in_window(run.timestamp_start, window)
+    ]
+
+
+def _window_start(event: SpDeployEvent | Any) -> datetime | None:
+    """A version may have been deployed right after the old one was last seen."""
+    if event.is_baseline:
+        return None
+    return cast("datetime | None", event.previous_seen_at or event.detected_at)
+
+
+async def _current_windows(db: AsyncSession) -> dict[tuple[uuid.UUID, str], Window]:
+    """Deploy window of the version currently on each (application, environment)."""
+    if settings.status_page_runs_match_version:
+        return {}
+    latest = await db.execute(
+        select(
+            SpDeployEvent.application_id,
+            SpDeployEvent.target,
+            SpDeployEvent.is_baseline,
+            SpDeployEvent.previous_seen_at,
+            SpDeployEvent.detected_at,
+        )
+        .where(SpDeployEvent.target.in_(ENV_TARGETS))
+        .distinct(SpDeployEvent.application_id, SpDeployEvent.target)
+        .order_by(
+            SpDeployEvent.application_id, SpDeployEvent.target, SpDeployEvent.detected_at.desc()
+        )
+    )
+    return {(ev.application_id, ev.target): (_window_start(ev), None) for ev in latest.all()}
 
 
 def _build_row(
     app: SpApplication,
     states: dict[str, SpVersionState],
     runs: RunIndex,
+    windows: dict[tuple[uuid.UUID, str], Window] | None = None,
 ) -> ApplicationRowOut:
     repo_state = states.get("REPO")
     repo_ok = repo_state is not None and repo_state.read_status == "OK"
@@ -206,7 +269,8 @@ def _build_row(
         if target != "REPO":
             readable = state.read_status == "OK"
             out.drift = drift(state.version, repo_version) if readable else Drift.UNKNOWN
-            out.tests = _latest_per_kind(_linked(runs, app, target, state.version))
+            window = (windows or {}).get((app.id, target), (None, None))
+            out.tests = _latest_per_kind(_linked(runs, app, target, state.version, window))
         return out
 
     repo_cell = cell("REPO")
@@ -254,6 +318,7 @@ async def _load_all(
     list[tuple[SpApplication, SpProduct]],
     dict[uuid.UUID, dict[str, SpVersionState]],
     RunIndex,
+    dict[tuple[uuid.UUID, str], Window],
 ]:
     pairs = [
         (a, p)
@@ -269,17 +334,17 @@ async def _load_all(
         if target in ENV_TARGETS
     ]
     runs = await _fetch_runs(db, _needed_versions(deployed))
-    return pairs, states, runs
+    return pairs, states, runs, await _current_windows(db)
 
 
 async def get_status(db: AsyncSession) -> StatusOut:
     try:
-        pairs, states, runs = await _load_all(db)
+        pairs, states, runs, windows = await _load_all(db)
         sync = await get_sync_status(db)
         products: dict[uuid.UUID, tuple[SpProduct, list[ApplicationRowOut]]] = {}
         for app, product in pairs:
             products.setdefault(product.id, (product, []))[1].append(
-                _build_row(app, states.get(app.id, {}), runs)
+                _build_row(app, states.get(app.id, {}), runs, windows)
             )
         by_area: dict[str, list[ProductGroupOut]] = defaultdict(list)
         for product, rows in products.values():
@@ -303,8 +368,8 @@ async def get_status(db: AsyncSession) -> StatusOut:
 
 async def get_summary(db: AsyncSession) -> SummaryOut:
     try:
-        pairs, states, runs = await _load_all(db)
-        rows = [_build_row(a, states.get(a.id, {}), runs) for a, _ in pairs]
+        pairs, states, runs, windows = await _load_all(db)
+        rows = [_build_row(a, states.get(a.id, {}), runs, windows) for a, _ in pairs]
         sync = await get_sync_status(db)
         return SummaryOut(
             total=len(rows),
@@ -368,15 +433,22 @@ async def get_application_detail(
         versions += [(app, st.version) for t, st in states.items() if t in ENV_TARGETS]
         runs = await _fetch_runs(db, _needed_versions(versions))
         history: dict[str, list[DeployEventOut]] = {t: [] for t in ALL_TARGETS}
+        # events are newest first: a version stays deployed until the next (newer) one may
+        # have been deployed, so a run in the uncertain interval goes to the newer version
+        next_start: dict[str, datetime] = {}
+        current: dict[tuple[uuid.UUID, str], Window] = {}
         for ev in events:
             linked: list[RunRefOut] = []
             if ev.target in ENV_TARGETS:
+                window = (_window_start(ev), next_start.get(ev.target))
+                current.setdefault((app.id, ev.target), window)
                 linked = [
                     _run_ref(r)
-                    for r in _sorted_newest(_linked(runs, app, ev.target, ev.version))[
+                    for r in _sorted_newest(_linked(runs, app, ev.target, ev.version, window))[
                         :MAX_RUNS_PER_VERSION
                     ]
                 ]
+                next_start[ev.target] = ev.previous_seen_at or ev.detected_at
             history[ev.target].append(
                 DeployEventOut(
                     version=ev.version,
@@ -389,7 +461,7 @@ async def get_application_detail(
                 )
             )
         return ApplicationDetailOut(
-            application=_build_row(app, states, runs),
+            application=_build_row(app, states, runs, current),
             product_name=product.name,
             history=cast("Any", history),
         )
