@@ -39,4 +39,5 @@ celery_app.conf.update(
 from app.tasks import (
     sync_ea,  # noqa: E402, F401
     sync_sanp_health,  # noqa: E402, F401
+    sync_status_page,  # noqa: E402, F401
 )

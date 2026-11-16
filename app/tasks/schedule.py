@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from celery.schedules import crontab
 
+from app.config import settings
 from app.tasks import (
     celery_app,
     recompute_flaky_scores,  # noqa: F401  (registers the task with celery_app)
@@ -12,6 +13,7 @@ from app.tasks import (
     sync_gpd_position,  # noqa: F401  (registers the task with celery_app)
     sync_psp_fee,  # noqa: F401  (registers the task with celery_app)
     sync_sanp_health,  # noqa: F401  (registers the task with celery_app)
+    sync_status_page,  # noqa: F401  (registers the task with celery_app)
 )
 
 ROME = ZoneInfo("Europe/Rome")
@@ -34,6 +36,11 @@ celery_app.conf.beat_schedule = {
     "sync-sanp-health-hourly": {
         "task": "app.tasks.sync_sanp_health.sync_sanp_health",
         "schedule": 3600.0,
+    },
+    "sync-status-page": {
+        "task": "app.tasks.sync_status_page.sync_status_page",
+        "schedule": settings.status_page_sync_interval_s,  # every 15 minutes
+        "options": {"expires": settings.status_page_sync_interval_s},
     },
     "sync-ea-map-weekly": {
         "task": "app.tasks.sync_ea.sync_ea",

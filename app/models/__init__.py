@@ -39,6 +39,13 @@ from app.models.sanp_health import (
     SanpResultStatus,
     SanpSeverity,
 )
+from app.models.status_page import (  # noqa: F401
+    SpApplication,
+    SpDeployEvent,
+    SpProduct,
+    SpSyncStatus,
+    SpVersionState,
+)
 from app.models.suite import Suite
 from app.models.tm import ExternalResource, ResourceAbsence  # noqa: F401
 from app.models.user import User

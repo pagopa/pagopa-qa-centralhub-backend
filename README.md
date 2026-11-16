@@ -62,6 +62,7 @@ app/
 │   ├── docs.py             # Docs & Knowledge Base CRUD + HTML proxy
 │   ├── users.py            # GET/PATCH /api/v1/users, POST /api/v1/users/sync-login
 │   ├── roles.py            # GET /api/v1/roles (role/permission matrix), PATCH /api/v1/roles/{role}
+│   ├── releases.py         # Release Status: status, summary, application detail, manual sync, catalog
 │   └── ...
 ├── core/
 │   ├── permissions.py      # ACTION_CATALOG, ACTION_KEYS, EDITABLE_ROLES, compute_role_matrix
@@ -72,6 +73,7 @@ app/
 │   ├── gpd_position.py     # GpdPositionSnapshotOut, GpdPositionSyncStatusOut, ...
 │   ├── user.py             # UserOut, UserListResponse, UserUpdate, sync-login schemas
 │   ├── role.py             # RoleOut, RoleMatrixResponse, RolePermissionUpdate
+│   ├── status_page.py      # Release Status request/response models
 │   └── ...
 ├── services/
 │   ├── bdd.py              # BDD CRUD + settings encryption/decryption
@@ -82,8 +84,13 @@ app/
 │   ├── github.py           # GitHubClient (Contents API + Actions API: list_workflow_runs, get_job_log)
 │   ├── users.py            # sync_login, list_users, update_user
 │   ├── roles.py            # get_role_matrix, update_role_permissions
+│   ├── status_page.py          # Release Status read model (status, summary, application detail)
+│   ├── status_page_sync.py     # Sync run: advisory lock, sync status, deploy events
+│   ├── status_page_sources.py  # Version readers (repo via GitHub, DEV/UAT/PROD via platform info endpoint)
+│   ├── status_page_catalog.py  # Catalog CRUD (products, applications) with audit log
+│   ├── status_page_versions.py # Version parsing and comparison
 │   └── ...
-└── tasks/                  # Celery/Arq background workers (sync_gpd_position, ...)
+└── tasks/                  # Celery/Arq background workers (sync_gpd_position, sync_status_page, ...)
 alembic/                    # DB migration scripts
 tests/                      # pytest test suite
 docker-compose.yml
@@ -121,6 +128,39 @@ Le pagine TAS e NRT hanno le stesse operazioni del Quality Gate; il servizio `ap
 Richiede `TAS_GITHUB_TOKEN` con **Actions: Read and write** sul repo TAS (503 se manca, 502 su errore GitHub). Le run QG sono lette con `origin=QG` da `/test-metrics/nrts`, `/nrts-suites` e `/suites/all`; senza `origin` le pagine NRT escludono sia TAS sia QG.
 
 > Finché `verify_jwt` non è implementato l'endpoint non ha autenticazione lato server: le uniche protezioni sono le guardie sugli input e l'audit log.
+
+## Release Status
+
+Port of the pagoPA status page: for each application it shows the deployed version on repo, DEV, UAT and PROD, plus the test linkage and deploy history. API under `/api/v1/releases` (`/status`, `/summary`, `/applications/{id}`, `/sync-status`, `/sync`, `/catalog/*`); catalog changes are written to the audit log.
+
+- **Data**: five tables, `sp_products`, `sp_applications`, `sp_version_state`, `sp_deploy_events`, `sp_sync_status`. Migration `0032` creates them and seeds 14 products and 53 applications.
+- **Sync**: task `app.tasks.sync_status_page.sync_status_page`, run by Celery beat every 900 s (`STATUS_PAGE_SYNC_INTERVAL_S`) or on demand with `POST /api/v1/releases/sync` (202). A Postgres advisory lock prevents concurrent runs. Without `GITHUB_TOKEN` the sync ends as `FAILED`.
+- **Settings** (all optional, defaults shown):
+
+```env
+STATUS_PAGE_DEV_BASE_URL=https://api.dev.platform.pagopa.it
+STATUS_PAGE_UAT_BASE_URL=https://api.uat.platform.pagopa.it
+STATUS_PAGE_PROD_BASE_URL=https://api.platform.pagopa.it
+STATUS_PAGE_INFO_PATH=/shared/statuspage/v1/info
+STATUS_PAGE_SYNC_CONCURRENCY=10
+STATUS_PAGE_HTTP_TIMEOUT_S=10.0
+STATUS_PAGE_SYNC_INTERVAL_S=900.0
+```
+
+**Network requirement**: the backend must reach `https://api.{dev.,uat.,}platform.pagopa.it/shared/statuspage/v1/info` for all three environments. To check it from a backend pod (the image has no curl):
+
+```bash
+python - <<'EOF'
+import httpx
+for host in ("api.dev.platform.pagopa.it", "api.uat.platform.pagopa.it", "api.platform.pagopa.it"):
+    url = f"https://{host}/shared/statuspage/v1/info?product=afmcalculator"
+    try:
+        r = httpx.get(url, timeout=10)
+        print(host, r.status_code, r.text[:120])
+    except Exception as e:
+        print(host, "FAILED", type(e).__name__, e)
+EOF
+```
 
 ## Environment variables
 
