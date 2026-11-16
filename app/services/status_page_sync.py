@@ -130,6 +130,19 @@ async def request_manual_sync(
         raise
 
 
+async def set_sync_task_id(db: AsyncSession, task_id: str) -> None:
+    try:
+        status = await db.get(SpSyncStatus, 1)
+        if status is None:
+            logger.info("set_sync_task_id found no sync status row")
+            return
+        status.celery_task_id = task_id
+        await db.commit()
+    except Exception:
+        logger.exception("set_sync_task_id failed")
+        raise
+
+
 async def _get_or_create_status(db: AsyncSession) -> SpSyncStatus:
     status = await db.get(SpSyncStatus, 1)
     if status is None:

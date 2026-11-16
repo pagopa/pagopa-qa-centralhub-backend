@@ -236,3 +236,7 @@ class EaComponentOut(BaseModel):
 
 class DeleteIn(BaseModel):
     user: Text
+
+
+class ManualSyncIn(BaseModel):
+    user: Text

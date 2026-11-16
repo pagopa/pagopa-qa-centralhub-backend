@@ -277,8 +277,14 @@ async def list_applications(db: AsyncSession, product_id: uuid.UUID | None) -> l
         raise
 
 
+async def _ensure_ea_node(db: AsyncSession, ea_node_id: str | None) -> None:
+    if ea_node_id is not None and await db.get(EaNode, ea_node_id) is None:
+        raise CatalogNotFoundError("Componente EA non trovato")
+
+
 async def create_application(db: AsyncSession, payload: ApplicationIn) -> ApplicationOut:
     await _get_product(db, payload.product_id)
+    await _ensure_ea_node(db, payload.ea_node_id)
     data = payload.model_dump(exclude={"user"})
     app = SpApplication(**data)
     db.add(app)
@@ -312,6 +318,7 @@ async def update_application(
     nullable = {"pipeline_url", "test_object", "ea_node_id"}
     if changes.get("product_id") not in (None, app.product_id):
         await _get_product(db, changes["product_id"])
+    await _ensure_ea_node(db, changes.get("ea_node_id"))
     before: dict[str, Any] = {}
     after: dict[str, Any] = {}
     for field, value in changes.items():

@@ -244,3 +244,21 @@ async def test_list_ea_components_filters(db: Any) -> None:
     ids = {c.id for c in out if c.id.startswith("t7-")}
     assert ids == {"t7-biz-a", "t7-x"}
     assert len(await cat.list_ea_components(db, None)) <= 50
+
+
+async def test_unknown_ea_node_is_not_found(db: Any) -> None:
+    p = await cat.create_product(db, ProductIn(name=_n(), area="CORE", user=U))
+    with pytest.raises(CatalogNotFoundError) as ei:
+        await cat.create_application(db, _app(p.id, ea_node_id="t7-missing"))
+    assert str(ei.value) == "Componente EA non trovato"
+    a = await cat.create_application(db, _app(p.id))
+    with pytest.raises(CatalogNotFoundError):
+        await cat.update_application(db, a.id, ApplicationPatch(ea_node_id="t7-missing", user=U))
+    db.add(EaNode(id="t7-real", kind="component", name="Real", status="active"))
+    await db.commit()
+    created = await cat.create_application(db, _app(p.id, ea_node_id="t7-real"))
+    assert created.ea_node_id == "t7-real"
+    cleared = await cat.update_application(
+        db, created.id, ApplicationPatch(ea_node_id=None, user=U)
+    )
+    assert cleared.ea_node_id is None

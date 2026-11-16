@@ -354,3 +354,16 @@ async def test_run_sync_fails_without_github_token(
     assert status is not None and status.status == "FAILED"
     assert status.errors == ["GitHub token is not configured"]
     assert await _counts([a.id for a in catalog]) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_set_sync_task_id_stores_id(catalog: list[SpApplication]) -> None:
+    from app.services.status_page_sync import set_sync_task_id
+
+    async with TestSession() as db:
+        await request_manual_sync(db, user="a@b.c")
+        await set_sync_task_id(db, "task-123")
+    async with TestSession() as db:
+        row = await db.get(SpSyncStatus, 1)
+        assert row is not None
+        assert row.celery_task_id == "task-123"
