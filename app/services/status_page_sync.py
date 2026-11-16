@@ -8,6 +8,7 @@ from typing import Protocol
 import httpx
 import structlog
 from sqlalchemy import func, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -114,13 +115,8 @@ async def request_manual_sync(
 ) -> SpSyncStatus:
     try:
         now = now or _utcnow()
-        status = (
-            await db.execute(select(SpSyncStatus).where(SpSyncStatus.id == 1).with_for_update())
-        ).scalar_one_or_none()
-        if status is None:
-            status = SpSyncStatus(id=1, status="QUEUED", trigger="MANUAL")
-            db.add(status)
-        elif status.status in ("QUEUED", "RUNNING") and not _is_stale(status, now):
+        status = await _lock_status_row(db)
+        if status.status in ("QUEUED", "RUNNING") and not _is_stale(status, now):
             await db.rollback()
             raise StatusPageSyncInProgressError("Status page synchronization already in progress")
         status.status = "QUEUED"
@@ -155,12 +151,31 @@ async def set_sync_task_id(db: AsyncSession, task_id: str) -> None:
         raise
 
 
+async def _lock_status_row(db: AsyncSession) -> SpSyncStatus:
+    """Create the singleton row if missing and return it locked for this transaction.
+
+    ``INSERT ... ON CONFLICT DO NOTHING`` makes concurrent first creations safe: the
+    second insert waits for the first and then does nothing, so ``SELECT ... FOR UPDATE``
+    always finds a row to lock. The placeholder values are always overwritten by the
+    caller before the transaction commits.
+    """
+    await db.execute(
+        pg_insert(SpSyncStatus)
+        .values(id=1, status="OK", trigger="SCHEDULED")
+        .on_conflict_do_nothing(index_elements=[SpSyncStatus.id])
+    )
+    return (
+        await db.execute(
+            select(SpSyncStatus)
+            .where(SpSyncStatus.id == 1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+
+
 async def _get_or_create_status(db: AsyncSession) -> SpSyncStatus:
-    status = await db.get(SpSyncStatus, 1)
-    if status is None:
-        status = SpSyncStatus(id=1, status="RUNNING", trigger="SCHEDULED")
-        db.add(status)
-    return status
+    return await _lock_status_row(db)
 
 
 async def _record_failed_sync_status(db: AsyncSession, *, error: str) -> None:

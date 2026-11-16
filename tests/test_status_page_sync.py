@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # ruff: noqa: S101
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -363,6 +364,49 @@ async def test_manual_sync_without_row_creates_it(catalog: list[SpApplication]) 
         await db.commit()
         status = await request_manual_sync(db, user="a@b.c")
     assert status.status == "QUEUED"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_manual_requests_without_row_give_one_conflict(
+    catalog: list[SpApplication],
+) -> None:
+    async with TestSession() as db:
+        await db.execute(delete(SpSyncStatus))
+        await db.commit()
+
+    async def request(user: str) -> SpSyncStatus:
+        async with TestSession() as db:
+            return await request_manual_sync(db, user=user)
+
+    results = await asyncio.gather(
+        request("a@b.c"), request("d@e.f"), return_exceptions=True
+    )
+
+    queued = [r for r in results if isinstance(r, SpSyncStatus)]
+    conflicts = [r for r in results if isinstance(r, StatusPageSyncInProgressError)]
+    assert len(queued) == 1 and len(conflicts) == 1, results
+    assert queued[0].status == "QUEUED"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_status_creation_without_row_does_not_collide(
+    catalog: list[SpApplication],
+) -> None:
+    async with TestSession() as db:
+        await db.execute(delete(SpSyncStatus))
+        await db.commit()
+
+    async def mark(status_value: str) -> None:
+        async with TestSession() as db:
+            status = await svc._get_or_create_status(db)
+            status.status = status_value
+            await db.commit()
+
+    await asyncio.gather(mark("RUNNING"), mark("FAILED"))
+
+    async with TestSession() as db:
+        rows = list(await db.scalars(select(SpSyncStatus)))
+    assert len(rows) == 1 and rows[0].status in ("RUNNING", "FAILED")
 
 
 @pytest.mark.asyncio
