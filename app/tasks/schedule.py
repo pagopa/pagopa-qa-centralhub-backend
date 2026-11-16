@@ -40,6 +40,7 @@ celery_app.conf.beat_schedule = {
     "sync-status-page": {
         "task": "app.tasks.sync_status_page.sync_status_page",
         "schedule": settings.status_page_sync_interval_s,  # every 15 minutes
+        "options": {"expires": settings.status_page_sync_interval_s},
     },
     "sync-ea-map-weekly": {
         "task": "app.tasks.sync_ea.sync_ea",

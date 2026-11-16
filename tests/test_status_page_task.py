@@ -24,6 +24,7 @@ def test_beat_schedules_status_page_every_15_minutes() -> None:
     assert celery_app.conf.beat_schedule["sync-status-page"] == {
         "task": TASK_NAME,
         "schedule": 900.0,
+        "options": {"expires": 900.0},
     }
 
 
