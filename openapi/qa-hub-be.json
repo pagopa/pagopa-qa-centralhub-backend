@@ -2519,6 +2519,646 @@
         }
       }
     },
+    "/api/v1/releases/status": {
+      "get": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "Get Status",
+        "operationId": "get_status_api_v1_releases_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases/summary": {
+      "get": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "Get Summary",
+        "operationId": "get_summary_api_v1_releases_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SummaryOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases/applications/{application_id}": {
+      "get": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "Get Application",
+        "operationId": "get_application_api_v1_releases_applications__application_id__get",
+        "parameters": [
+          {
+            "name": "application_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Application Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationDetailOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases/sync-status": {
+      "get": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "Get Sync Status",
+        "operationId": "get_sync_status_api_v1_releases_sync_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get Sync Status Api V1 Releases Sync Status Get",
+                  "$ref": "#/components/schemas/SyncStatusOut",
+                  "nullable": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases/sync": {
+      "post": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "Trigger Sync",
+        "operationId": "trigger_sync_api_v1_releases_sync_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualSyncIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncStatusOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases/catalog/products": {
+      "get": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "List Products",
+        "operationId": "list_products_api_v1_releases_catalog_products_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProductOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Products Api V1 Releases Catalog Products Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "Create Product",
+        "operationId": "create_product_api_v1_releases_catalog_products_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases/catalog/products/{product_id}": {
+      "patch": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "Update Product",
+        "operationId": "update_product_api_v1_releases_catalog_products__product_id__patch",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Product Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "Delete Product",
+        "operationId": "delete_product_api_v1_releases_catalog_products__product_id__delete",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Product Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases/catalog/applications": {
+      "get": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "List Applications",
+        "operationId": "list_applications_api_v1_releases_catalog_applications_get",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Product Id",
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApplicationOut"
+                  },
+                  "title": "Response List Applications Api V1 Releases Catalog Applications Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "Create Application",
+        "operationId": "create_application_api_v1_releases_catalog_applications_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplicationIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases/catalog/applications/check": {
+      "post": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "Check Application",
+        "operationId": "check_application_api_v1_releases_catalog_applications_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases/catalog/applications/{application_id}": {
+      "patch": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "Update Application",
+        "operationId": "update_application_api_v1_releases_catalog_applications__application_id__patch",
+        "parameters": [
+          {
+            "name": "application_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Application Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplicationPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "Delete Application",
+        "operationId": "delete_application_api_v1_releases_catalog_applications__application_id__delete",
+        "parameters": [
+          {
+            "name": "application_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Application Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases/catalog/test-objects": {
+      "get": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "List Test Objects",
+        "operationId": "list_test_objects_api_v1_releases_catalog_test_objects_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response List Test Objects Api V1 Releases Catalog Test Objects Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases/catalog/ea-components": {
+      "get": {
+        "tags": [
+          "releases"
+        ],
+        "summary": "List Ea Components",
+        "operationId": "list_ea_components_api_v1_releases_catalog_ea_components_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Q",
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EaComponentOut"
+                  },
+                  "title": "Response List Ea Components Api V1 Releases Catalog Ea Components Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/docs": {
       "get": {
         "tags": [
@@ -5990,664 +6630,6 @@
           }
         }
       }
-    },
-    "/api/v1/releases/status": {
-      "get": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "Get Status",
-        "operationId": "get_status_api_v1_releases_status_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusOut"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/releases/summary": {
-      "get": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "Get Summary",
-        "operationId": "get_summary_api_v1_releases_summary_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SummaryOut"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/releases/applications/{application_id}": {
-      "get": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "Get Application",
-        "operationId": "get_application_api_v1_releases_applications__application_id__get",
-        "parameters": [
-          {
-            "name": "application_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Application Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApplicationDetailOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/releases/sync-status": {
-      "get": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "Get Sync Status",
-        "operationId": "get_sync_status_api_v1_releases_sync_status_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SyncStatusOut"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Get Sync Status Api V1 Releases Sync Status Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/releases/sync": {
-      "post": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "Trigger Sync",
-        "operationId": "trigger_sync_api_v1_releases_sync_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ManualSyncIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SyncStatusOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/releases/catalog/products": {
-      "get": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "List Products",
-        "operationId": "list_products_api_v1_releases_catalog_products_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ProductOut"
-                  },
-                  "type": "array",
-                  "title": "Response List Products Api V1 Releases Catalog Products Get"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "Create Product",
-        "operationId": "create_product_api_v1_releases_catalog_products_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProductIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProductOut"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Conflict"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/releases/catalog/products/{product_id}": {
-      "patch": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "Update Product",
-        "operationId": "update_product_api_v1_releases_catalog_products__product_id__patch",
-        "parameters": [
-          {
-            "name": "product_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Product Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProductPatch"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProductOut"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found"
-          },
-          "409": {
-            "description": "Conflict"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "Delete Product",
-        "operationId": "delete_product_api_v1_releases_catalog_products__product_id__delete",
-        "parameters": [
-          {
-            "name": "product_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Product Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeleteIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "404": {
-            "description": "Not found"
-          },
-          "409": {
-            "description": "Conflict"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/releases/catalog/applications": {
-      "get": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "List Applications",
-        "operationId": "list_applications_api_v1_releases_catalog_applications_get",
-        "parameters": [
-          {
-            "name": "product_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Product Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ApplicationOut"
-                  },
-                  "title": "Response List Applications Api V1 Releases Catalog Applications Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "Create Application",
-        "operationId": "create_application_api_v1_releases_catalog_applications_post",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApplicationIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApplicationOut"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found"
-          },
-          "409": {
-            "description": "Conflict"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/releases/catalog/applications/check": {
-      "post": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "Check Application",
-        "operationId": "check_application_api_v1_releases_catalog_applications_check_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CheckIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/releases/catalog/applications/{application_id}": {
-      "patch": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "Update Application",
-        "operationId": "update_application_api_v1_releases_catalog_applications__application_id__patch",
-        "parameters": [
-          {
-            "name": "application_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Application Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApplicationPatch"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApplicationOut"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found"
-          },
-          "409": {
-            "description": "Conflict"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "Delete Application",
-        "operationId": "delete_application_api_v1_releases_catalog_applications__application_id__delete",
-        "parameters": [
-          {
-            "name": "application_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Application Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeleteIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "404": {
-            "description": "Not found"
-          },
-          "409": {
-            "description": "Conflict"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/releases/catalog/test-objects": {
-      "get": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "List Test Objects",
-        "operationId": "list_test_objects_api_v1_releases_catalog_test_objects_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array",
-                  "title": "Response List Test Objects Api V1 Releases Catalog Test Objects Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/releases/catalog/ea-components": {
-      "get": {
-        "tags": [
-          "releases"
-        ],
-        "summary": "List Ea Components",
-        "operationId": "list_ea_components_api_v1_releases_catalog_ea_components_get",
-        "parameters": [
-          {
-            "name": "q",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/EaComponentOut"
-                  },
-                  "title": "Response List Ea Components Api V1 Releases Catalog Ea Components Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
@@ -6735,16 +6717,10 @@
             "title": "Repository"
           },
           "pipeline_url": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pipeline Url"
+            "title": "Pipeline Url",
+            "type": "string",
+            "minLength": 1,
+            "nullable": true
           },
           "runtime": {
             "type": "string",
@@ -6772,28 +6748,16 @@
             "default": "backend"
           },
           "test_object": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Test Object"
+            "title": "Test Object",
+            "type": "string",
+            "minLength": 1,
+            "nullable": true
           },
           "ea_node_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ea Node Id"
+            "title": "Ea Node Id",
+            "type": "string",
+            "minLength": 1,
+            "nullable": true
           },
           "user": {
             "type": "string",
@@ -6838,15 +6802,9 @@
             "title": "Repository"
           },
           "pipeline_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pipeline Url"
+            "title": "Pipeline Url",
+            "type": "string",
+            "nullable": true
           },
           "runtime": {
             "type": "string",
@@ -6861,26 +6819,14 @@
             "title": "Kind"
           },
           "test_object": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Test Object"
+            "title": "Test Object",
+            "type": "string",
+            "nullable": true
           },
           "ea_node_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ea Node Id"
+            "title": "Ea Node Id",
+            "type": "string",
+            "nullable": true
           }
         },
         "type": "object",
@@ -6902,134 +6848,74 @@
       "ApplicationPatch": {
         "properties": {
           "product_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Product Id"
+            "title": "Product Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           },
           "name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+            "title": "Name",
+            "type": "string",
+            "minLength": 1,
+            "nullable": true
           },
           "product_key": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Product Key"
+            "title": "Product Key",
+            "type": "string",
+            "minLength": 1,
+            "nullable": true
           },
           "repository": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "pattern": "^[A-Za-z0-9._-]+$"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Repository"
+            "title": "Repository",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "nullable": true
           },
           "pipeline_url": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pipeline Url"
+            "title": "Pipeline Url",
+            "type": "string",
+            "minLength": 1,
+            "nullable": true
           },
           "runtime": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "AKS",
-                  "AZ"
-                ]
-              },
-              {
-                "type": "null"
-              }
+            "title": "Runtime",
+            "type": "string",
+            "enum": [
+              "AKS",
+              "AZ"
             ],
-            "title": "Runtime"
+            "nullable": true
           },
           "ci": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "GHA",
-                  "AZDO"
-                ]
-              },
-              {
-                "type": "null"
-              }
+            "title": "Ci",
+            "type": "string",
+            "enum": [
+              "GHA",
+              "AZDO"
             ],
-            "title": "Ci"
+            "nullable": true
           },
           "kind": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "backend",
-                  "frontend"
-                ]
-              },
-              {
-                "type": "null"
-              }
+            "title": "Kind",
+            "type": "string",
+            "enum": [
+              "backend",
+              "frontend"
             ],
-            "title": "Kind"
+            "nullable": true
           },
           "test_object": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Test Object"
+            "title": "Test Object",
+            "type": "string",
+            "minLength": 1,
+            "nullable": true
           },
           "ea_node_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ea Node Id"
+            "title": "Ea Node Id",
+            "type": "string",
+            "minLength": 1,
+            "nullable": true
           },
           "user": {
             "type": "string",
@@ -7069,15 +6955,9 @@
             "title": "Repository"
           },
           "pipeline_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pipeline Url"
+            "title": "Pipeline Url",
+            "type": "string",
+            "nullable": true
           },
           "runtime": {
             "type": "string",
@@ -7092,47 +6972,23 @@
             "title": "Kind"
           },
           "test_object": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Test Object"
+            "title": "Test Object",
+            "type": "string",
+            "nullable": true
           },
           "ea_node_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ea Node Id"
+            "title": "Ea Node Id",
+            "type": "string",
+            "nullable": true
           },
           "repo": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CellOut"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/CellOut",
+            "nullable": true
           },
           "envs": {
             "additionalProperties": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/CellOut"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+              "$ref": "#/components/schemas/CellOut",
+              "nullable": true
             },
             "propertyNames": {
               "enum": [
@@ -7306,30 +7162,18 @@
       "CellOut": {
         "properties": {
           "version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Version"
+            "title": "Version",
+            "type": "string",
+            "nullable": true
           },
           "read_status": {
             "type": "string",
             "title": "Read Status"
           },
           "error_detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Detail"
+            "title": "Error Detail",
+            "type": "string",
+            "nullable": true
           },
           "checked_at": {
             "type": "string",
@@ -7337,38 +7181,20 @@
             "title": "Checked At"
           },
           "last_ok_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Ok At"
+            "title": "Last Ok At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "version_since": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Version Since"
+            "title": "Version Since",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "drift": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Drift"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/Drift",
+            "nullable": true
           },
           "tests": {
             "items": {
@@ -7438,26 +7264,14 @@
             "title": "Ok"
           },
           "version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Version"
+            "title": "Version",
+            "type": "string",
+            "nullable": true
           },
           "detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Detail"
+            "title": "Detail",
+            "type": "string",
+            "nullable": true
           }
         },
         "type": "object",
@@ -7592,15 +7406,9 @@
             "title": "Version"
           },
           "previous_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Previous Version"
+            "title": "Previous Version",
+            "type": "string",
+            "nullable": true
           },
           "detected_at": {
             "type": "string",
@@ -7608,16 +7416,10 @@
             "title": "Detected At"
           },
           "previous_seen_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Previous Seen At"
+            "title": "Previous Seen At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "is_baseline": {
             "type": "boolean",
@@ -11817,31 +11619,19 @@
       "ProductPatch": {
         "properties": {
           "name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+            "title": "Name",
+            "type": "string",
+            "minLength": 1,
+            "nullable": true
           },
           "area": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "CORE",
-                  "TOUCHPOINT"
-                ]
-              },
-              {
-                "type": "null"
-              }
+            "title": "Area",
+            "type": "string",
+            "enum": [
+              "CORE",
+              "TOUCHPOINT"
             ],
-            "title": "Area"
+            "nullable": true
           },
           "user": {
             "type": "string",
@@ -12566,71 +12356,35 @@
             "title": "Needs Review"
           },
           "trigger_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trigger Type"
+            "title": "Trigger Type",
+            "type": "string",
+            "nullable": true
           },
           "timestamp_start": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Timestamp Start"
+            "title": "Timestamp Start",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "passed": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Passed"
+            "title": "Passed",
+            "type": "integer",
+            "nullable": true
           },
           "failed": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Failed"
+            "title": "Failed",
+            "type": "integer",
+            "nullable": true
           },
           "allure_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Allure Url"
+            "title": "Allure Url",
+            "type": "string",
+            "nullable": true
           },
           "gha_run_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Gha Run Url"
+            "title": "Gha Run Url",
+            "type": "string",
+            "nullable": true
           },
           "hub_url": {
             "type": "string",
@@ -13369,14 +13123,8 @@
       "StatusOut": {
         "properties": {
           "sync": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SyncStatusOut"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/SyncStatusOut",
+            "nullable": true
           },
           "areas": {
             "items": {
@@ -13416,16 +13164,10 @@
             "title": "Untested"
           },
           "last_success_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Success At"
+            "title": "Last Success At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           }
         },
         "type": "object",
@@ -13522,63 +13264,33 @@
             "title": "Trigger"
           },
           "requested_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested By"
+            "title": "Requested By",
+            "type": "string",
+            "nullable": true
           },
           "queued_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Queued At"
+            "title": "Queued At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "started_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
+            "title": "Started At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "finished_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Finished At"
+            "title": "Finished At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "last_success_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Success At"
+            "title": "Last Success At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "applications_checked": {
             "type": "integer",
