@@ -4,8 +4,9 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, StringConstraints, computed_field, field_validator
 
+from app.services.status_page_sync import is_in_progress
 from app.services.status_page_versions import Drift
 
 RunKind = Literal["NRT", "QG", "TAS"]
@@ -28,6 +29,12 @@ class SyncStatusOut(BaseModel):
     applications_checked: int
     reads_failed: int
     errors: list[object]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def in_progress(self) -> bool:
+        """QUEUED or RUNNING and not stale (QUEUED > 10 min, RUNNING > 30 min)."""
+        return is_in_progress(self)
 
 
 class RunRefOut(BaseModel):

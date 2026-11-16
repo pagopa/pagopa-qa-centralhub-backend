@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 import httpx
 import structlog
@@ -89,12 +90,23 @@ async def get_sync_status(db: AsyncSession) -> SpSyncStatus | None:
         raise
 
 
-def _is_stale(status: SpSyncStatus, now: datetime) -> bool:
+class _SyncTimes(Protocol):
+    status: str
+    queued_at: datetime | None
+    started_at: datetime | None
+
+
+def _is_stale(status: _SyncTimes, now: datetime) -> bool:
     if status.status == "QUEUED":
         return status.queued_at is None or now - status.queued_at > QUEUED_STALE_AFTER
     if status.status == "RUNNING":
         return status.started_at is None or now - status.started_at > RUNNING_STALE_AFTER
     return True
+
+
+def is_in_progress(status: _SyncTimes, now: datetime | None = None) -> bool:
+    """True when a sync is QUEUED or RUNNING and not stale (a dead worker does not count)."""
+    return status.status in ("QUEUED", "RUNNING") and not _is_stale(status, now or _utcnow())
 
 
 async def request_manual_sync(

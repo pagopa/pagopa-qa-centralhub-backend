@@ -383,3 +383,33 @@ async def test_mark_enqueue_failed_releases_the_queue(catalog: list[SpApplicatio
         assert row.errors == ["Impossibile accodare la sincronizzazione"]
         # a new manual sync is no longer blocked
         assert (await request_manual_sync(db, user="a@b.c")).status == "QUEUED"
+
+
+def _sync_row(status: str, *, queued_ago: int | None = None, started_ago: int | None = None) -> Any:
+    now = datetime.now(UTC)
+    return SpSyncStatus(
+        id=1,
+        status=status,
+        trigger="SCHEDULED",
+        requested_by=None,
+        queued_at=now - timedelta(minutes=queued_ago) if queued_ago is not None else None,
+        started_at=now - timedelta(minutes=started_ago) if started_ago is not None else None,
+        finished_at=None,
+        last_success_at=None,
+        applications_checked=0,
+        reads_failed=0,
+        errors=[],
+    )
+
+
+def test_sync_status_out_in_progress_follows_stale_rule() -> None:
+    from app.schemas.status_page import SyncStatusOut
+
+    def in_progress(row: Any) -> bool:
+        return SyncStatusOut.model_validate(row).model_dump()["in_progress"]
+
+    assert in_progress(_sync_row("RUNNING", started_ago=1)) is True
+    assert in_progress(_sync_row("RUNNING", started_ago=31)) is False
+    assert in_progress(_sync_row("QUEUED", queued_ago=1)) is True
+    assert in_progress(_sync_row("QUEUED", queued_ago=11)) is False
+    assert in_progress(_sync_row("OK")) is False
