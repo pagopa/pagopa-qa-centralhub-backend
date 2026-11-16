@@ -11,6 +11,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import delete, func, select, text
 
+from app.config import settings
 from app.models.status_page import (
     SpApplication,
     SpDeployEvent,
@@ -118,6 +119,11 @@ def test_v_prefix_change_is_event_exact_strings() -> None:
 
 
 # ---------------------------------------------------------------- DB tests
+
+
+@pytest.fixture(autouse=True)
+def _github_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "github_token", "test-token")
 
 
 @pytest_asyncio.fixture
@@ -329,3 +335,22 @@ async def test_manual_sync_without_row_creates_it(catalog: list[SpApplication]) 
         await db.commit()
         status = await request_manual_sync(db, user="a@b.c")
     assert status.status == "QUEUED"
+
+
+@pytest.mark.asyncio
+async def test_run_sync_fails_without_github_token(
+    catalog: list[SpApplication], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "github_token", "")
+    p1, p2, p3 = _patch_sources(catalog)
+    with p1 as repo, p2 as env, p3:
+        async with TestSession() as db:
+            with pytest.raises(RuntimeError, match="GitHub token is not configured"):
+                await run_sync(db, trigger="SCHEDULED", requested_by=None)
+        repo.assert_not_called()
+        env.assert_not_called()
+    async with TestSession() as db:
+        status = await db.get(SpSyncStatus, 1)
+    assert status is not None and status.status == "FAILED"
+    assert status.errors == ["GitHub token is not configured"]
+    assert await _counts([a.id for a in catalog]) == (0, 0)

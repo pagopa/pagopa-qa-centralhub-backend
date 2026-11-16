@@ -196,6 +196,12 @@ async def _run_locked(db: AsyncSession, *, trigger: str, requested_by: str | Non
     status.finished_at = None
     await db.commit()
 
+    if not settings.github_token:
+        message = "GitHub token is not configured"
+        logger.error("run_sync failed", error=message)
+        await _record_failed_sync_status(db, error=message)
+        raise RuntimeError(message)
+
     try:
         applications = await _load_applications(db)
         if not applications:
