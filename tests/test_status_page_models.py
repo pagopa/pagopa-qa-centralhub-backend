@@ -15,6 +15,7 @@ from app.models.status_page import (
     SpApplication,
     SpDeployEvent,
     SpProduct,
+    SpSyncStatus,
     SpVersionState,
 )
 from tests._db import TestSession
@@ -173,3 +174,11 @@ async def test_ea_node_delete_sets_null(clean: object) -> None:
         await session.commit()
         await session.refresh(app)
         assert app.ea_node_id is None
+
+
+def test_sync_status_counters_have_server_defaults() -> None:
+    columns = SpSyncStatus.__table__.c
+    for name in ("applications_checked", "reads_failed"):
+        default = columns[name].server_default
+        assert default is not None, name
+        assert str(getattr(default, "arg", default)) == "0", name

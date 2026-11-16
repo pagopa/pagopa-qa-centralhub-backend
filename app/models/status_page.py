@@ -152,8 +152,12 @@ class SpSyncStatus(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    applications_checked: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    reads_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    applications_checked: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    reads_failed: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     errors: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
