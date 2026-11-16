@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import structlog
@@ -14,6 +16,16 @@ GITHUB_API_BASE = "https://api.github.com"
 GITHUB_OWNER = "pagopa"
 MAX_ATTEMPTS = 2
 _RELEASE_PREFIX = "Release "
+_REPOSITORY_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def is_valid_repository(name: str) -> bool:
+    """A GitHub repository name that is safe as a single URL path segment.
+
+    Only letters, digits, ``.``, ``_`` and ``-``; names made only of dots (``.``, ``..``)
+    are rejected because they would move the request to another GitHub API path.
+    """
+    return bool(_REPOSITORY_RE.fullmatch(name)) and name.strip(".") != ""
 
 
 @dataclass(frozen=True)
@@ -83,7 +95,10 @@ async def read_env(client: httpx.AsyncClient, target: str, product_key: str) -> 
 
 async def read_repo(client: httpx.AsyncClient, repository: str) -> Reading:
     try:
-        url = f"{GITHUB_API_BASE}/repos/{GITHUB_OWNER}/{repository}/releases/latest"
+        if not is_valid_repository(repository):
+            return _error("REPO", "Invalid repository name")
+        segment = quote(repository, safe="")
+        url = f"{GITHUB_API_BASE}/repos/{GITHUB_OWNER}/{segment}/releases/latest"
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",

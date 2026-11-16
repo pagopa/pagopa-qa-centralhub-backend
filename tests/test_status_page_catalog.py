@@ -79,6 +79,12 @@ def test_schema_validation() -> None:
     pid = uuid.uuid4()
     with pytest.raises(ValidationError):
         _app(pid, repository="bad repo/x")
+    for dots in (".", ".."):
+        with pytest.raises(ValidationError):
+            _app(pid, repository=dots)
+        with pytest.raises(ValidationError):
+            CheckIn(product_key="k", repository=dots)
+    assert _app(pid, repository="a..b").repository == "a..b"
     with pytest.raises(ValidationError):
         _app(pid, pipeline_url="http://x")
     with pytest.raises(ValidationError):

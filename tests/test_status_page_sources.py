@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from app.config import settings
-from app.services.status_page_sources import Reading, read_env, read_repo
+from app.services.status_page_sources import Reading, is_valid_repository, read_env, read_repo
 
 
 def _client(handler: httpx.MockTransport) -> httpx.AsyncClient:
@@ -111,6 +111,31 @@ async def test_read_repo_ok_and_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     assert str(seen[0].url) == (
         "https://api.github.com/repos/pagopa/pagopa-afm-calculator/releases/latest"
     )
+
+
+@pytest.mark.parametrize("name", ["pagopa-afm-calculator", "a..b", "repo.name_1"])
+def test_is_valid_repository_accepts_names(name: str) -> None:
+    assert is_valid_repository(name)
+
+
+@pytest.mark.parametrize("name", [".", "..", "...", "", "a/b", "a%2fb", "a b", "a?b", "a#b"])
+def test_is_valid_repository_rejects_names(name: str) -> None:
+    assert not is_valid_repository(name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", [".", "..", "../../orgs/pagopa"])
+async def test_read_repo_rejects_unsafe_names_without_a_request(name: str) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(r: httpx.Request) -> httpx.Response:
+        seen.append(r)
+        return httpx.Response(200, json={"tag_name": "1.0.0"})
+
+    async with _client(httpx.MockTransport(handler)) as c:
+        reading = await read_repo(c, name)
+    assert reading == Reading("REPO", "ERROR", None, "Invalid repository name")
+    assert seen == []
 
 
 @pytest.mark.asyncio

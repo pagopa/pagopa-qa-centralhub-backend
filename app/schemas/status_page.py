@@ -4,8 +4,16 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, StringConstraints, computed_field, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    StringConstraints,
+    computed_field,
+    field_validator,
+)
 
+from app.services.status_page_sources import is_valid_repository
 from app.services.status_page_sync import is_in_progress
 from app.services.status_page_versions import Drift
 
@@ -128,8 +136,16 @@ Ci = Literal["GHA", "AZDO"]
 AppKind = Literal["backend", "frontend"]
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+def _check_repository(value: str) -> str:
+    if not is_valid_repository(value):
+        raise ValueError("Nome repository non valido")
+    return value
+
+
 Repository = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, pattern=r"^[A-Za-z0-9._-]+$")
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, pattern=r"^[A-Za-z0-9._-]+$"),
+    AfterValidator(_check_repository),
 ]
 
 
