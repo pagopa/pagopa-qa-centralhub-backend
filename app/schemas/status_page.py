@@ -267,6 +267,8 @@ class ApplicationOut(BaseModel):
 class CheckIn(BaseModel):
     product_key: Text
     repository: Repository
+    # Manual applications have no /info endpoint: probe the repository only.
+    repo_only: bool = False
 
 
 class CheckTargetOut(BaseModel):
