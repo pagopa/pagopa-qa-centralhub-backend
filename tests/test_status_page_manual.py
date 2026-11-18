@@ -189,6 +189,26 @@ async def test_same_value_refreshes_without_event(ctx: Ctx) -> None:
 
 
 @pytest.mark.asyncio
+async def test_set_after_clear_is_not_a_baseline(ctx: Ctx) -> None:
+    await _seed(ctx, "UAT", "1.0.0", status="MANUAL")
+    await _run_set(ctx, {"UAT": ""}, T1)
+    cleared = await _state(ctx, "UAT")
+    assert cleared is not None and cleared.last_ok_at == T1
+    await _run_set(ctx, {"UAT": "2.0.0"}, T2)
+    events = await _events(ctx)
+    assert len(events) == 1
+    ev = events[0]
+    assert (ev.previous_version, ev.version, ev.previous_seen_at, ev.is_baseline) == (
+        None,
+        "2.0.0",
+        T1,
+        False,
+    )
+    state = await _state(ctx, "UAT")
+    assert state is not None and state.version == "2.0.0" and state.version_since == T2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("empty", ["", None, "   "])
 async def test_clear_keeps_row_and_lookup_is_404(ctx: Ctx, empty: str | None) -> None:
     await _seed(ctx, "PROD", "1.2.0", status="MANUAL")

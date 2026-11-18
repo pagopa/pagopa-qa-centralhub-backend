@@ -25,6 +25,7 @@ from app.services.status_page import (
     run_kind,
     run_outcome,
 )
+from app.services.status_page_manual import set_manual_versions
 from tests._db import TestSession, test_engine
 
 T0 = datetime(2026, 3, 1, 10, tzinfo=UTC)
@@ -587,6 +588,40 @@ async def test_detail_splits_runs_by_deploy_window(world: World) -> None:
     assert [r.run_id for r in upgrade.runs] == [new, uncertain]
     assert [r.run_id for r in baseline.runs] == [old]
     assert [t.run_id for t in detail.application.envs["UAT"].tests] == [new]
+
+
+async def test_manual_version_set_after_clear_keeps_a_bounded_window(world: World) -> None:
+    p = await add_product(world, "p")
+    obj = world.name("obj")
+    a = await add_app(world, p, "a", obj, states={"REPO": ("2.0.0", "OK")}, version_source="MANUAL")
+
+    async def set_uat(value: str, minutes: int) -> None:
+        async with TestSession() as db:
+            app = await db.get(SpApplication, a)
+            assert app is not None
+            now = T0 + timedelta(minutes=minutes)
+            await set_manual_versions(db, app, {"UAT": value}, "qa@example.com", now)
+            await db.commit()
+
+    await set_uat("1.0.0", 0)
+    await set_uat("", 20)
+    await set_uat("2.0.0", 40)
+    old = await add_run(world, obj, "x", "UAT", origin="QG", minutes=5)  # under 1.0.0
+    gap = await add_run(world, obj, "x", "UAT", minutes=30)  # cleared: goes to the newer
+    new = await add_run(world, obj, "x", "UAT", minutes=45)
+
+    cell = (await row(world, a)).envs["UAT"]
+    assert cell.version == "2.0.0"
+    assert [t.run_id for t in cell.tests] == [new]  # the QG run of 1.0.0 is not linked
+
+    async with TestSession() as db:
+        detail = await get_application_detail(db, a)
+    assert detail is not None
+    reset, first = detail.history["UAT"]
+    assert (reset.version, reset.direction, reset.is_baseline) == ("2.0.0", "unknown", False)
+    assert [r.run_id for r in reset.runs] == [new, gap]
+    assert (first.version, first.direction) == ("1.0.0", "baseline")
+    assert [r.run_id for r in first.runs] == [old]
 
 
 async def test_get_version_returns_state_and_keeps_last_good_on_error(world: World) -> None:

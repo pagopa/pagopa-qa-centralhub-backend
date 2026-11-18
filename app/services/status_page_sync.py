@@ -53,7 +53,20 @@ def apply_reading(
         return state, None
 
     event: SpDeployEvent | None = None
-    if state.version is None:
+    if state.version is None and state.last_ok_at is not None:
+        # A version was known and then cleared (manual applications only): not a first
+        # detection, so the deploy window stays bounded by when the old version was last seen.
+        event = SpDeployEvent(
+            application_id=application_id,
+            target=reading.target,
+            previous_version=None,
+            version=reading.version,
+            detected_at=now,
+            previous_seen_at=state.last_ok_at,
+            is_baseline=False,
+        )
+        state.version_since = now
+    elif state.version is None:
         event = SpDeployEvent(
             application_id=application_id,
             target=reading.target,

@@ -109,6 +109,9 @@ async def set_manual_versions(
                 if before is not None:
                     state.version = None
                     state.version_since = None
+                    # The cleared version was valid until now: a later value starts its
+                    # deploy window here instead of at the dawn of time (see apply_reading).
+                    state.last_ok_at = now
                     changed[target] = (before, None)
                 continue
             if state is not None and before == value:

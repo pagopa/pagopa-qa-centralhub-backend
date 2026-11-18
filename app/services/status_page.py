@@ -396,8 +396,10 @@ async def get_summary(db: AsyncSession) -> SummaryOut:
 
 
 def _direction(event: SpDeployEvent) -> str:
-    if event.is_baseline or event.previous_version is None:
+    if event.is_baseline:
         return "baseline"
+    if event.previous_version is None:
+        return "unknown"
     result = compare_versions(event.version, event.previous_version)
     if result is None:
         return "unknown"
