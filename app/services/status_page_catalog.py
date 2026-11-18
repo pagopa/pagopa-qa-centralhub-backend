@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -31,6 +32,7 @@ from app.schemas.status_page import (
     ProductOut,
     ProductPatch,
 )
+from app.services.status_page_manual import make_manual, manual_versions_of, set_manual_versions
 from app.services.status_page_sources import Reading, read_env, read_repo
 
 logger = structlog.get_logger(__name__)
@@ -42,9 +44,17 @@ MSG_PRODUCT_NAME = "Esiste già un prodotto con questo nome"
 MSG_PRODUCT_KEY = "Chiave product già usata da un'altra applicazione"
 MSG_APP_NAME = "Esiste già un'applicazione con questo nome nel prodotto"
 MSG_PRODUCT_NOT_EMPTY = "Il prodotto contiene ancora applicazioni"
+MSG_MANUAL_VERSIONS = "Le versioni manuali richiedono un'applicazione manuale"
 
 
 class CatalogConflictError(Exception):
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(message)
+        self.field = field
+        self.message = message
+
+
+class CatalogValidationError(Exception):
     def __init__(self, field: str, message: str) -> None:
         super().__init__(message)
         self.field = field
@@ -56,7 +66,7 @@ class CatalogNotFoundError(Exception):
 
 
 def _product_snapshot(p: SpProduct) -> dict[str, Any]:
-    return {"name": p.name, "area": p.area}
+    return {"name": p.name, "area": p.area, "hidden": p.hidden}
 
 
 _APP_FIELDS = (
@@ -70,6 +80,8 @@ _APP_FIELDS = (
     "kind",
     "test_object",
     "ea_node_id",
+    "hidden",
+    "version_source",
 )
 
 
@@ -169,7 +181,8 @@ async def list_products(db: AsyncSession) -> list[ProductOut]:
         if not rows:
             logger.info("status_page catalog query succeeded with 0 results", entity="product")
         return [
-            ProductOut(id=p.id, name=p.name, area=p.area, application_count=int(n)) for p, n in rows
+            ProductOut(id=p.id, name=p.name, area=p.area, hidden=p.hidden, application_count=int(n))
+            for p, n in rows
         ]
     except Exception:
         logger.exception("status_page list_products failed")
@@ -177,7 +190,7 @@ async def list_products(db: AsyncSession) -> list[ProductOut]:
 
 
 async def create_product(db: AsyncSession, payload: ProductIn) -> ProductOut:
-    product = SpProduct(name=payload.name, area=payload.area)
+    product = SpProduct(name=payload.name, area=payload.area, hidden=payload.hidden)
     db.add(product)
     try:
         await db.flush()
@@ -198,7 +211,13 @@ async def create_product(db: AsyncSession, payload: ProductIn) -> ProductOut:
         after=_product_snapshot(product),
     )
     await _commit(db)
-    return ProductOut(id=product.id, name=product.name, area=product.area, application_count=0)
+    return ProductOut(
+        id=product.id,
+        name=product.name,
+        area=product.area,
+        hidden=product.hidden,
+        application_count=0,
+    )
 
 
 async def update_product(
@@ -229,6 +248,7 @@ async def update_product(
         id=product.id,
         name=product.name,
         area=product.area,
+        hidden=product.hidden,
         application_count=await _application_count(db, product.id),
     )
 
@@ -271,10 +291,36 @@ async def list_applications(db: AsyncSession, product_id: uuid.UUID | None) -> l
         apps = (await db.scalars(stmt)).all()
         if not apps:
             logger.info("status_page catalog query succeeded with 0 results", entity="application")
-        return [ApplicationOut.model_validate(a) for a in apps]
+        manual_ids = [a.id for a in apps if a.version_source == "MANUAL"]
+        manual = await manual_versions_of(db, manual_ids) if manual_ids else {}
+        return [_application_out(a, manual.get(a.id)) for a in apps]
     except Exception:
         logger.exception("status_page list_applications failed")
         raise
+
+
+def _application_out(
+    app: SpApplication, manual_versions: dict[str, str | None] | None
+) -> ApplicationOut:
+    out = ApplicationOut.model_validate(app)
+    if app.version_source == "MANUAL":
+        out.manual_versions = {
+            "DEV": (manual_versions or {}).get("DEV"),
+            "UAT": (manual_versions or {}).get("UAT"),
+            "PROD": (manual_versions or {}).get("PROD"),
+        }
+    return out
+
+
+async def _application_out_for(db: AsyncSession, app: SpApplication) -> ApplicationOut:
+    manual = await manual_versions_of(db, [app.id]) if app.version_source == "MANUAL" else {}
+    return _application_out(app, manual.get(app.id))
+
+
+def _manual_versions_sent(payload: ApplicationIn | ApplicationPatch) -> dict[str, str | None]:
+    if payload.manual_versions is None:
+        return {}
+    return payload.manual_versions.model_dump(exclude_unset=True)
 
 
 async def _ensure_ea_node(db: AsyncSession, ea_node_id: str | None) -> None:
@@ -285,7 +331,10 @@ async def _ensure_ea_node(db: AsyncSession, ea_node_id: str | None) -> None:
 async def create_application(db: AsyncSession, payload: ApplicationIn) -> ApplicationOut:
     await _get_product(db, payload.product_id)
     await _ensure_ea_node(db, payload.ea_node_id)
-    data = payload.model_dump(exclude={"user"})
+    versions = _manual_versions_sent(payload)
+    if payload.manual_versions is not None and payload.version_source != "MANUAL":
+        raise CatalogValidationError("manual_versions", MSG_MANUAL_VERSIONS)
+    data = payload.model_dump(exclude={"user", "manual_versions"})
     app = SpApplication(**data)
     db.add(app)
     try:
@@ -306,15 +355,35 @@ async def create_application(db: AsyncSession, payload: ApplicationIn) -> Applic
         before={},
         after=_app_snapshot(app),
     )
+    try:
+        if app.version_source == "MANUAL":
+            now = datetime.now(UTC)
+            await make_manual(db, app, now)
+            if versions:
+                await set_manual_versions(db, app, versions, payload.user, now)
+    except Exception:
+        await db.rollback()
+        logger.exception("status_page create_application manual versions failed")
+        raise
     await _commit(db)
-    return ApplicationOut.model_validate(app)
+    return await _application_out_for(db, app)
 
 
 async def update_application(
     db: AsyncSession, app_id: uuid.UUID, payload: ApplicationPatch
 ) -> ApplicationOut:
-    app = await _get_application(db, app_id)
-    changes = payload.model_dump(exclude_unset=True, exclude={"user"})
+    # Lock the row up to the commit: a versions-only PATCH does not touch sp_applications,
+    # so without the lock concurrent PATCHes could read the same previous version (duplicate
+    # deploy events) or validate against a version_source that is being changed.
+    app = await db.get(SpApplication, app_id, with_for_update=True, populate_existing=True)
+    if app is None:
+        raise CatalogNotFoundError(f"Application {app_id} not found")
+    changes = payload.model_dump(exclude_unset=True, exclude={"user", "manual_versions"})
+    versions = _manual_versions_sent(payload)
+    resulting_source = changes.get("version_source") or app.version_source
+    if payload.manual_versions is not None and resulting_source != "MANUAL":
+        raise CatalogValidationError("manual_versions", MSG_MANUAL_VERSIONS)
+    switching_to_manual = resulting_source == "MANUAL" and app.version_source != "MANUAL"
     nullable = {"pipeline_url", "test_object", "ea_node_id"}
     if changes.get("product_id") not in (None, app.product_id):
         await _get_product(db, changes["product_id"])
@@ -330,6 +399,15 @@ async def update_application(
         before[field] = _jsonable(current)
         after[field] = _jsonable(value)
         setattr(app, field, value)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        conflict = _conflict_from(exc)
+        if conflict is not None:
+            raise conflict from exc
+        logger.exception("status_page update_application failed")
+        raise
     if after:
         _audit(
             db,
@@ -340,8 +418,18 @@ async def update_application(
             before=before,
             after=after,
         )
+    try:
+        now = datetime.now(UTC)
+        if switching_to_manual:
+            await make_manual(db, app, now)
+        if versions:
+            await set_manual_versions(db, app, versions, payload.user, now)
+    except Exception:
+        await db.rollback()
+        logger.exception("status_page update_application manual versions failed")
+        raise
     await _commit(db)
-    return ApplicationOut.model_validate(app)
+    return await _application_out_for(db, app)
 
 
 async def delete_application(db: AsyncSession, app_id: uuid.UUID, payload: DeleteIn) -> None:

@@ -82,6 +82,8 @@ class ApplicationRowOut(BaseModel):
     kind: str
     test_object: str | None
     ea_node_id: str | None
+    version_source: str
+    hidden: bool
     repo: CellOut | None
     envs: dict[EnvTarget, CellOut | None]
     flags: list[AppFlag]
@@ -136,6 +138,8 @@ Ci = Literal["GHA", "AZDO"]
 AppKind = Literal["backend", "frontend"]
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
 def _check_repository(value: str) -> str:
     if not is_valid_repository(value):
         raise ValueError("Nome repository non valido")
@@ -161,15 +165,29 @@ def _check_https(value: str | None) -> str | None:
     return value
 
 
+VersionSource = Literal["AUTO", "MANUAL"]
+ManualVersion = Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]
+
+
+class ManualVersionsIn(BaseModel):
+    """Manually entered versions; only the keys actually sent are applied (null/empty clears)."""
+
+    DEV: ManualVersion | None = None
+    UAT: ManualVersion | None = None
+    PROD: ManualVersion | None = None
+
+
 class ProductIn(BaseModel):
     name: Text
     area: Area
+    hidden: bool = False
     user: Text
 
 
 class ProductPatch(BaseModel):
     name: Text | None = None
     area: Area | None = None
+    hidden: bool | None = None
     user: Text
 
 
@@ -177,6 +195,7 @@ class ProductOut(BaseModel):
     id: uuid.UUID
     name: str
     area: str
+    hidden: bool
     application_count: int
 
 
@@ -191,6 +210,9 @@ class ApplicationIn(BaseModel):
     kind: AppKind = "backend"
     test_object: Text | None = None
     ea_node_id: Text | None = None
+    hidden: bool = False
+    version_source: VersionSource = "AUTO"
+    manual_versions: ManualVersionsIn | None = None
     user: Text
 
     _blank = field_validator("pipeline_url", "test_object", "ea_node_id", mode="before")(
@@ -212,6 +234,9 @@ class ApplicationPatch(BaseModel):
     kind: AppKind | None = None
     test_object: Text | None = None
     ea_node_id: Text | None = None
+    hidden: bool | None = None
+    version_source: VersionSource | None = None
+    manual_versions: ManualVersionsIn | None = None
     user: Text
 
     _blank = field_validator("pipeline_url", "test_object", "ea_node_id", mode="before")(
@@ -234,6 +259,9 @@ class ApplicationOut(BaseModel):
     kind: str
     test_object: str | None
     ea_node_id: str | None
+    hidden: bool
+    version_source: str
+    manual_versions: dict[EnvTarget, str | None] | None = None
 
 
 class CheckIn(BaseModel):

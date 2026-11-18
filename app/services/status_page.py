@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, cast
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -44,6 +44,7 @@ RunIndex = dict[tuple[str, str, str], list[Any]]
 # [since, until) of a deployed version: None means unbounded
 Window = tuple[datetime | None, datetime | None]
 ANY_VERSION = "*"
+READABLE = ("OK", "MANUAL")
 
 
 def run_kind(test_origin: str | None) -> str:
@@ -250,6 +251,7 @@ def _build_row(
     states: dict[str, SpVersionState],
     runs: RunIndex,
     windows: dict[tuple[uuid.UUID, str], Window] | None = None,
+    hidden: bool = False,
 ) -> ApplicationRowOut:
     repo_state = states.get("REPO")
     repo_ok = repo_state is not None and repo_state.read_status == "OK"
@@ -268,7 +270,7 @@ def _build_row(
             version_since=state.version_since,
         )
         if target != "REPO":
-            readable = state.read_status == "OK"
+            readable = state.read_status in READABLE
             out.drift = drift(state.version, repo_version) if readable else Drift.UNKNOWN
             window = (windows or {}).get((app.id, target), (None, None))
             out.tests = _latest_per_kind(_linked(runs, app, target, state.version, window))
@@ -279,13 +281,13 @@ def _build_row(
 
     flags: list[str] = []
     all_cells = [repo_cell, *envs.values()]
-    all_ok = all(c is not None and c.read_status == "OK" for c in all_cells)
+    all_ok = all(c is not None and c.read_status in READABLE for c in all_cells)
     prod = envs["PROD"]
     if prod is not None and prod.drift == Drift.EQUAL and all_ok:
         flags.append("ALIGNED")
     if prod is not None and prod.drift in (Drift.BEHIND, Drift.AHEAD):
         flags.append("DRIFT")
-    if any(c is not None and c.read_status != "OK" for c in all_cells):
+    if any(c is not None and c.read_status not in READABLE for c in all_cells):
         flags.append("UNREACHABLE")
     if app.test_object is not None and any(
         envs[t] is not None
@@ -307,6 +309,8 @@ def _build_row(
         kind=app.kind,
         test_object=app.test_object,
         ea_node_id=app.ea_node_id,
+        version_source=app.version_source,
+        hidden=hidden,
         repo=repo_cell,
         envs=cast("Any", envs),
         flags=cast("Any", flags),
@@ -323,7 +327,13 @@ async def _load_all(
 ]:
     pairs = [
         (a, p)
-        for a, p in (await db.execute(select(SpApplication, SpProduct).join(SpProduct))).all()
+        for a, p in (
+            await db.execute(
+                select(SpApplication, SpProduct)
+                .join(SpProduct)
+                .where(not_(SpApplication.hidden), not_(SpProduct.hidden))
+            )
+        ).all()
     ]
     states: dict[uuid.UUID, dict[str, SpVersionState]] = defaultdict(dict)
     for state in (await db.execute(select(SpVersionState))).scalars():
@@ -386,8 +396,10 @@ async def get_summary(db: AsyncSession) -> SummaryOut:
 
 
 def _direction(event: SpDeployEvent) -> str:
-    if event.is_baseline or event.previous_version is None:
+    if event.is_baseline:
         return "baseline"
+    if event.previous_version is None:
+        return "unknown"
     result = compare_versions(event.version, event.previous_version)
     if result is None:
         return "unknown"
@@ -488,7 +500,7 @@ async def get_application_detail(
                 )
             )
         return ApplicationDetailOut(
-            application=_build_row(app, states, runs, current),
+            application=_build_row(app, states, runs, current, hidden=app.hidden or product.hidden),
             product_name=product.name,
             history=cast("Any", history),
         )

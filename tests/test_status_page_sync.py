@@ -13,6 +13,7 @@ import pytest_asyncio
 from sqlalchemy import delete, func, select, text
 
 from app.config import settings
+from app.models.audit_log import AuditLog
 from app.models.status_page import (
     SpApplication,
     SpDeployEvent,
@@ -20,7 +21,10 @@ from app.models.status_page import (
     SpSyncStatus,
     SpVersionState,
 )
+from app.schemas.status_page import ApplicationPatch
+from app.services import status_page_catalog as cat
 from app.services import status_page_sync as svc
+from app.services.status_page import get_version
 from app.services.status_page_sources import Reading
 from app.services.status_page_sync import (
     SYNC_LOCK_ID,
@@ -260,6 +264,109 @@ async def test_run_sync_skips_application_deleted_during_reads(
     assert await _counts([deleted.id]) == (0, 0)
 
 
+async def _make_manual(app: SpApplication) -> None:
+    app.version_source = "MANUAL"
+    async with TestSession() as db:
+        db.add(
+            SpVersionState(
+                application_id=app.id,
+                target="DEV",
+                version="1.0.0",
+                read_status="MANUAL",
+                checked_at=datetime.now(UTC),
+            )
+        )
+        row = await db.get(SpApplication, app.id)
+        assert row is not None
+        row.version_source = "MANUAL"
+        await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_run_sync_skips_env_reads_of_manual_application(
+    catalog: list[SpApplication],
+) -> None:
+    auto, manual = catalog
+    await _make_manual(manual)
+    p1, p2, p3 = _patch_sources(catalog)
+    with p1, p2, p3 as _load:
+        del _load
+        read_env = svc.read_env
+        read_repo = svc.read_repo
+        async with TestSession() as db:
+            status = await run_sync(db, trigger="SCHEDULED", requested_by=None)
+        env_keys = {c.args[2] for c in read_env.call_args_list}  # type: ignore[attr-defined]
+        repos = {c.args[1] for c in read_repo.call_args_list}  # type: ignore[attr-defined]
+
+    assert manual.product_key not in env_keys
+    assert auto.product_key in env_keys
+    assert manual.repository in repos
+    assert status.status == "OK"
+    assert status.applications_checked == 2 and status.reads_failed == 0
+    async with TestSession() as db:
+        rows = {
+            s.target: s
+            for s in await db.scalars(
+                select(SpVersionState).where(SpVersionState.application_id == manual.id)
+            )
+        }
+        events = await db.scalar(
+            select(func.count())
+            .select_from(SpDeployEvent)
+            .where(SpDeployEvent.application_id == manual.id, SpDeployEvent.target != "REPO")
+        )
+    assert rows["REPO"].version == "1.0.0"
+    assert rows["DEV"].version == "1.0.0" and rows["DEV"].read_status == "MANUAL"
+    assert "UAT" not in rows and "PROD" not in rows
+    assert events == 0
+
+
+@pytest.mark.asyncio
+async def test_run_sync_drops_env_readings_of_application_switched_to_manual(
+    catalog: list[SpApplication],
+) -> None:
+    switched, _other = catalog
+    p1, p2, p3 = _patch_sources(catalog)
+    flipped = False
+
+    async def flip_while_reading(client: Any, repository: str) -> Reading:
+        nonlocal flipped
+        if repository == switched.repository and not flipped:
+            flipped = True
+            async with TestSession() as other:
+                row = await other.get(SpApplication, switched.id)
+                assert row is not None
+                row.version_source = "MANUAL"
+                other.add(
+                    SpVersionState(
+                        application_id=switched.id,
+                        target="DEV",
+                        version="5.0.0",
+                        read_status="MANUAL",
+                        checked_at=datetime.now(UTC),
+                    )
+                )
+                await other.commit()
+        return ok("9.9.9", "REPO")
+
+    with p1, p2, p3, patch.object(svc, "read_repo", AsyncMock(side_effect=flip_while_reading)):
+        async with TestSession() as db:
+            status = await run_sync(db, trigger="SCHEDULED", requested_by=None)
+
+    assert flipped
+    assert status.status == "OK" and status.applications_checked == 2
+    async with TestSession() as db:
+        rows = {
+            s.target: s
+            for s in await db.scalars(
+                select(SpVersionState).where(SpVersionState.application_id == switched.id)
+            )
+        }
+    assert rows["REPO"].version == "9.9.9"
+    assert rows["DEV"].version == "5.0.0" and rows["DEV"].read_status == "MANUAL"
+    assert "UAT" not in rows and "PROD" not in rows
+
+
 @pytest.mark.asyncio
 async def test_run_sync_partial(catalog: list[SpApplication]) -> None:
     p1, p2, p3 = _patch_sources(catalog, fail_for=catalog[0].product_key)
@@ -378,9 +485,7 @@ async def test_concurrent_manual_requests_without_row_give_one_conflict(
         async with TestSession() as db:
             return await request_manual_sync(db, user=user)
 
-    results = await asyncio.gather(
-        request("a@b.c"), request("d@e.f"), return_exceptions=True
-    )
+    results = await asyncio.gather(request("a@b.c"), request("d@e.f"), return_exceptions=True)
 
     queued = [r for r in results if isinstance(r, SpSyncStatus)]
     conflicts = [r for r in results if isinstance(r, StatusPageSyncInProgressError)]
@@ -485,3 +590,70 @@ def test_sync_status_out_in_progress_follows_stale_rule() -> None:
     assert in_progress(_sync_row("QUEUED", queued_ago=1)) is True
     assert in_progress(_sync_row("QUEUED", queued_ago=11)) is False
     assert in_progress(_sync_row("OK")) is False
+
+
+@pytest.mark.asyncio
+async def test_patch_to_manual_then_sync_keeps_last_good_prod(
+    catalog: list[SpApplication],
+) -> None:
+    target = catalog[0]
+    key = target.product_key
+    ids = [a.id for a in catalog]
+    last_ok = T0
+    async with TestSession() as db:
+        db.add(
+            SpVersionState(
+                application_id=target.id,
+                target="PROD",
+                version="1.2.0",
+                read_status="ERROR",
+                error_detail="HTTP 503",
+                checked_at=T1,
+                last_ok_at=last_ok,
+                version_since=last_ok,
+            )
+        )
+        await db.commit()
+    try:
+        async with TestSession() as db:
+            out = await cat.update_application(
+                db, target.id, ApplicationPatch(version_source="MANUAL", user="qa@example.com")
+            )
+        assert out.version_source == "MANUAL"
+
+        async def fake_repo(client: Any, repository: str) -> Reading:
+            return ok("9.9.9", "REPO")
+
+        async def fake_env(client: Any, t: str, product_key: str) -> Reading:
+            return ok("9.9.9", t)
+
+        with (
+            patch.object(svc, "read_repo", AsyncMock(side_effect=fake_repo)),
+            patch.object(svc, "read_env", AsyncMock(side_effect=fake_env)),
+        ):
+            async with TestSession() as db:
+                await run_sync(db, trigger="MANUAL", requested_by="a@b.c")
+
+        async with TestSession() as db:
+            version = await get_version(db, key, "PROD")
+            repo_state = await db.get(SpVersionState, (target.id, "REPO"))
+            prod_events = (
+                await db.scalars(
+                    select(SpDeployEvent).where(
+                        SpDeployEvent.application_id == target.id,
+                        SpDeployEvent.target == "PROD",
+                    )
+                )
+            ).all()
+        assert version.version == "1.2.0"
+        assert version.read_status == "MANUAL"
+        assert version.last_ok_at == last_ok
+        assert version.version_since == last_ok
+        assert repo_state is not None and repo_state.version == "9.9.9"
+        assert list(prod_events) == []
+    finally:
+        async with TestSession() as db:
+            await db.execute(
+                delete(AuditLog).where(AuditLog.resource_id.in_([str(i) for i in ids]))
+            )
+            await db.commit()

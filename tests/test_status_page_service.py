@@ -25,6 +25,7 @@ from app.services.status_page import (
     run_kind,
     run_outcome,
 )
+from app.services.status_page_manual import set_manual_versions
 from tests._db import TestSession, test_engine
 
 T0 = datetime(2026, 3, 1, 10, tzinfo=UTC)
@@ -93,10 +94,10 @@ async def world() -> AsyncIterator[World]:
         await db.commit()
 
 
-async def add_product(w: World, suffix: str, area: str = "CORE") -> uuid.UUID:
+async def add_product(w: World, suffix: str, area: str = "CORE", hidden: bool = False) -> uuid.UUID:
     pid = uuid.uuid4()
     async with TestSession() as db:
-        db.add(SpProduct(id=pid, name=w.name(suffix), area=area))
+        db.add(SpProduct(id=pid, name=w.name(suffix), area=area, hidden=hidden))
         await db.commit()
     w.product_ids.append(pid)
     return pid
@@ -107,7 +108,9 @@ async def add_app(
     product_id: uuid.UUID,
     suffix: str,
     test_object: str | None = None,
-    states: dict[str, tuple[str, str]] | None = None,
+    states: dict[str, tuple[str | None, str]] | None = None,
+    hidden: bool = False,
+    version_source: str = "AUTO",
 ) -> uuid.UUID:
     """states: target -> (version, read_status)."""
     aid = uuid.uuid4()
@@ -122,6 +125,8 @@ async def add_app(
                 runtime="AKS",
                 ci="GHA",
                 test_object=test_object,
+                hidden=hidden,
+                version_source=version_source,
             )
         )
         await db.flush()
@@ -585,6 +590,40 @@ async def test_detail_splits_runs_by_deploy_window(world: World) -> None:
     assert [t.run_id for t in detail.application.envs["UAT"].tests] == [new]
 
 
+async def test_manual_version_set_after_clear_keeps_a_bounded_window(world: World) -> None:
+    p = await add_product(world, "p")
+    obj = world.name("obj")
+    a = await add_app(world, p, "a", obj, states={"REPO": ("2.0.0", "OK")}, version_source="MANUAL")
+
+    async def set_uat(value: str, minutes: int) -> None:
+        async with TestSession() as db:
+            app = await db.get(SpApplication, a)
+            assert app is not None
+            now = T0 + timedelta(minutes=minutes)
+            await set_manual_versions(db, app, {"UAT": value}, "qa@example.com", now)
+            await db.commit()
+
+    await set_uat("1.0.0", 0)
+    await set_uat("", 20)
+    await set_uat("2.0.0", 40)
+    old = await add_run(world, obj, "x", "UAT", origin="QG", minutes=5)  # under 1.0.0
+    gap = await add_run(world, obj, "x", "UAT", minutes=30)  # cleared: goes to the newer
+    new = await add_run(world, obj, "x", "UAT", minutes=45)
+
+    cell = (await row(world, a)).envs["UAT"]
+    assert cell.version == "2.0.0"
+    assert [t.run_id for t in cell.tests] == [new]  # the QG run of 1.0.0 is not linked
+
+    async with TestSession() as db:
+        detail = await get_application_detail(db, a)
+    assert detail is not None
+    reset, first = detail.history["UAT"]
+    assert (reset.version, reset.direction, reset.is_baseline) == ("2.0.0", "unknown", False)
+    assert [r.run_id for r in reset.runs] == [new, gap]
+    assert (first.version, first.direction) == ("1.0.0", "baseline")
+    assert [r.run_id for r in first.runs] == [old]
+
+
 async def test_get_version_returns_state_and_keeps_last_good_on_error(world: World) -> None:
     pid = await add_product(world, "ver")
     await add_app(world, pid, "ver-app", states={"UAT": ("1.2.3", "ERROR")})
@@ -627,3 +666,113 @@ async def test_get_version_never_detected_is_not_found(world: World) -> None:
     async with TestSession() as db:
         with pytest.raises(VersionNotFoundError, match="non ancora rilevata"):
             await get_version(db, world.name("ver3-app"), "DEV")
+
+
+# ------------------------------------------------------- hidden and manual
+
+
+def _app_ids(out: Any) -> set[uuid.UUID]:
+    return {a.id for ar in out.areas for p in ar.products for a in p.applications}
+
+
+async def test_status_and_summary_exclude_hidden(world: World) -> None:
+    ok = states("1.0.0", "1.0.0", "1.0.0", "1.0.0")
+    visible_p = await add_product(world, "vis")
+    hidden_p = await add_product(world, "hid", hidden=True)
+    all_hidden_p = await add_product(world, "allhid")
+    visible = await add_app(world, visible_p, "v", None, ok)
+    hidden_app = await add_app(world, visible_p, "h", None, ok, hidden=True)
+    in_hidden_product = await add_app(world, hidden_p, "hp", None, ok)
+    only_hidden = await add_app(world, all_hidden_p, "oh", None, ok, hidden=True)
+    async with TestSession() as db:
+        before = await get_summary(db)
+        out = await get_status(db)
+    ids = _app_ids(out)
+    assert visible in ids
+    assert not ids & {hidden_app, in_hidden_product, only_hidden}
+    assert all_hidden_p not in {p.id for ar in out.areas for p in ar.products}
+    assert hidden_p not in {p.id for ar in out.areas for p in ar.products}
+    # the summary counts exactly the apps the grid lists
+    assert before.total == len(ids)
+    async with TestSession() as db:
+        await db.execute(delete(SpApplication).where(SpApplication.id.in_([visible, hidden_app])))
+        await db.commit()
+        after = await get_summary(db)
+    assert after.total == before.total - 1
+
+
+async def test_detail_and_version_ignore_hidden(world: World) -> None:
+    ok = states("1.0.0", "1.0.0", "1.0.0", "1.0.0")
+    p = await add_product(world, "hp")
+    hp = await add_product(world, "hprod", hidden=True)
+    a = await add_app(world, p, "ha", None, ok, hidden=True)
+    b = await add_app(world, hp, "hb", None, ok)
+    c = await add_app(world, p, "vc", None, ok)
+    async with TestSession() as db:
+        d_a = await get_application_detail(db, a)
+        d_b = await get_application_detail(db, b)
+        d_c = await get_application_detail(db, c)
+        v = await get_version(db, world.name("ha"), "PROD")
+    assert d_a is not None and d_a.application.hidden is True
+    assert d_b is not None and d_b.application.hidden is True
+    assert d_c is not None and d_c.application.hidden is False
+    assert v.version == "1.0.0"
+
+
+async def test_manual_cell_is_readable_and_drifts(world: World) -> None:
+    p = await add_product(world, "m")
+    a = await add_app(
+        world,
+        p,
+        "behind",
+        None,
+        {
+            "REPO": ("1.1.0", "OK"),
+            "DEV": ("1.1.0", "MANUAL"),
+            "UAT": ("1.1.0", "MANUAL"),
+            "PROD": ("1.0.0", "MANUAL"),
+        },
+        version_source="MANUAL",
+    )
+    r = await row(world, a)
+    assert r.version_source == "MANUAL"
+    assert r.hidden is False
+    assert r.envs["PROD"].drift == "BEHIND"
+    assert "DRIFT" in r.flags and "UNREACHABLE" not in r.flags
+
+
+async def test_manual_and_ok_cells_align(world: World) -> None:
+    p = await add_product(world, "m2")
+    a = await add_app(
+        world,
+        p,
+        "aligned",
+        None,
+        {
+            "REPO": ("1.0.0", "OK"),
+            "DEV": ("1.0.0", "OK"),
+            "UAT": ("1.0.0", "MANUAL"),
+            "PROD": ("1.0.0", "MANUAL"),
+        },
+        version_source="MANUAL",
+    )
+    assert (await row(world, a)).flags == ["ALIGNED"]
+
+
+async def test_empty_manual_prod_is_neither_aligned_nor_unreachable(world: World) -> None:
+    p = await add_product(world, "m3")
+    a = await add_app(
+        world,
+        p,
+        "empty",
+        None,
+        {
+            "REPO": ("1.0.0", "OK"),
+            "DEV": ("1.0.0", "OK"),
+            "UAT": ("1.0.0", "OK"),
+            "PROD": (None, "MANUAL"),
+        },
+        version_source="MANUAL",
+    )
+    r = await row(world, a)
+    assert "ALIGNED" not in r.flags and "UNREACHABLE" not in r.flags

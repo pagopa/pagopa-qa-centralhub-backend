@@ -49,11 +49,24 @@ def apply_reading(
     state.read_status = reading.read_status
     state.error_detail = reading.error_detail
     state.checked_at = now
-    if reading.read_status != "OK" or reading.version is None:
+    if reading.read_status not in ("OK", "MANUAL") or reading.version is None:
         return state, None
 
     event: SpDeployEvent | None = None
-    if state.version is None:
+    if state.version is None and state.last_ok_at is not None:
+        # A version was known and then cleared (manual applications only): not a first
+        # detection, so the deploy window stays bounded by when the old version was last seen.
+        event = SpDeployEvent(
+            application_id=application_id,
+            target=reading.target,
+            previous_version=None,
+            version=reading.version,
+            detected_at=now,
+            previous_seen_at=state.last_ok_at,
+            is_baseline=False,
+        )
+        state.version_since = now
+    elif state.version is None:
         event = SpDeployEvent(
             application_id=application_id,
             target=reading.target,
@@ -226,7 +239,7 @@ async def _read_all(
         tasks = [
             _guarded(app, client, target)
             for app in applications
-            for target in ("REPO", *ENV_TARGETS)
+            for target in (("REPO",) if app.version_source == "MANUAL" else ("REPO", *ENV_TARGETS))
         ]
         return list(await asyncio.gather(*tasks))
 
@@ -256,17 +269,22 @@ async def _run_locked(db: AsyncSession, *, trigger: str, requested_by: str | Non
 
         # The reads can take minutes: lock the applications that still exist and drop the
         # ones deleted meanwhile, so their readings cannot violate the foreign keys and
-        # fail the whole synchronization.
-        surviving_ids = set(
-            await db.scalars(
-                select(SpApplication.id)
-                .where(SpApplication.id.in_([app.id for app in applications]))
-                .order_by(SpApplication.id)
-                .with_for_update()
-            )
+        # fail the whole synchronization. An application switched to MANUAL meanwhile keeps
+        # its environment states: only its REPO reading is applied.
+        locked = await db.execute(
+            select(SpApplication.id, SpApplication.version_source)
+            .where(SpApplication.id.in_([app.id for app in applications]))
+            .order_by(SpApplication.id)
+            .with_for_update()
         )
-        applications = [app for app in applications if app.id in surviving_ids]
-        readings = [(app, reading) for app, reading in readings if app.id in surviving_ids]
+        source_by_id = {row.id: row.version_source for row in locked}
+        applications = [app for app in applications if app.id in source_by_id]
+        readings = [
+            (app, reading)
+            for app, reading in readings
+            if app.id in source_by_id
+            and (reading.target == "REPO" or source_by_id[app.id] != "MANUAL")
+        ]
 
         ids = [app.id for app in applications]
         states: dict[tuple[uuid.UUID, str], SpVersionState] = {}

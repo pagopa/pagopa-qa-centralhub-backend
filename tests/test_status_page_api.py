@@ -21,7 +21,11 @@ from app.schemas.status_page import (
     VersionOut,
 )
 from app.services.status_page import VersionNotFoundError
-from app.services.status_page_catalog import CatalogConflictError, CatalogNotFoundError
+from app.services.status_page_catalog import (
+    CatalogConflictError,
+    CatalogNotFoundError,
+    CatalogValidationError,
+)
 from app.services.status_page_sync import StatusPageSyncInProgressError
 
 BASE = "/api/v1/releases"
@@ -45,7 +49,7 @@ def _sync_row() -> SimpleNamespace:
 
 
 def _product() -> ProductOut:
-    return ProductOut(id=uuid.uuid4(), name="P", area="CORE", application_count=0)
+    return ProductOut(id=uuid.uuid4(), name="P", area="CORE", hidden=False, application_count=0)
 
 
 def _application() -> ApplicationOut:
@@ -61,6 +65,9 @@ def _application() -> ApplicationOut:
         kind="backend",
         test_object=None,
         ea_node_id=None,
+        hidden=False,
+        version_source="AUTO",
+        manual_versions=None,
     )
 
 
@@ -400,3 +407,84 @@ async def test_manual_sync_enqueue_failure_is_503_and_marks_failed(client: Async
     assert response.json()["detail"] == "Impossibile avviare la sincronizzazione, riprova più tardi"
     assert mark.await_args_list[0].args[1] == "Impossibile accodare la sincronizzazione"
     store.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_application_new_fields_round_trip_and_defaults(client: AsyncClient) -> None:
+    application = _application()
+    application.version_source = "MANUAL"
+    application.hidden = True
+    application.manual_versions = {"DEV": None, "UAT": "2.0.0", "PROD": None}
+    body = _app_body(
+        hidden=True, version_source="MANUAL", manual_versions={"UAT": "2.0.0", "PROD": None}
+    )
+    with patch(
+        CAT + "create_application", new_callable=AsyncMock, return_value=application
+    ) as create:
+        r = await client.post(f"{BASE}/catalog/applications", json=body)
+    assert r.status_code == 201
+    assert r.json()["version_source"] == "MANUAL"
+    assert r.json()["manual_versions"] == {"DEV": None, "UAT": "2.0.0", "PROD": None}
+    sent = create.await_args.args[1]
+    assert sent.manual_versions.model_dump(exclude_unset=True) == {"UAT": "2.0.0", "PROD": None}
+
+    with patch(CAT + "create_application", new_callable=AsyncMock, return_value=_application()):
+        r = await client.post(f"{BASE}/catalog/applications", json=_app_body())
+    assert r.json()["hidden"] is False
+    assert r.json()["version_source"] == "AUTO"
+    assert r.json()["manual_versions"] is None
+
+    with patch(
+        CAT + "update_application", new_callable=AsyncMock, return_value=application
+    ) as update:
+        r = await client.patch(
+            f"{BASE}/catalog/applications/{application.id}",
+            json={"user": USER, "manual_versions": {"DEV": "  1.0  "}},
+        )
+    assert r.status_code == 200
+    patch_in = update.await_args.args[2]
+    assert patch_in.manual_versions.model_dump(exclude_unset=True) == {"DEV": "1.0"}
+    assert patch_in.version_source is None and patch_in.hidden is None
+
+
+@pytest.mark.anyio
+async def test_manual_version_too_long_is_422(client: AsyncClient) -> None:
+    r = await client.patch(
+        f"{BASE}/catalog/applications/{uuid.uuid4()}",
+        json={"user": USER, "manual_versions": {"DEV": "x" * 101}},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_catalog_validation_error_is_422_with_field(client: AsyncClient) -> None:
+    err = CatalogValidationError("manual_versions", "Le versioni manuali richiedono")
+    aid = uuid.uuid4()
+    with patch(CAT + "update_application", new_callable=AsyncMock, side_effect=err):
+        r = await client.patch(f"{BASE}/catalog/applications/{aid}", json={"user": USER})
+    assert r.status_code == 422
+    assert r.json() == {"detail": "Le versioni manuali richiedono", "field": "manual_versions"}
+    with patch(CAT + "create_application", new_callable=AsyncMock, side_effect=err):
+        r = await client.post(f"{BASE}/catalog/applications", json=_app_body())
+    assert r.status_code == 422
+    assert r.json()["field"] == "manual_versions"
+
+
+@pytest.mark.anyio
+async def test_product_hidden_fields(client: AsyncClient) -> None:
+    product = _product()
+    product.hidden = True
+    with patch(CAT + "create_product", new_callable=AsyncMock, return_value=product) as create:
+        r = await client.post(
+            f"{BASE}/catalog/products",
+            json={"name": "P", "area": "CORE", "hidden": True, "user": USER},
+        )
+    assert r.status_code == 201
+    assert r.json()["hidden"] is True
+    assert create.await_args.args[1].hidden is True
+    with patch(CAT + "update_product", new_callable=AsyncMock, return_value=product) as update:
+        r = await client.patch(
+            f"{BASE}/catalog/products/{product.id}", json={"hidden": False, "user": USER}
+        )
+    assert r.status_code == 200
+    assert update.await_args.args[2].hidden is False
