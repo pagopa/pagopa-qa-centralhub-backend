@@ -135,6 +135,9 @@ Port of the pagoPA status page: for each application it shows the deployed versi
 
 - **Data**: five tables, `sp_products`, `sp_applications`, `sp_version_state`, `sp_deploy_events`, `sp_sync_status`. Migration `0032` creates them and seeds 14 products and 53 applications.
 - **Sync**: task `app.tasks.sync_status_page.sync_status_page`, run by Celery beat every 900 s (`STATUS_PAGE_SYNC_INTERVAL_S`) or on demand with `POST /api/v1/releases/sync` (202). A Postgres advisory lock prevents concurrent runs. Without `GITHUB_TOKEN` the sync ends as `FAILED`.
+- **Hidden entries**: a product or an application can be marked `hidden` from the catalog (`hidden` on `POST`/`PATCH /catalog/products` and `/catalog/applications`). Hidden applications (own flag or product flag) are left out of `/status` and `/summary`, so the Overview KPI ignores them; they stay in the catalog, are still synced, and are still served by `/applications/{id}` and `/versions`.
+- **Manual applications**: an application with `version_source=MANUAL` (default `AUTO`) has its DEV, UAT and PROD versions entered in the catalog through `manual_versions` (`{"DEV": "...", "UAT": "...", "PROD": "..."}`, only the keys sent change, empty string clears, max 100 chars; 422 if the application is not `MANUAL`). The sync reads only its REPO version. Manual values are stored in `sp_version_state` with `read_status=MANUAL`, count as readable (drift is computed), a change creates a deploy event, and `/versions` serves them like read versions. Changes are audited as `status_page.application.versions` (before/after per target); other catalog field changes use `status_page.application.update`. Migration `0033` adds the `hidden` and `version_source` columns.
+
 - **Settings** (all optional, defaults shown):
 
 ```env
