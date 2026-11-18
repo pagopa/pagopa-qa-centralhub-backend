@@ -372,7 +372,12 @@ async def create_application(db: AsyncSession, payload: ApplicationIn) -> Applic
 async def update_application(
     db: AsyncSession, app_id: uuid.UUID, payload: ApplicationPatch
 ) -> ApplicationOut:
-    app = await _get_application(db, app_id)
+    # Lock the row up to the commit: a versions-only PATCH does not touch sp_applications,
+    # so without the lock concurrent PATCHes could read the same previous version (duplicate
+    # deploy events) or validate against a version_source that is being changed.
+    app = await db.get(SpApplication, app_id, with_for_update=True, populate_existing=True)
+    if app is None:
+        raise CatalogNotFoundError(f"Application {app_id} not found")
     changes = payload.model_dump(exclude_unset=True, exclude={"user", "manual_versions"})
     versions = _manual_versions_sent(payload)
     resulting_source = changes.get("version_source") or app.version_source

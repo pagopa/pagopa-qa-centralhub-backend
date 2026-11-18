@@ -12,6 +12,7 @@ import pytest
 import pytest_asyncio
 from pydantic import ValidationError
 from sqlalchemy import delete, event, select
+from sqlalchemy.exc import DBAPIError
 
 from app.models.audit_log import AuditLog
 from app.models.ea import EaNode
@@ -442,6 +443,36 @@ async def test_patch_manual_versions_only_sent_keys_and_explicit_null(db: Any) -
         db, a.id, ApplicationPatch(manual_versions=ManualVersionsIn(DEV=None), user=U)
     )
     assert out.manual_versions == {"DEV": None, "UAT": "2.0.0", "PROD": None}
+
+
+async def test_versions_only_patch_locks_the_application_row(db: Any) -> None:
+    p = await cat.create_product(db, ProductIn(name=_n(), area="CORE", user=U))
+    a = await cat.create_application(
+        db, _app(p.id, version_source="MANUAL", manual_versions=ManualVersionsIn(UAT="1.0.0"))
+    )
+    original = cat.set_manual_versions
+    lock_errors: list[str] = []
+
+    async def probe(*args: Any, **kwargs: Any) -> Any:
+        # Another writer must not be able to lock the row while the versions are written.
+        async with TestSession() as other:
+            try:
+                await other.execute(
+                    select(SpApplication.id)
+                    .where(SpApplication.id == a.id)
+                    .with_for_update(nowait=True)
+                )
+            except DBAPIError as exc:
+                lock_errors.append(type(exc.orig).__name__)
+            await other.rollback()
+        return await original(*args, **kwargs)
+
+    with patch.object(cat, "set_manual_versions", probe):
+        out = await cat.update_application(
+            db, a.id, ApplicationPatch(manual_versions=ManualVersionsIn(UAT="1.1.0"), user=U)
+        )
+    assert len(lock_errors) == 1
+    assert out.manual_versions == {"DEV": None, "UAT": "1.1.0", "PROD": None}
 
 
 async def test_product_hidden_create_patch_audit(db: Any) -> None:
