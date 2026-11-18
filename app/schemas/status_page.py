@@ -257,6 +257,23 @@ class EaComponentOut(BaseModel):
     name: str
 
 
+class VersionOut(BaseModel):
+    """Last known version of an application in one environment (from ``sp_version_state``).
+
+    ``version`` is the last good read: it is kept when a later read fails, so callers
+    should also look at ``read_status`` and ``checked_at`` to judge how fresh it is.
+    """
+
+    product_key: str
+    env: EnvTarget
+    version: str
+    read_status: str
+    error_detail: str | None
+    checked_at: datetime
+    last_ok_at: datetime | None
+    version_since: datetime | None
+
+
 class DeleteIn(BaseModel):
     user: Text
 

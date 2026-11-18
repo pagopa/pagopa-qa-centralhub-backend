@@ -40,11 +40,25 @@ async def create_test_suite(db: AsyncSession, test_suite: TestSuite):
         raise
     
 
-async def get_latest_test_suite_version(db: AsyncSession, test_object_in: str) -> TestSuite:
+async def get_latest_test_suite_version(
+    db: AsyncSession,
+    test_object_in: str,
+    test_object_version: str | None = None,
+    test_type: str | None = None,
+) -> TestSuite | None:
+    """Return a suite of ``test_object_in``, newest first by version string.
+
+    With ``test_object_version`` and/or ``test_type`` the lookup is restricted to the
+    matching suite, which lets callers find an exact ``(test_object, test_type, version)``
+    record regardless of the (lexicographic) ordering of version strings.
+    """
     try:
-        result = await db.execute(
-            select(TestSuite).filter_by(test_object=test_object_in).order_by(TestSuite.test_object_version.desc()).limit(1)
-        )
+        query = select(TestSuite).filter_by(test_object=test_object_in)
+        if test_object_version is not None:
+            query = query.filter_by(test_object_version=test_object_version)
+        if test_type is not None:
+            query = query.filter_by(test_type=test_type)
+        result = await db.execute(query.order_by(TestSuite.test_object_version.desc()).limit(1))
         suite = result.scalar_one_or_none()
         if suite is None:
             logger.info("get_latest_test_suite_version query succeeded with 0 results", test_object=test_object_in)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # ruff: noqa: S101
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -17,7 +18,9 @@ from app.schemas.status_page import (
     ProductOut,
     StatusOut,
     SummaryOut,
+    VersionOut,
 )
+from app.services.status_page import VersionNotFoundError
 from app.services.status_page_catalog import CatalogConflictError, CatalogNotFoundError
 from app.services.status_page_sync import StatusPageSyncInProgressError
 
@@ -115,6 +118,54 @@ async def test_application_detail_unknown_is_404(client: AsyncClient) -> None:
 async def test_application_detail_bad_uuid_is_422(client: AsyncClient) -> None:
     response = await client.get(f"{BASE}/applications/not-a-uuid")
     assert response.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_version_lookup_returns_state(client: AsyncClient) -> None:
+    out = VersionOut(
+        product_key="fdrfase3",
+        env="UAT",
+        version="1.2.3",
+        read_status="OK",
+        error_detail=None,
+        checked_at=datetime(2026, 3, 1, 10, tzinfo=UTC),
+        last_ok_at=datetime(2026, 3, 1, 10, tzinfo=UTC),
+        version_since=datetime(2026, 2, 1, 9, tzinfo=UTC),
+    )
+    with patch(
+        "app.services.status_page.get_version", new_callable=AsyncMock, return_value=out
+    ) as svc:
+        response = await client.get(
+            f"{BASE}/versions", params={"product_key": "fdrfase3", "env": "UAT"}
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["version"] == "1.2.3"
+    assert body["read_status"] == "OK"
+    assert body["env"] == "UAT"
+    assert svc.await_args.args[1:] == ("fdrfase3", "UAT")
+
+
+@pytest.mark.anyio
+async def test_version_lookup_unknown_is_404_with_reason(client: AsyncClient) -> None:
+    with patch(
+        "app.services.status_page.get_version",
+        new_callable=AsyncMock,
+        side_effect=VersionNotFoundError("Applicazione non trovata"),
+    ):
+        response = await client.get(
+            f"{BASE}/versions", params={"product_key": "nope", "env": "DEV"}
+        )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Applicazione non trovata"
+
+
+@pytest.mark.anyio
+async def test_version_lookup_requires_valid_params(client: AsyncClient) -> None:
+    assert (await client.get(f"{BASE}/versions", params={"env": "DEV"})).status_code == 422
+    assert (await client.get(f"{BASE}/versions", params={"product_key": "a"})).status_code == 422
+    bad_env = await client.get(f"{BASE}/versions", params={"product_key": "a", "env": "REPO"})
+    assert bad_env.status_code == 422
 
 
 # --- sync ---------------------------------------------------------------------------------------

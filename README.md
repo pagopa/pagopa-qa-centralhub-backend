@@ -131,7 +131,7 @@ Richiede `TAS_GITHUB_TOKEN` con **Actions: Read and write** sul repo TAS (503 se
 
 ## Release Status
 
-Port of the pagoPA status page: for each application it shows the deployed version on repo, DEV, UAT and PROD, plus the test linkage and deploy history. API under `/api/v1/releases` (`/status`, `/summary`, `/applications/{id}`, `/sync-status`, `/sync`, `/catalog/*`); catalog changes are written to the audit log.
+Port of the pagoPA status page: for each application it shows the deployed version on repo, DEV, UAT and PROD, plus the test linkage and deploy history. API under `/api/v1/releases` (`/status`, `/summary`, `/applications/{id}`, `/versions`, `/sync-status`, `/sync`, `/catalog/*`); `GET /versions?product_key=<key>&env=DEV|UAT|PROD` returns the last stored version of one application in one environment (the last good read is kept when a later read fails; check `read_status`/`checked_at`; 404 if the application is not cataloged or never read). Catalog changes are written to the audit log.
 
 - **Data**: five tables, `sp_products`, `sp_applications`, `sp_version_state`, `sp_deploy_events`, `sp_sync_status`. Migration `0032` creates them and seeds 14 products and 53 applications.
 - **Sync**: task `app.tasks.sync_status_page.sync_status_page`, run by Celery beat every 900 s (`STATUS_PAGE_SYNC_INTERVAL_S`) or on demand with `POST /api/v1/releases/sync` (202). A Postgres advisory lock prevents concurrent runs. Without `GITHUB_TOKEN` the sync ends as `FAILED`.
