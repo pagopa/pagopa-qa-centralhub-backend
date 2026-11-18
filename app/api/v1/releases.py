@@ -30,7 +30,11 @@ from app.schemas.status_page import (
 from app.services import status_page as status_page_svc
 from app.services import status_page_catalog as catalog_svc
 from app.services import status_page_sync as sync_svc
-from app.services.status_page_catalog import CatalogConflictError, CatalogNotFoundError
+from app.services.status_page_catalog import (
+    CatalogConflictError,
+    CatalogNotFoundError,
+    CatalogValidationError,
+)
 from app.services.status_page_sync import StatusPageSyncInProgressError
 
 logger = structlog.get_logger(__name__)
@@ -50,6 +54,13 @@ def _not_found(exc: CatalogNotFoundError) -> HTTPException:
 def _conflict(exc: CatalogConflictError) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_409_CONFLICT,
+        content={"detail": exc.message, "field": exc.field},
+    )
+
+
+def _invalid(exc: CatalogValidationError) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
         content={"detail": exc.message, "field": exc.field},
     )
 
@@ -203,6 +214,8 @@ async def create_application(body: ApplicationIn, db: DbDep) -> ApplicationOut |
         return await catalog_svc.create_application(db, body)
     except CatalogNotFoundError as exc:
         raise _not_found(exc) from exc
+    except CatalogValidationError as exc:
+        return _invalid(exc)
     except CatalogConflictError as exc:
         return _conflict(exc)
 
@@ -225,6 +238,8 @@ async def update_application(
         return await catalog_svc.update_application(db, application_id, body)
     except CatalogNotFoundError as exc:
         raise _not_found(exc) from exc
+    except CatalogValidationError as exc:
+        return _invalid(exc)
     except CatalogConflictError as exc:
         return _conflict(exc)
 
