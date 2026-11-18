@@ -245,6 +245,26 @@ async def test_check_application_maps_readings() -> None:
     assert set(out.envs) == {"DEV", "UAT", "PROD"}
 
 
+async def test_check_application_repo_only_skips_the_environments() -> None:
+    env_calls: list[str] = []
+
+    async def fake_env(_c: Any, target: str, _k: str) -> Reading:
+        env_calls.append(target)
+        return Reading(target, "OK", "1.0.0", None)
+
+    async def fake_repo(_c: Any, _r: str) -> Reading:
+        return Reading("REPO", "OK", "2.0.0", None)
+
+    with (
+        patch.object(cat, "read_env", fake_env),
+        patch.object(cat, "read_repo", fake_repo),
+    ):
+        out = await cat.check_application(CheckIn(product_key="k", repository="r", repo_only=True))
+    assert env_calls == []
+    assert out.repo.ok and out.repo.version == "2.0.0"
+    assert out.envs == {}
+
+
 async def test_list_test_objects_distinct_sorted(db: Any) -> None:
     for obj, ver in (("T7-b", "1"), ("T7-a", "1"), ("T7-b", "2")):
         db.add(TestSuite(test_object=obj, test_type="NRT", test_object_version=ver))

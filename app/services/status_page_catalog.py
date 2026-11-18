@@ -458,16 +458,20 @@ def _target_out(reading: Reading) -> CheckTargetOut:
 
 
 async def check_application(payload: CheckIn) -> CheckOut:
-    """Live probe of a product_key/repository pair; never persists anything."""
+    """Live probe of a product_key/repository pair; never persists anything.
+
+    With ``repo_only`` the environments are not read and ``envs`` is empty.
+    """
     try:
+        targets = () if payload.repo_only else ENV_TARGETS
         async with httpx.AsyncClient(timeout=settings.status_page_http_timeout_s) as client:
             repo, *envs = await asyncio.gather(
                 read_repo(client, payload.repository),
-                *(read_env(client, t, payload.product_key) for t in ENV_TARGETS),
+                *(read_env(client, t, payload.product_key) for t in targets),
             )
         return CheckOut(
             repo=_target_out(repo),
-            envs={t: _target_out(r) for t, r in zip(ENV_TARGETS, envs, strict=True)},
+            envs={t: _target_out(r) for t, r in zip(targets, envs, strict=True)},
         )
     except Exception:
         logger.exception("status_page check_application failed")

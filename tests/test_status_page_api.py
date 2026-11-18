@@ -370,6 +370,18 @@ async def test_static_catalog_routes_not_shadowed(client: AsyncClient) -> None:
     assert r.status_code == 200
     assert r.json()["repo"]["ok"] is True
 
+    with patch(CAT + "check_application", new_callable=AsyncMock, return_value=check) as probe:
+        r = await client.post(
+            f"{BASE}/catalog/applications/check",
+            json={"product_key": "a", "repository": "repo", "repo_only": True},
+        )
+        default = await client.post(
+            f"{BASE}/catalog/applications/check",
+            json={"product_key": "a", "repository": "repo"},
+        )
+    assert r.status_code == 200 and default.status_code == 200
+    assert [c.args[0].repo_only for c in probe.await_args_list] == [True, False]
+
     with patch(CAT + "list_test_objects", new_callable=AsyncMock, return_value=["obj-1"]):
         r = await client.get(f"{BASE}/catalog/test-objects")
     assert r.status_code == 200
