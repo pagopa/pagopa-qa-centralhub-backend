@@ -49,7 +49,7 @@ def apply_reading(
     state.read_status = reading.read_status
     state.error_detail = reading.error_detail
     state.checked_at = now
-    if reading.read_status != "OK" or reading.version is None:
+    if reading.read_status not in ("OK", "MANUAL") or reading.version is None:
         return state, None
 
     event: SpDeployEvent | None = None
