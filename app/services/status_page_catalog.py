@@ -394,6 +394,15 @@ async def update_application(
         before[field] = _jsonable(current)
         after[field] = _jsonable(value)
         setattr(app, field, value)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        conflict = _conflict_from(exc)
+        if conflict is not None:
+            raise conflict from exc
+        logger.exception("status_page update_application failed")
+        raise
     if after:
         _audit(
             db,

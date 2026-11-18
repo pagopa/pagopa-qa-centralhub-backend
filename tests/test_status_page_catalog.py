@@ -487,3 +487,44 @@ async def test_list_applications_manual_versions_bounded_queries(db: Any) -> Non
     assert len(manual) == 3 and len(auto) == 1
     assert all(o.manual_versions is not None and o.manual_versions["DEV"] for o in manual)
     assert auto[0].manual_versions is None
+
+
+async def test_update_conflict_with_manual_versions_is_a_conflict(db: Any) -> None:
+    p = await cat.create_product(db, ProductIn(name=_n(), area="CORE", user=U))
+    a = await cat.create_application(db, _app(p.id, version_source="MANUAL"))
+    b = await cat.create_application(
+        db,
+        _app(p.id, version_source="MANUAL", manual_versions=ManualVersionsIn(DEV="1.0.0")),
+    )
+    with pytest.raises(CatalogConflictError) as ei:
+        await cat.update_application(
+            db,
+            b.id,
+            ApplicationPatch(name=a.name, manual_versions=ManualVersionsIn(DEV="2.0.0"), user=U),
+        )
+    assert ei.value.field == "name"
+    again = await cat.list_applications(db, p.id)
+    got = next(x for x in again if x.id == b.id)
+    assert got.name == b.name
+    assert got.manual_versions == {"DEV": "1.0.0", "UAT": None, "PROD": None}
+    assert [x.action for x in await _audits(db, str(b.id)) if x.action.endswith(".versions")] == [
+        "status_page.application.versions"
+    ]
+
+
+async def test_update_conflict_on_switch_to_manual_is_a_conflict(db: Any) -> None:
+    p = await cat.create_product(db, ProductIn(name=_n(), area="CORE", user=U))
+    a = await cat.create_application(db, _app(p.id))
+    c = await cat.create_application(db, _app(p.id))
+    with pytest.raises(CatalogConflictError) as ei:
+        await cat.update_application(
+            db,
+            c.id,
+            ApplicationPatch(version_source="MANUAL", product_key=a.product_key, user=U),
+        )
+    assert ei.value.field == "product_key"
+    got = next(x for x in await cat.list_applications(db, p.id) if x.id == c.id)
+    assert got.version_source == "AUTO" and got.product_key == c.product_key
+    assert [x.action for x in await _audits(db, str(c.id))] == ["status_page.application.create"]
+    states = await db.scalars(select(SpVersionState).where(SpVersionState.application_id == c.id))
+    assert list(states.all()) == []

@@ -13,6 +13,7 @@ import pytest_asyncio
 from sqlalchemy import delete, func, select, text
 
 from app.config import settings
+from app.models.audit_log import AuditLog
 from app.models.status_page import (
     SpApplication,
     SpDeployEvent,
@@ -20,7 +21,10 @@ from app.models.status_page import (
     SpSyncStatus,
     SpVersionState,
 )
+from app.schemas.status_page import ApplicationPatch
+from app.services import status_page_catalog as cat
 from app.services import status_page_sync as svc
+from app.services.status_page import get_version
 from app.services.status_page_sources import Reading
 from app.services.status_page_sync import (
     SYNC_LOCK_ID,
@@ -586,3 +590,70 @@ def test_sync_status_out_in_progress_follows_stale_rule() -> None:
     assert in_progress(_sync_row("QUEUED", queued_ago=1)) is True
     assert in_progress(_sync_row("QUEUED", queued_ago=11)) is False
     assert in_progress(_sync_row("OK")) is False
+
+
+@pytest.mark.asyncio
+async def test_patch_to_manual_then_sync_keeps_last_good_prod(
+    catalog: list[SpApplication],
+) -> None:
+    target = catalog[0]
+    key = target.product_key
+    ids = [a.id for a in catalog]
+    last_ok = T0
+    async with TestSession() as db:
+        db.add(
+            SpVersionState(
+                application_id=target.id,
+                target="PROD",
+                version="1.2.0",
+                read_status="ERROR",
+                error_detail="HTTP 503",
+                checked_at=T1,
+                last_ok_at=last_ok,
+                version_since=last_ok,
+            )
+        )
+        await db.commit()
+    try:
+        async with TestSession() as db:
+            out = await cat.update_application(
+                db, target.id, ApplicationPatch(version_source="MANUAL", user="qa@example.com")
+            )
+        assert out.version_source == "MANUAL"
+
+        async def fake_repo(client: Any, repository: str) -> Reading:
+            return ok("9.9.9", "REPO")
+
+        async def fake_env(client: Any, t: str, product_key: str) -> Reading:
+            return ok("9.9.9", t)
+
+        with (
+            patch.object(svc, "read_repo", AsyncMock(side_effect=fake_repo)),
+            patch.object(svc, "read_env", AsyncMock(side_effect=fake_env)),
+        ):
+            async with TestSession() as db:
+                await run_sync(db, trigger="MANUAL", requested_by="a@b.c")
+
+        async with TestSession() as db:
+            version = await get_version(db, key, "PROD")
+            repo_state = await db.get(SpVersionState, (target.id, "REPO"))
+            prod_events = (
+                await db.scalars(
+                    select(SpDeployEvent).where(
+                        SpDeployEvent.application_id == target.id,
+                        SpDeployEvent.target == "PROD",
+                    )
+                )
+            ).all()
+        assert version.version == "1.2.0"
+        assert version.read_status == "MANUAL"
+        assert version.last_ok_at == last_ok
+        assert version.version_since == last_ok
+        assert repo_state is not None and repo_state.version == "9.9.9"
+        assert list(prod_events) == []
+    finally:
+        async with TestSession() as db:
+            await db.execute(
+                delete(AuditLog).where(AuditLog.resource_id.in_([str(i) for i in ids]))
+            )
+            await db.commit()
