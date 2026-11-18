@@ -23,7 +23,8 @@ from app.core.db import Base
 
 AREAS = ("CORE", "TOUCHPOINT")
 TARGETS = ("REPO", "DEV", "UAT", "PROD")
-READ_STATUSES = ("OK", "ERROR", "EMPTY_BODY", "NO_VERSION", "NO_RELEASE")
+READ_STATUSES = ("OK", "ERROR", "EMPTY_BODY", "NO_VERSION", "NO_RELEASE", "MANUAL")
+VERSION_SOURCES = ("AUTO", "MANUAL")
 RUNTIMES = ("AKS", "AZ")
 CIS = ("GHA", "AZDO")
 KINDS = ("backend", "frontend")
@@ -53,6 +54,9 @@ class SpProduct(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     area: Mapped[str] = mapped_column(String(20), nullable=False)
+    hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
 
@@ -68,6 +72,9 @@ class SpApplication(Base):
         CheckConstraint(_in("runtime", RUNTIMES), name="ck_sp_applications_runtime"),
         CheckConstraint(_in("ci", CIS), name="ck_sp_applications_ci"),
         CheckConstraint(_in("kind", KINDS), name="ck_sp_applications_kind"),
+        CheckConstraint(
+            _in("version_source", VERSION_SOURCES), name="ck_sp_applications_version_source"
+        ),
         Index("ix_sp_applications_test_object", "test_object"),
     )
 
@@ -83,6 +90,12 @@ class SpApplication(Base):
     ci: Mapped[str] = mapped_column(String(10), nullable=False)
     kind: Mapped[str] = mapped_column(
         String(10), nullable=False, default="backend", server_default="backend"
+    )
+    hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    version_source: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="AUTO", server_default="AUTO"
     )
     test_object: Mapped[str | None] = mapped_column(String(200), nullable=True)
     ea_node_id: Mapped[str | None] = mapped_column(
