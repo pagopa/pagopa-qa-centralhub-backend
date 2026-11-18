@@ -82,6 +82,8 @@ class ApplicationRowOut(BaseModel):
     kind: str
     test_object: str | None
     ea_node_id: str | None
+    version_source: str
+    hidden: bool
     repo: CellOut | None
     envs: dict[EnvTarget, CellOut | None]
     flags: list[AppFlag]
