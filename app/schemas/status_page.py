@@ -266,7 +266,7 @@ class VersionOut(BaseModel):
 
     product_key: str
     env: EnvTarget
-    version: str | None
+    version: str
     read_status: str
     error_detail: str | None
     checked_at: datetime

@@ -71,9 +71,7 @@ async def suites() -> AsyncIterator[str]:
             ("0.10.0", "e2e"),
         ):
             db.add(
-                TestSuite(
-                    test_object=test_object, test_type=test_type, test_object_version=version
-                )
+                TestSuite(test_object=test_object, test_type=test_type, test_object_version=version)
             )
         await db.commit()
     yield test_object

@@ -406,7 +406,7 @@ async def get_version(db: AsyncSession, product_key: str, env: str) -> VersionOu
     if application_id is None:
         raise VersionNotFoundError("Applicazione non trovata")
     state = await db.get(SpVersionState, (application_id, env))
-    if state is None:
+    if state is None or state.version is None:
         raise VersionNotFoundError("Versione non ancora rilevata")
     return VersionOut(
         product_key=product_key,

@@ -604,3 +604,26 @@ async def test_get_version_unknown_application_or_environment(world: World) -> N
             await get_version(db, world.name("missing"), "DEV")
         with pytest.raises(VersionNotFoundError, match="non ancora rilevata"):
             await get_version(db, world.name("ver2-app"), "UAT")
+
+
+async def test_get_version_never_detected_is_not_found(world: World) -> None:
+    """A first failed read persists a state row with a null version: still "not detected"."""
+    pid = await add_product(world, "ver3")
+    aid = await add_app(world, pid, "ver3-app")
+    async with TestSession() as db:
+        db.add(
+            SpVersionState(
+                application_id=aid,
+                target="DEV",
+                version=None,
+                read_status="ERROR",
+                error_detail="timeout",
+                checked_at=T0,
+                last_ok_at=None,
+                version_since=None,
+            )
+        )
+        await db.commit()
+    async with TestSession() as db:
+        with pytest.raises(VersionNotFoundError, match="non ancora rilevata"):
+            await get_version(db, world.name("ver3-app"), "DEV")

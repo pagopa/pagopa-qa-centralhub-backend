@@ -14086,9 +14086,8 @@
             "title": "Env"
           },
           "version": {
-            "title": "Version",
             "type": "string",
-            "nullable": true
+            "title": "Version"
           },
           "read_status": {
             "type": "string",
