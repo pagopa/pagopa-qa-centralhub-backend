@@ -16,10 +16,12 @@ from app.models.status_page import SpApplication, SpDeployEvent, SpProduct, SpVe
 from app.models.test_metrics import TestRun, TestSuite
 from app.services import status_page as read_model
 from app.services.status_page import (
+    VersionNotFoundError,
     _run_ref,
     get_application_detail,
     get_status,
     get_summary,
+    get_version,
     run_kind,
     run_outcome,
 )
@@ -581,3 +583,24 @@ async def test_detail_splits_runs_by_deploy_window(world: World) -> None:
     assert [r.run_id for r in upgrade.runs] == [new, uncertain]
     assert [r.run_id for r in baseline.runs] == [old]
     assert [t.run_id for t in detail.application.envs["UAT"].tests] == [new]
+
+
+async def test_get_version_returns_state_and_keeps_last_good_on_error(world: World) -> None:
+    pid = await add_product(world, "ver")
+    await add_app(world, pid, "ver-app", states={"UAT": ("1.2.3", "ERROR")})
+    async with TestSession() as db:
+        out = await get_version(db, world.name("ver-app"), "UAT")
+    assert out.version == "1.2.3"
+    assert out.read_status == "ERROR"
+    assert out.env == "UAT"
+    assert out.checked_at == T0
+
+
+async def test_get_version_unknown_application_or_environment(world: World) -> None:
+    pid = await add_product(world, "ver2")
+    await add_app(world, pid, "ver2-app", states={"DEV": ("1.0.0", "OK")})
+    async with TestSession() as db:
+        with pytest.raises(VersionNotFoundError, match="Applicazione non trovata"):
+            await get_version(db, world.name("missing"), "DEV")
+        with pytest.raises(VersionNotFoundError, match="non ancora rilevata"):
+            await get_version(db, world.name("ver2-app"), "UAT")

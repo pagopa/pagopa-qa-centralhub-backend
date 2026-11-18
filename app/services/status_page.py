@@ -26,6 +26,7 @@ from app.schemas.status_page import (
     StatusOut,
     SummaryOut,
     SyncStatusOut,
+    VersionOut,
 )
 from app.services.status_page_sync import get_sync_status
 from app.services.status_page_versions import Drift, compare_versions, drift, normalize_version
@@ -391,6 +392,32 @@ def _direction(event: SpDeployEvent) -> str:
     if result is None:
         return "unknown"
     return "upgrade" if result > 0 else "rollback" if result < 0 else "unknown"
+
+
+class VersionNotFoundError(Exception):
+    """The application is not cataloged, or its version was never read in that environment."""
+
+
+async def get_version(db: AsyncSession, product_key: str, env: str) -> VersionOut:
+    """Return the stored version state of ``product_key`` in ``env`` (DEV, UAT or PROD)."""
+    application_id = (
+        await db.execute(select(SpApplication.id).where(SpApplication.product_key == product_key))
+    ).scalar_one_or_none()
+    if application_id is None:
+        raise VersionNotFoundError("Applicazione non trovata")
+    state = await db.get(SpVersionState, (application_id, env))
+    if state is None:
+        raise VersionNotFoundError("Versione non ancora rilevata")
+    return VersionOut(
+        product_key=product_key,
+        env=cast(Any, env),
+        version=state.version,
+        read_status=state.read_status,
+        error_detail=state.error_detail,
+        checked_at=state.checked_at,
+        last_ok_at=state.last_ok_at,
+        version_since=state.version_since,
+    )
 
 
 async def get_application_detail(

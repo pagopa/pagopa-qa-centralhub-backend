@@ -51,13 +51,22 @@ async def create_test_suite(
 async def get_latest_test_suite_version(
     test_object: str,
     db: DbDep,
+    test_object_version: str | None = None,
+    test_type: str | None = None,
 ) -> TestSuiteOut:
     if not test_object:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Query parameter 'test_object' cannot be empty",
         )
-    test_suite = await test_metrics_svc.get_latest_test_suite_version(db, test_object)
+    if test_object_version == "" or test_type == "":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Query parameters 'test_object_version' and 'test_type' cannot be empty when provided",
+        )
+    test_suite = await test_metrics_svc.get_latest_test_suite_version(
+        db, test_object, test_object_version, test_type
+    )
     if not test_suite:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

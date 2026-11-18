@@ -17,6 +17,7 @@ from app.schemas.status_page import (
     CheckOut,
     DeleteIn,
     EaComponentOut,
+    EnvTarget,
     ManualSyncIn,
     ProductIn,
     ProductOut,
@@ -24,6 +25,7 @@ from app.schemas.status_page import (
     StatusOut,
     SummaryOut,
     SyncStatusOut,
+    VersionOut,
 )
 from app.services import status_page as status_page_svc
 from app.services import status_page_catalog as catalog_svc
@@ -73,6 +75,23 @@ async def get_application(application_id: uuid.UUID, db: DbDep) -> ApplicationDe
             status_code=status.HTTP_404_NOT_FOUND, detail="Applicazione non trovata"
         )
     return detail
+
+
+@router.get(
+    "/versions",
+    response_model=VersionOut,
+    responses={404: {"description": "Application or version not found"}},
+)
+async def get_version(
+    db: DbDep,
+    product_key: Annotated[str, Query(min_length=1)],
+    env: Annotated[EnvTarget, Query()],
+) -> VersionOut:
+    """Last known version of an application (by ``product_key``) in an environment."""
+    try:
+        return await status_page_svc.get_version(db, product_key, env)
+    except status_page_svc.VersionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 # --- sync ---------------------------------------------------------------------------------------
