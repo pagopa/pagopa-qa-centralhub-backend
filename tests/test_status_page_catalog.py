@@ -485,8 +485,12 @@ async def test_product_hidden_create_patch_audit(db: Any) -> None:
     audits = await _audits(db, str(p.id))
     created = next(x for x in audits if x.action == "status_page.product.create")
     assert json.loads(created.detail or "")["after"]["hidden"] is True
-    updated = [x for x in audits if x.action == "status_page.product.update"]
-    d = json.loads(updated[0].detail or "")
+    # two update audits (hidden, then name): _audits has no ordering, so match by content
+    updated = [
+        json.loads(x.detail or "") for x in audits if x.action == "status_page.product.update"
+    ]
+    assert len(updated) == 2
+    d = next(u for u in updated if "hidden" in u["before"])
     assert d["before"] == {"hidden": True}
     assert d["after"] == {"hidden": False}
     listed = next(x for x in await cat.list_products(db) if x.id == p.id)
