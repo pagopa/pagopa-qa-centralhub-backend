@@ -37,6 +37,7 @@ celery_app.conf.update(
 )
 
 from app.tasks import (
+    enrich_status_page,  # noqa: E402, F401
     recompute_flaky_scores,  # noqa: E402, F401
     sync_ea,  # noqa: E402, F401
     sync_sanp_health,  # noqa: E402, F401

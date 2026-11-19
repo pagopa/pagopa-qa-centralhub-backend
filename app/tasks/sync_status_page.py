@@ -19,26 +19,39 @@ async def _async_sync(trigger: str, requested_by: str | None) -> dict[str, Any]:
     from app.core.db import async_session
     from app.services.status_page_sync import run_sync
 
-    async with async_session() as db:
-        status = await run_sync(db, trigger=trigger, requested_by=requested_by)
-        logger.info(
-            "status_page_sync_finished",
-            status=status.status,
-            trigger=trigger,
-            applications_checked=status.applications_checked,
-            reads_failed=status.reads_failed,
-        )
-        return {
-            "status": status.status,
-            "trigger": status.trigger,
-            "requested_by": status.requested_by,
-            "queued_at": status.queued_at.isoformat() if status.queued_at else None,
-            "started_at": status.started_at.isoformat() if status.started_at else None,
-            "finished_at": status.finished_at.isoformat() if status.finished_at else None,
-            "last_success_at": (
-                status.last_success_at.isoformat() if status.last_success_at else None
-            ),
-            "applications_checked": status.applications_checked,
-            "reads_failed": status.reads_failed,
-            "errors": list(status.errors or []),
-        }
+    try:
+        async with async_session() as db:
+            status = await run_sync(db, trigger=trigger, requested_by=requested_by)
+            logger.info(
+                "status_page_sync_finished",
+                status=status.status,
+                trigger=trigger,
+                applications_checked=status.applications_checked,
+                reads_failed=status.reads_failed,
+            )
+            return {
+                "status": status.status,
+                "trigger": status.trigger,
+                "requested_by": status.requested_by,
+                "queued_at": status.queued_at.isoformat() if status.queued_at else None,
+                "started_at": status.started_at.isoformat() if status.started_at else None,
+                "finished_at": status.finished_at.isoformat() if status.finished_at else None,
+                "last_success_at": (
+                    status.last_success_at.isoformat() if status.last_success_at else None
+                ),
+                "applications_checked": status.applications_checked,
+                "reads_failed": status.reads_failed,
+                "errors": list(status.errors or []),
+            }
+    finally:
+        _enqueue_enrichment()
+
+
+def _enqueue_enrichment() -> None:
+    """Enrichment only depends on stored data, so it runs whatever the sync outcome was."""
+    try:
+        from app.tasks.enrich_status_page import enrich_status_page
+
+        enrich_status_page.delay()
+    except Exception:
+        logger.exception("status_page_enrichment_enqueue_failed")

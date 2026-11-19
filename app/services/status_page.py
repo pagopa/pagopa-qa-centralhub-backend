@@ -7,27 +7,39 @@ from collections import defaultdict
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, cast
+from urllib.parse import quote
 
 import structlog
 from sqlalchemy import not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.status_page import SpApplication, SpDeployEvent, SpProduct, SpVersionState
+from app.models.status_page import (
+    SpApplication,
+    SpChangeSummary,
+    SpDeployEvent,
+    SpProduct,
+    SpTechStack,
+    SpVersionState,
+)
 from app.models.test_metrics import EnvEnum, TestRun, TestSuite
 from app.schemas.status_page import (
     ApplicationDetailOut,
     ApplicationRowOut,
     AreaGroupOut,
     CellOut,
+    ChangeItemOut,
+    ChangeSummaryOut,
     DeployEventOut,
     ProductGroupOut,
     RunRefOut,
+    StackOut,
     StatusOut,
     SummaryOut,
     SyncStatusOut,
     VersionOut,
 )
+from app.services.status_page_enrich import MAX_ATTEMPTS
 from app.services.status_page_sync import get_sync_status
 from app.services.status_page_versions import Drift, compare_versions, drift, normalize_version
 
@@ -246,12 +258,29 @@ async def _current_windows(db: AsyncSession) -> dict[tuple[uuid.UUID, str], Wind
     return {(ev.application_id, ev.target): (_window_start(ev), None) for ev in latest.all()}
 
 
+def _stack_out(stack: SpTechStack | None) -> StackOut | None:
+    """Only a reliably detected stack (status OK with a language) is exposed."""
+    if stack is None or stack.status != "OK" or stack.language is None:
+        return None
+    return StackOut(
+        language=stack.language, version=stack.version, source=stack.source, ref=stack.ref
+    )
+
+
+async def _load_stacks(db: AsyncSession, repositories: set[str]) -> dict[str, SpTechStack]:
+    if not repositories:
+        return {}
+    result = await db.execute(select(SpTechStack).where(SpTechStack.repository.in_(repositories)))
+    return {s.repository: s for s in result.scalars()}
+
+
 def _build_row(
     app: SpApplication,
     states: dict[str, SpVersionState],
     runs: RunIndex,
     windows: dict[tuple[uuid.UUID, str], Window] | None = None,
     hidden: bool = False,
+    stack: SpTechStack | None = None,
 ) -> ApplicationRowOut:
     repo_state = states.get("REPO")
     repo_ok = repo_state is not None and repo_state.read_status == "OK"
@@ -314,6 +343,7 @@ def _build_row(
         repo=repo_cell,
         envs=cast("Any", envs),
         flags=cast("Any", flags),
+        stack=_stack_out(stack),
     )
 
 
@@ -324,6 +354,7 @@ async def _load_all(
     dict[uuid.UUID, dict[str, SpVersionState]],
     RunIndex,
     dict[tuple[uuid.UUID, str], Window],
+    dict[str, SpTechStack],
 ]:
     pairs = [
         (a, p)
@@ -345,17 +376,21 @@ async def _load_all(
         if target in ENV_TARGETS
     ]
     runs = await _fetch_runs(db, _needed_versions(deployed))
-    return pairs, states, runs, await _current_windows(db)
+    windows = await _current_windows(db)
+    stacks = await _load_stacks(db, {app.repository for app, _ in pairs})
+    return pairs, states, runs, windows, stacks
 
 
 async def get_status(db: AsyncSession) -> StatusOut:
     try:
-        pairs, states, runs, windows = await _load_all(db)
+        pairs, states, runs, windows, stacks = await _load_all(db)
         sync = await get_sync_status(db)
         products: dict[uuid.UUID, tuple[SpProduct, list[ApplicationRowOut]]] = {}
         for app, product in pairs:
             products.setdefault(product.id, (product, []))[1].append(
-                _build_row(app, states.get(app.id, {}), runs, windows)
+                _build_row(
+                    app, states.get(app.id, {}), runs, windows, stack=stacks.get(app.repository)
+                )
             )
         by_area: dict[str, list[ProductGroupOut]] = defaultdict(list)
         for product, rows in products.values():
@@ -379,7 +414,7 @@ async def get_status(db: AsyncSession) -> StatusOut:
 
 async def get_summary(db: AsyncSession) -> SummaryOut:
     try:
-        pairs, states, runs, windows = await _load_all(db)
+        pairs, states, runs, windows, _stacks = await _load_all(db)
         rows = [_build_row(a, states.get(a.id, {}), runs, windows) for a, _ in pairs]
         sync = await get_sync_status(db)
         return SummaryOut(
@@ -404,6 +439,45 @@ def _direction(event: SpDeployEvent) -> str:
     if result is None:
         return "unknown"
     return "upgrade" if result > 0 else "rollback" if result < 0 else "unknown"
+
+
+def _compare_url(repository: str, from_ref: str | None, to_ref: str | None) -> str | None:
+    if not from_ref or not to_ref:
+        return None
+    return (
+        f"https://github.com/pagopa/{quote(repository, safe='')}"
+        f"/compare/{quote(from_ref, safe='')}...{quote(to_ref, safe='')}"
+    )
+
+
+def _change_summary(repository: str, cached: SpChangeSummary | None) -> ChangeSummaryOut:
+    """Cached summary of one deploy; PENDING while it is missing or still being retried."""
+    if cached is None or (cached.status == "ERROR" and cached.attempts < MAX_ATTEMPTS):
+        return ChangeSummaryOut(
+            status="PENDING",
+            direction=None,
+            items=[],
+            total_commits=0,
+            truncated=False,
+            compare_url=None,
+        )
+    return ChangeSummaryOut(
+        status=cast("Any", cached.status),
+        direction=cached.direction,
+        items=[
+            ChangeItemOut(
+                kind=str(item.get("kind", "")),
+                number=item.get("number"),
+                title=str(item.get("title", "")),
+                author=item.get("author"),
+                url=str(item.get("url", "")),
+            )
+            for item in cached.items
+        ],
+        total_commits=cached.total_commits,
+        truncated=cached.truncated,
+        compare_url=_compare_url(repository, cached.from_ref, cached.to_ref),
+    )
 
 
 class VersionNotFoundError(Exception):
@@ -466,6 +540,15 @@ async def get_application_detail(
             .scalars()
             .all()
         )
+        cached = {
+            (c.from_version, c.to_version): c
+            for c in (
+                await db.execute(
+                    select(SpChangeSummary).where(SpChangeSummary.repository == app.repository)
+                )
+            ).scalars()
+        }
+        stack = (await _load_stacks(db, {app.repository})).get(app.repository)
         versions: list[tuple[SpApplication, str | None]] = [
             (app, ev.version) for ev in events if ev.target in ENV_TARGETS
         ]
@@ -497,10 +580,19 @@ async def get_application_detail(
                     is_baseline=ev.is_baseline,
                     direction=cast("Any", _direction(ev)),
                     runs=linked,
+                    changes=(
+                        _change_summary(
+                            app.repository, cached.get((ev.previous_version, ev.version))
+                        )
+                        if ev.previous_version is not None
+                        else None
+                    ),
                 )
             )
         return ApplicationDetailOut(
-            application=_build_row(app, states, runs, current, hidden=app.hidden or product.hidden),
+            application=_build_row(
+                app, states, runs, current, hidden=app.hidden or product.hidden, stack=stack
+            ),
             product_name=product.name,
             history=cast("Any", history),
         )

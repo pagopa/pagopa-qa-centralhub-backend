@@ -1,0 +1,344 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+import structlog
+from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.core.db import engine as app_engine
+from app.models.status_page import (
+    SpApplication,
+    SpChangeSummary,
+    SpDeployEvent,
+    SpTechStack,
+    SpVersionState,
+)
+from app.services.status_page_changes import fetch_change_summary
+from app.services.status_page_github import EnrichGitHub, GitHubBudgetExhaustedError
+from app.services.status_page_stack import StackResult, detect_stack
+
+logger = structlog.get_logger(__name__)
+
+ENRICH_LOCK_ID = 672
+MAX_ATTEMPTS = 3
+MAX_ERROR_LENGTH = 500
+# Consecutive transport / 5xx failures after which the run assumes GitHub is down and stops.
+MAX_CONSECUTIVE_OUTAGES = 3
+
+
+_EMPTY_SUMMARY: dict[str, Any] = {
+    "direction": None,
+    "from_ref": None,
+    "to_ref": None,
+    "items": [],
+    "total_commits": 0,
+    "truncated": False,
+}
+
+
+def _zeros() -> dict[str, int]:
+    # ``stopped_by_budget``: the rate-limit budget ran out. ``stopped_by_errors``: the circuit
+    # breaker opened after repeated transport errors or GitHub 5xx responses.
+    return {"summaries": 0, "stacks": 0, "stopped_by_budget": 0, "stopped_by_errors": 0}
+
+
+class GitHubOutageError(Exception):
+    """Raised when too many consecutive items failed with transport errors or GitHub 5xx."""
+
+
+class _Breaker:
+    """Counts consecutive outage-type failures; a success (or any other outcome) resets it."""
+
+    def __init__(self) -> None:
+        self._streak = 0
+
+    def success(self) -> None:
+        self._streak = 0
+
+    def failure(self, exc: Exception) -> None:
+        """Record a failed item; raise ``GitHubOutageError`` when it trips the breaker."""
+        if not _is_outage(exc):
+            self._streak = 0
+            return
+        self._streak += 1
+        if self._streak >= MAX_CONSECUTIVE_OUTAGES:
+            raise GitHubOutageError(_error_text(exc)) from exc
+
+
+def _is_outage(exc: Exception) -> bool:
+    if isinstance(exc, httpx.TransportError):
+        return True
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code >= 500
+
+
+def _error_text(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {exc}"[:MAX_ERROR_LENGTH]
+
+
+async def _pending_pairs(db: AsyncSession, limit: int) -> list[tuple[str, str, str]]:
+    newest = func.max(SpDeployEvent.detected_at)
+    stmt = (
+        select(SpApplication.repository, SpDeployEvent.previous_version, SpDeployEvent.version)
+        .join(SpApplication, SpApplication.id == SpDeployEvent.application_id)
+        .outerjoin(
+            SpChangeSummary,
+            and_(
+                SpChangeSummary.repository == SpApplication.repository,
+                SpChangeSummary.from_version == SpDeployEvent.previous_version,
+                SpChangeSummary.to_version == SpDeployEvent.version,
+            ),
+        )
+        .where(
+            SpApplication.repository.is_not(None),
+            SpDeployEvent.previous_version.is_not(None),
+            SpDeployEvent.version.is_not(None),
+            or_(
+                SpChangeSummary.id.is_(None),
+                and_(
+                    SpChangeSummary.status == "ERROR",
+                    SpChangeSummary.attempts < MAX_ATTEMPTS,
+                ),
+            ),
+        )
+        .group_by(SpApplication.repository, SpDeployEvent.previous_version, SpDeployEvent.version)
+        .order_by(newest.desc())
+        .limit(limit)
+    )
+    return [(r, p, v) for r, p, v in (await db.execute(stmt)).all() if r and p and v]
+
+
+async def _pending_stacks(db: AsyncSession, limit: int) -> list[tuple[str, str]]:
+    if limit <= 0:
+        return []
+    # One canonical REPO version per repository, computed over all its REPO states before any
+    # pending filter: OK reads first, then the most recently checked.
+    canonical = (
+        select(
+            SpApplication.repository.label("repository"), SpVersionState.version.label("version")
+        )
+        .join(SpVersionState, SpVersionState.application_id == SpApplication.id)
+        .where(
+            SpApplication.repository.is_not(None),
+            SpVersionState.target == "REPO",
+            SpVersionState.version.is_not(None),
+        )
+        .distinct(SpApplication.repository)
+        .order_by(
+            SpApplication.repository,
+            (SpVersionState.read_status == "OK").desc(),
+            SpVersionState.checked_at.desc().nulls_last(),
+            SpVersionState.version,
+        )
+        .subquery()
+    )
+    stmt = (
+        select(canonical.c.repository, canonical.c.version)
+        .outerjoin(SpTechStack, SpTechStack.repository == canonical.c.repository)
+        .where(
+            or_(
+                SpTechStack.repository.is_(None),
+                SpTechStack.for_version != canonical.c.version,
+                and_(SpTechStack.status == "ERROR", SpTechStack.attempts < MAX_ATTEMPTS),
+            )
+        )
+        .order_by(canonical.c.repository)
+        .limit(limit)
+    )
+    return [(r, v) for r, v in (await db.execute(stmt)).all() if r and v]
+
+
+async def _store_summary(
+    db: AsyncSession,
+    repository: str,
+    from_version: str,
+    to_version: str,
+    gh: EnrichGitHub,
+    breaker: _Breaker,
+) -> None:
+    error: str | None
+    try:
+        result = await fetch_change_summary(gh, repository, from_version, to_version)
+    except GitHubBudgetExhaustedError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        breaker.failure(exc)
+        logger.warning("status_page_summary_failed", repository=repository, error=str(exc))
+        status, error = "ERROR", _error_text(exc)
+        fields: dict[str, Any] = dict(_EMPTY_SUMMARY)
+    else:
+        breaker.success()
+        status, error = result.status, result.error
+        fields = {
+            "direction": result.direction,
+            "from_ref": result.from_ref,
+            "to_ref": result.to_ref,
+            "items": result.items,
+            "total_commits": result.total_commits or 0,
+            "truncated": result.truncated,
+        }
+    await _persist_summary(db, repository, from_version, to_version, status, error, fields)
+
+
+async def _persist_summary(
+    db: AsyncSession,
+    repository: str,
+    from_version: str,
+    to_version: str,
+    status: str,
+    error: str | None,
+    fields: dict[str, Any],
+) -> None:
+    try:
+        await _write_summary(db, repository, from_version, to_version, status, error, fields)
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.exception("status_page_summary_persist_failed", repository=repository)
+        try:
+            await _write_summary(
+                db,
+                repository,
+                from_version,
+                to_version,
+                "ERROR",
+                "Could not store the change summary",
+                dict(_EMPTY_SUMMARY),
+            )
+        except SQLAlchemyError:
+            await db.rollback()
+            logger.exception("status_page_summary_error_row_failed", repository=repository)
+
+
+async def _write_summary(
+    db: AsyncSession,
+    repository: str,
+    from_version: str,
+    to_version: str,
+    status: str,
+    error: str | None,
+    fields: dict[str, Any],
+) -> None:
+    row = await db.scalar(
+        select(SpChangeSummary).where(
+            SpChangeSummary.repository == repository,
+            SpChangeSummary.from_version == from_version,
+            SpChangeSummary.to_version == to_version,
+        )
+    )
+    if row is None:
+        row = SpChangeSummary(
+            repository=repository, from_version=from_version, to_version=to_version, attempts=0
+        )
+        db.add(row)
+    row.status = status
+    row.error = error[:MAX_ERROR_LENGTH] if error else None
+    for name, value in fields.items():
+        setattr(row, name, value)
+    if status == "ERROR":
+        row.attempts = (row.attempts or 0) + 1
+    row.fetched_at = datetime.now(UTC)
+    await db.commit()
+
+
+async def _store_stack(
+    db: AsyncSession, repository: str, repo_version: str, gh: EnrichGitHub, breaker: _Breaker
+) -> None:
+    try:
+        result = await detect_stack(gh, repository, repo_version)
+    except GitHubBudgetExhaustedError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        breaker.failure(exc)
+        logger.warning("status_page_stack_failed", repository=repository, error=str(exc))
+        result = StackResult(status="ERROR", error=_error_text(exc))
+    else:
+        breaker.success()
+    try:
+        await _write_stack(db, repository, repo_version, result)
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.exception("status_page_stack_persist_failed", repository=repository)
+        try:
+            failed = StackResult(status="ERROR", error="Could not store the detected stack")
+            await _write_stack(db, repository, repo_version, failed)
+        except SQLAlchemyError:
+            await db.rollback()
+            logger.exception("status_page_stack_error_row_failed", repository=repository)
+
+
+async def _write_stack(
+    db: AsyncSession, repository: str, repo_version: str, result: StackResult
+) -> None:
+    row = await db.get(SpTechStack, repository)
+    if row is None:
+        row = SpTechStack(repository=repository, attempts=0)
+        db.add(row)
+    elif row.for_version != repo_version:
+        row.attempts = 0
+    row.for_version = repo_version
+    row.status = result.status
+    row.language = result.language
+    row.version = result.version
+    row.source = result.source
+    row.ref = result.ref
+    row.error = result.error[:MAX_ERROR_LENGTH] if result.error else None
+    if result.status == "ERROR":
+        row.attempts = (row.attempts or 0) + 1
+    row.detected_at = datetime.now(UTC)
+    await db.commit()
+
+
+async def _process(db: AsyncSession, gh: EnrichGitHub) -> dict[str, int]:
+    counters = _zeros()
+    batch = settings.status_page_enrich_batch
+    breaker = _Breaker()
+    try:
+        for repository, from_version, to_version in await _pending_pairs(db, batch):
+            await _store_summary(db, repository, from_version, to_version, gh, breaker)
+            counters["summaries"] += 1
+        remaining = batch - counters["summaries"]
+        for repository, repo_version in await _pending_stacks(db, remaining):
+            await _store_stack(db, repository, repo_version, gh, breaker)
+            counters["stacks"] += 1
+    except GitHubBudgetExhaustedError:
+        await db.rollback()
+        counters["stopped_by_budget"] = 1
+        logger.warning("status_page_enrichment_stopped_by_budget", **counters)
+    except GitHubOutageError:
+        await db.rollback()
+        counters["stopped_by_errors"] = 1
+        logger.warning("status_page_enrichment_stopped_by_errors", **counters)
+    except Exception:
+        await db.rollback()
+        raise
+    return counters
+
+
+async def run_enrichment(
+    db: AsyncSession, *, client: httpx.AsyncClient | None = None
+) -> dict[str, int]:
+    if not settings.github_token:
+        logger.info("run_enrichment skipped: no GitHub token configured")
+        return _zeros()
+    bind = db.bind
+    lock_engine = bind if bind is not None and hasattr(bind, "connect") else app_engine
+    async with lock_engine.connect() as lock_conn:
+        acquired = bool(await lock_conn.scalar(select(func.pg_try_advisory_lock(ENRICH_LOCK_ID))))
+        if not acquired:
+            logger.info("run_enrichment skipped: another enrichment holds the lock")
+            return _zeros()
+        try:
+            if client is not None:
+                return await _process(db, EnrichGitHub(client, settings.status_page_github_reserve))
+            async with httpx.AsyncClient(timeout=settings.status_page_http_timeout_s) as own:
+                return await _process(db, EnrichGitHub(own, settings.status_page_github_reserve))
+        finally:
+            await lock_conn.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": ENRICH_LOCK_ID})
+            await lock_conn.commit()
+
+
+__all__ = ["ENRICH_LOCK_ID", "run_enrichment"]
