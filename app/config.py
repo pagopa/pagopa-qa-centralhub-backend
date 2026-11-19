@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     status_page_sync_concurrency: int = 10
     status_page_http_timeout_s: float = 10.0
     status_page_sync_interval_s: float = 900.0
+    # Enrichment (change summaries, technology stack): items handled per run, and the GitHub
+    # rate-limit remainder below which a run stops to leave budget to the version sync.
+    status_page_enrich_batch: int = 40
+    status_page_github_reserve: int = 1000
     # When False, runs are linked to a deployed version by test_object, environment and the
     # time window the version was deployed in, ignoring test_object_version (unreliable today).
     status_page_runs_match_version: bool = False

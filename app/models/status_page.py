@@ -30,6 +30,10 @@ CIS = ("GHA", "AZDO")
 KINDS = ("backend", "frontend")
 SYNC_STATUSES = ("QUEUED", "RUNNING", "OK", "PARTIAL", "FAILED")
 SYNC_TRIGGERS = ("SCHEDULED", "MANUAL")
+ENRICH_STATUSES = ("OK", "UNAVAILABLE", "ERROR")
+CHANGE_DIRECTIONS = ("forward", "rollback", "diverged", "identical")
+STACK_LANGUAGES = ("JAVA", "PYTHON", "NODE", "RUST", "GO")
+STACK_SOURCES = ("dockerfile", "build_file")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -175,3 +179,65 @@ class SpSyncStatus(Base):
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
     celery_task_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+
+class SpChangeSummary(Base):
+    """Cache of the changes between two deployed versions of a repository."""
+
+    __tablename__ = "sp_change_summaries"
+    __table_args__ = (
+        UniqueConstraint(
+            "repository", "from_version", "to_version", name="uq_sp_change_summaries_pair"
+        ),
+        CheckConstraint(_in("status", ENRICH_STATUSES), name="ck_sp_change_summaries_status"),
+        CheckConstraint(
+            _in("direction", CHANGE_DIRECTIONS), name="ck_sp_change_summaries_direction"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    repository: Mapped[str] = mapped_column(String(200), nullable=False)
+    from_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    to_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(12), nullable=False)
+    direction: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    from_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    to_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    items: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    total_commits: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    truncated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class SpTechStack(Base):
+    """Cache of the language and runtime version detected for a repository."""
+
+    __tablename__ = "sp_tech_stacks"
+    __table_args__ = (
+        CheckConstraint(_in("status", ENRICH_STATUSES), name="ck_sp_tech_stacks_status"),
+        CheckConstraint(_in("language", STACK_LANGUAGES), name="ck_sp_tech_stacks_language"),
+        CheckConstraint(_in("source", STACK_SOURCES), name="ck_sp_tech_stacks_source"),
+    )
+
+    repository: Mapped[str] = mapped_column(String(200), primary_key=True)
+    status: Mapped[str] = mapped_column(String(12), nullable=False)
+    language: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    for_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
