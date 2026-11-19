@@ -70,6 +70,30 @@ class CellOut(BaseModel):
     tests: list[RunRefOut] = []
 
 
+class StackOut(BaseModel):
+    language: str
+    version: str | None
+    source: str | None
+    ref: str | None
+
+
+class ChangeItemOut(BaseModel):
+    kind: str
+    number: int | None
+    title: str
+    author: str | None
+    url: str | None
+
+
+class ChangeSummaryOut(BaseModel):
+    status: Literal["OK", "UNAVAILABLE", "ERROR", "PENDING"]
+    direction: str | None
+    items: list[ChangeItemOut]
+    total_commits: int
+    truncated: bool
+    compare_url: str | None
+
+
 class ApplicationRowOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -87,6 +111,7 @@ class ApplicationRowOut(BaseModel):
     repo: CellOut | None
     envs: dict[EnvTarget, CellOut | None]
     flags: list[AppFlag]
+    stack: StackOut | None = None
 
 
 class ProductGroupOut(BaseModel):
@@ -122,6 +147,7 @@ class DeployEventOut(BaseModel):
     is_baseline: bool
     direction: Literal["upgrade", "rollback", "unknown", "baseline"]
     runs: list[RunRefOut] = []
+    changes: ChangeSummaryOut | None = None
 
 
 class ApplicationDetailOut(BaseModel):

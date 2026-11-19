@@ -12,7 +12,14 @@ import pytest_asyncio
 from sqlalchemy import delete, event
 
 from app.config import settings
-from app.models.status_page import SpApplication, SpDeployEvent, SpProduct, SpVersionState
+from app.models.status_page import (
+    SpApplication,
+    SpChangeSummary,
+    SpDeployEvent,
+    SpProduct,
+    SpTechStack,
+    SpVersionState,
+)
 from app.models.test_metrics import TestRun, TestSuite
 from app.services import status_page as read_model
 from app.services.status_page import (
@@ -75,6 +82,7 @@ class World:
         self.product_ids: list[uuid.UUID] = []
         self.app_ids: list[uuid.UUID] = []
         self.suite_ids: list[uuid.UUID] = []
+        self.repositories: list[str] = []
 
     def name(self, suffix: str) -> str:
         return f"zz-{self.tag}-{suffix}"
@@ -87,6 +95,11 @@ async def world() -> AsyncIterator[World]:
     async with TestSession() as db:
         if w.suite_ids:
             await db.execute(delete(TestSuite).where(TestSuite.id.in_(w.suite_ids)))
+        if w.repositories:
+            await db.execute(
+                delete(SpChangeSummary).where(SpChangeSummary.repository.in_(w.repositories))
+            )
+            await db.execute(delete(SpTechStack).where(SpTechStack.repository.in_(w.repositories)))
         if w.app_ids:
             await db.execute(delete(SpApplication).where(SpApplication.id.in_(w.app_ids)))
         if w.product_ids:
@@ -111,6 +124,7 @@ async def add_app(
     states: dict[str, tuple[str | None, str]] | None = None,
     hidden: bool = False,
     version_source: str = "AUTO",
+    repository: str = "repo",
 ) -> uuid.UUID:
     """states: target -> (version, read_status)."""
     aid = uuid.uuid4()
@@ -121,7 +135,7 @@ async def add_app(
                 product_id=product_id,
                 name=w.name(suffix),
                 product_key=w.name(suffix),
-                repository="repo",
+                repository=repository,
                 runtime="AKS",
                 ci="GHA",
                 test_object=test_object,
@@ -343,7 +357,8 @@ async def test_status_grouping_and_query_count(world: World) -> None:
     finally:
         event.remove(test_engine.sync_engine, "before_cursor_execute", _count)
     print(f"get_status query count: {count}")
-    assert count <= 6
+    # 6 before the technology badge, plus one query for the tech stacks of the listed repositories
+    assert count <= 7
 
     areas = [a.area for a in out.areas]
     assert areas.index("CORE") < areas.index("TOUCHPOINT")
@@ -776,3 +791,175 @@ async def test_empty_manual_prod_is_neither_aligned_nor_unreachable(world: World
     )
     r = await row(world, a)
     assert "ALIGNED" not in r.flags and "UNREACHABLE" not in r.flags
+
+
+# ------------------------------------------------------- stack and change summaries
+
+
+async def add_stack(w: World, repository: str, status: str = "OK", **kw: Any) -> None:
+    w.repositories.append(repository)
+    values: dict[str, Any] = {
+        "language": "JAVA",
+        "version": "17",
+        "source": "dockerfile",
+        "ref": "v1.0.0",
+        **kw,
+    }
+    if status != "OK":
+        values.update(language=None, version=None, source=None, ref=None)
+    async with TestSession() as db:
+        db.add(SpTechStack(repository=repository, status=status, for_version="1.0.0", **values))
+        await db.commit()
+
+
+async def add_summary(w: World, repository: str, from_v: str, to_v: str, **kw: Any) -> None:
+    w.repositories.append(repository)
+    values: dict[str, Any] = {"status": "OK", "attempts": 1, **kw}
+    async with TestSession() as db:
+        db.add(
+            SpChangeSummary(repository=repository, from_version=from_v, to_version=to_v, **values)
+        )
+        await db.commit()
+
+
+async def test_row_stack_only_for_ok(world: World) -> None:
+    p = await add_product(world, "p")
+    st = states("1.0.0", "1.0.0", "1.0.0", "1.0.0")
+    ok_repo, un_repo = world.name("r-ok"), world.name("r-un")
+    ok = await add_app(world, p, "ok", None, st, repository=ok_repo)
+    un = await add_app(world, p, "un", None, st, repository=un_repo)
+    missing = await add_app(world, p, "none", None, st, repository=world.name("r-none"))
+    await add_stack(world, ok_repo)
+    await add_stack(world, un_repo, status="UNAVAILABLE")
+    stack = (await row(world, ok)).stack
+    assert (stack.language, stack.version, stack.source, stack.ref) == (
+        "JAVA",
+        "17",
+        "dockerfile",
+        "v1.0.0",
+    )
+    assert (await row(world, un)).stack is None
+    assert (await row(world, missing)).stack is None
+
+
+async def test_detail_changes_from_cache(world: World) -> None:
+    p = await add_product(world, "p")
+    repo = world.name("repo")
+    a = await add_app(
+        world, p, "a", None, states("1.2.0", "1.2.0", "1.2.0", "1.2.0"), repository=repo
+    )
+    await add_stack(world, repo)
+    await add_event(a, "PROD", "1.0.0", 0)
+    await add_event(a, "PROD", "1.1.0", 10, previous="1.0.0")
+    await add_event(a, "PROD", "1.2.0", 20, previous="1.1.0")
+    await add_event(a, "PROD", "1.1.5", 30, previous="1.2.0")
+    await add_event(a, "PROD", "1.3.0", 40, previous="1.1.5")
+    item = {
+        "kind": "pr",
+        "number": 7,
+        "title": "Fix",
+        "author": "me",
+        "url": "https://x/7",
+        "sha": "abc",
+    }
+    await add_summary(
+        world,
+        repo,
+        "1.0.0",
+        "1.1.0",
+        from_ref="v1.0.0",
+        to_ref="v1.1.0",
+        direction="forward",
+        items=[item],
+        total_commits=3,
+        truncated=True,
+    )
+    await add_summary(
+        world,
+        repo,
+        "1.1.0",
+        "1.2.0",
+        status="UNAVAILABLE",
+        attempts=1,
+    )
+    await add_summary(
+        world,
+        repo,
+        "1.2.0",
+        "1.1.5",
+        direction="rollback",
+        from_ref="v1.2.0",
+        to_ref="v1.1.5",
+    )
+    await add_summary(world, repo, "1.1.5", "1.3.0", status="ERROR", attempts=3, error="boom")
+
+    async with TestSession() as db:
+        detail, base_count = await _detail_count(db, a)
+    prod = {e.version: e for e in detail.history["PROD"]}
+    assert prod["1.0.0"].changes is None
+    ch = prod["1.1.0"].changes
+    assert ch.status == "OK" and ch.direction == "forward"
+    assert ch.total_commits == 3 and ch.truncated is True
+    assert [(i.kind, i.number, i.title, i.author, i.url) for i in ch.items] == [
+        ("pr", 7, "Fix", "me", "https://x/7")
+    ]
+    assert not hasattr(ch.items[0], "sha")
+    assert ch.compare_url == f"https://github.com/pagopa/{repo}/compare/v1.0.0...v1.1.0"
+    assert prod["1.2.0"].changes.status == "UNAVAILABLE"
+    assert prod["1.2.0"].changes.compare_url is None
+    rb = prod["1.1.5"]
+    assert rb.direction == "rollback" and rb.changes.direction == "rollback"
+    assert prod["1.3.0"].changes.status == "ERROR"
+    assert detail.application.stack is not None
+    assert base_count >= 1
+
+
+async def _detail_count(db: Any, app_id: uuid.UUID) -> tuple[Any, int]:
+    count = 0
+
+    def _count(*_: Any) -> None:
+        nonlocal count
+        count += 1
+
+    event.listen(test_engine.sync_engine, "before_cursor_execute", _count)
+    try:
+        detail = await get_application_detail(db, app_id)
+    finally:
+        event.remove(test_engine.sync_engine, "before_cursor_execute", _count)
+    return detail, count
+
+
+async def test_detail_changes_pending_and_single_query(world: World) -> None:
+    p = await add_product(world, "p")
+    repo = world.name("repo")
+    a = await add_app(
+        world, p, "a", None, states("1.2.0", "1.2.0", "1.2.0", "1.2.0"), repository=repo
+    )
+    await add_event(a, "UAT", "1.0.0", 0)
+    await add_event(a, "UAT", "1.1.0", 10, previous="1.0.0")
+    await add_event(a, "UAT", "1.2.0", 20, previous="1.1.0")
+    await add_summary(world, repo, "1.1.0", "1.2.0", status="ERROR", attempts=2, error="x")
+    async with TestSession() as db:
+        detail, with_two = await _detail_count(db, a)
+    uat = {e.version: e for e in detail.history["UAT"]}
+    assert uat["1.0.0"].changes is None
+    assert uat["1.1.0"].changes.status == "PENDING"  # no row
+    assert uat["1.2.0"].changes.status == "PENDING"  # ERROR below the attempt limit
+    assert uat["1.2.0"].changes.items == []
+    # the number of queries does not depend on the number of events
+    for i in range(3, 8):
+        await add_event(a, "UAT", f"1.{i}.0", i * 10, previous=f"1.{i - 1}.0")
+    async with TestSession() as db:
+        _, with_more = await _detail_count(db, a)
+    assert with_more == with_two
+
+
+async def test_compare_url_quotes_refs(world: World) -> None:
+    from app.services.status_page import _compare_url
+
+    assert _compare_url("repo", None, "v1") is None
+    assert _compare_url("repo", "v1", None) is None
+    assert (
+        _compare_url("re po", "a/b", "c d")
+        == "https://github.com/pagopa/re%20po/compare/a%2Fb...c%20d"
+    )
