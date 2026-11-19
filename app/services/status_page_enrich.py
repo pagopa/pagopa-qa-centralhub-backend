@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 import structlog
 from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -26,6 +27,16 @@ logger = structlog.get_logger(__name__)
 ENRICH_LOCK_ID = 672
 MAX_ATTEMPTS = 3
 MAX_ERROR_LENGTH = 500
+
+
+_EMPTY_SUMMARY: dict[str, Any] = {
+    "direction": None,
+    "from_ref": None,
+    "to_ref": None,
+    "items": [],
+    "total_commits": 0,
+    "truncated": False,
+}
 
 
 def _zeros() -> dict[str, int]:
@@ -71,23 +82,38 @@ async def _pending_pairs(db: AsyncSession, limit: int) -> list[tuple[str, str, s
 async def _pending_stacks(db: AsyncSession, limit: int) -> list[tuple[str, str]]:
     if limit <= 0:
         return []
-    repo_version = func.max(SpVersionState.version)
-    stmt = (
-        select(SpApplication.repository, repo_version)
+    # One canonical REPO version per repository, computed over all its REPO states before any
+    # pending filter: OK reads first, then the most recently checked.
+    canonical = (
+        select(
+            SpApplication.repository.label("repository"), SpVersionState.version.label("version")
+        )
         .join(SpVersionState, SpVersionState.application_id == SpApplication.id)
-        .outerjoin(SpTechStack, SpTechStack.repository == SpApplication.repository)
         .where(
             SpApplication.repository.is_not(None),
             SpVersionState.target == "REPO",
             SpVersionState.version.is_not(None),
+        )
+        .distinct(SpApplication.repository)
+        .order_by(
+            SpApplication.repository,
+            (SpVersionState.read_status == "OK").desc(),
+            SpVersionState.checked_at.desc().nulls_last(),
+            SpVersionState.version,
+        )
+        .subquery()
+    )
+    stmt = (
+        select(canonical.c.repository, canonical.c.version)
+        .outerjoin(SpTechStack, SpTechStack.repository == canonical.c.repository)
+        .where(
             or_(
                 SpTechStack.repository.is_(None),
-                SpTechStack.for_version != SpVersionState.version,
+                SpTechStack.for_version != canonical.c.version,
                 and_(SpTechStack.status == "ERROR", SpTechStack.attempts < MAX_ATTEMPTS),
-            ),
+            )
         )
-        .group_by(SpApplication.repository)
-        .order_by(SpApplication.repository)
+        .order_by(canonical.c.repository)
         .limit(limit)
     )
     return [(r, v) for r, v in (await db.execute(stmt)).all() if r and v]
@@ -96,13 +122,6 @@ async def _pending_stacks(db: AsyncSession, limit: int) -> list[tuple[str, str]]
 async def _store_summary(
     db: AsyncSession, repository: str, from_version: str, to_version: str, gh: EnrichGitHub
 ) -> None:
-    row = await db.scalar(
-        select(SpChangeSummary).where(
-            SpChangeSummary.repository == repository,
-            SpChangeSummary.from_version == from_version,
-            SpChangeSummary.to_version == to_version,
-        )
-    )
     error: str | None
     try:
         result = await fetch_change_summary(gh, repository, from_version, to_version)
@@ -111,14 +130,7 @@ async def _store_summary(
     except Exception as exc:  # noqa: BLE001
         logger.warning("status_page_summary_failed", repository=repository, error=str(exc))
         status, error = "ERROR", _error_text(exc)
-        fields: dict[str, Any] = {
-            "direction": None,
-            "from_ref": None,
-            "to_ref": None,
-            "items": [],
-            "total_commits": 0,
-            "truncated": False,
-        }
+        fields: dict[str, Any] = dict(_EMPTY_SUMMARY)
     else:
         status, error = result.status, result.error
         fields = {
@@ -129,15 +141,61 @@ async def _store_summary(
             "total_commits": result.total_commits or 0,
             "truncated": result.truncated,
         }
-    if error is not None:
-        error = error[:MAX_ERROR_LENGTH]
+    await _persist_summary(db, repository, from_version, to_version, status, error, fields)
+
+
+async def _persist_summary(
+    db: AsyncSession,
+    repository: str,
+    from_version: str,
+    to_version: str,
+    status: str,
+    error: str | None,
+    fields: dict[str, Any],
+) -> None:
+    try:
+        await _write_summary(db, repository, from_version, to_version, status, error, fields)
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.exception("status_page_summary_persist_failed", repository=repository)
+        try:
+            await _write_summary(
+                db,
+                repository,
+                from_version,
+                to_version,
+                "ERROR",
+                "Could not store the change summary",
+                dict(_EMPTY_SUMMARY),
+            )
+        except SQLAlchemyError:
+            await db.rollback()
+            logger.exception("status_page_summary_error_row_failed", repository=repository)
+
+
+async def _write_summary(
+    db: AsyncSession,
+    repository: str,
+    from_version: str,
+    to_version: str,
+    status: str,
+    error: str | None,
+    fields: dict[str, Any],
+) -> None:
+    row = await db.scalar(
+        select(SpChangeSummary).where(
+            SpChangeSummary.repository == repository,
+            SpChangeSummary.from_version == from_version,
+            SpChangeSummary.to_version == to_version,
+        )
+    )
     if row is None:
         row = SpChangeSummary(
             repository=repository, from_version=from_version, to_version=to_version, attempts=0
         )
         db.add(row)
     row.status = status
-    row.error = error
+    row.error = error[:MAX_ERROR_LENGTH] if error else None
     for name, value in fields.items():
         setattr(row, name, value)
     if status == "ERROR":
@@ -149,7 +207,6 @@ async def _store_summary(
 async def _store_stack(
     db: AsyncSession, repository: str, repo_version: str, gh: EnrichGitHub
 ) -> None:
-    row = await db.get(SpTechStack, repository)
     try:
         result = await detect_stack(gh, repository, repo_version)
     except GitHubBudgetExhaustedError:
@@ -157,6 +214,23 @@ async def _store_stack(
     except Exception as exc:  # noqa: BLE001
         logger.warning("status_page_stack_failed", repository=repository, error=str(exc))
         result = StackResult(status="ERROR", error=_error_text(exc))
+    try:
+        await _write_stack(db, repository, repo_version, result)
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.exception("status_page_stack_persist_failed", repository=repository)
+        try:
+            failed = StackResult(status="ERROR", error="Could not store the detected stack")
+            await _write_stack(db, repository, repo_version, failed)
+        except SQLAlchemyError:
+            await db.rollback()
+            logger.exception("status_page_stack_error_row_failed", repository=repository)
+
+
+async def _write_stack(
+    db: AsyncSession, repository: str, repo_version: str, result: StackResult
+) -> None:
+    row = await db.get(SpTechStack, repository)
     if row is None:
         row = SpTechStack(repository=repository, attempts=0)
         db.add(row)
@@ -190,6 +264,9 @@ async def _process(db: AsyncSession, gh: EnrichGitHub) -> dict[str, int]:
         await db.rollback()
         counters["stopped_by_budget"] = 1
         logger.warning("status_page_enrichment_stopped_by_budget", **counters)
+    except Exception:
+        await db.rollback()
+        raise
     return counters
 
 

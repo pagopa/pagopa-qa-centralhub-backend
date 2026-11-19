@@ -285,3 +285,65 @@ async def test_lock_held_skips_run(ctx: Ctx) -> None:
             await conn.execute(select(func.pg_advisory_unlock(svc.ENRICH_LOCK_ID)))
     assert counters == {"summaries": 0, "stacks": 0, "stopped_by_budget": 0}
     assert ctx.summary_calls == []
+
+
+@pytest.mark.anyio
+async def test_shared_repository_with_different_versions_is_detected_once(ctx: Ctx) -> None:
+    other_id = uuid.uuid4()
+    async with TestSession() as db:
+        db.add(
+            SpApplication(
+                id=other_id,
+                product_id=ctx.product_id,
+                name=f"zz-b-{ctx.sfx}",
+                product_key=f"zz-kb-{ctx.sfx}",
+                repository=ctx.repo,
+                runtime="AKS",
+                ci="GHA",
+            )
+        )
+        await db.flush()
+        db.add(
+            SpVersionState(
+                application_id=other_id,
+                target="REPO",
+                version="1.10.0",
+                read_status="OK",
+                checked_at=T0 + timedelta(hours=1),
+            )
+        )
+        await db.commit()
+    try:
+        await _repo_state(ctx, "1.9.0")
+        await _run(ctx)
+        assert len(ctx.stack_calls) == 1
+        assert ctx.stack_calls[0][1] == "1.10.0"
+        counters = await _run(ctx)
+        assert counters["stacks"] == 0
+        assert len(ctx.stack_calls) == 1
+    finally:
+        async with TestSession() as db:
+            await db.execute(delete(SpApplication).where(SpApplication.id == other_id))
+            await db.commit()
+
+
+@pytest.mark.anyio
+async def test_db_failure_on_one_item_becomes_error_row_and_run_continues(ctx: Ctx) -> None:
+    await _event(ctx, "DEV", "1.0.0", "1.1.0", T0)
+    await _event(ctx, "DEV", "1.1.0", "1.2.0", T0 + timedelta(hours=1))
+    p1, p2 = _fakes(ctx)
+
+    async def fake_summary(gh: Any, repository: str, frm: str, to: str) -> ChangeResult:
+        ctx.summary_calls.append((repository, frm, to))
+        ref = "x" * 200 if to == "1.2.0" else "v1.1.0"
+        return ChangeResult(status="OK", direction="forward", to_ref=ref, total_commits=1)
+
+    async with TestSession() as db:
+        with patch.object(svc, "fetch_change_summary", fake_summary), p2:
+            counters = await svc.run_enrichment(db, client=_client())
+    assert counters["summaries"] == 2
+    rows = {r.to_version: r for r in await _summaries(ctx)}
+    assert rows["1.2.0"].status == "ERROR"
+    assert rows["1.2.0"].attempts == 1
+    assert rows["1.1.0"].status == "OK"
+    del p1
