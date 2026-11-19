@@ -470,7 +470,7 @@ def _change_summary(repository: str, cached: SpChangeSummary | None) -> ChangeSu
                 number=item.get("number"),
                 title=str(item.get("title", "")),
                 author=item.get("author"),
-                url=item.get("url"),
+                url=str(item.get("url", "")),
             )
             for item in cached.items
         ],

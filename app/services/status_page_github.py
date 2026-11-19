@@ -63,6 +63,17 @@ class GitHubNotFoundError(Exception):
     """GitHub answered 404 for the requested resource."""
 
 
+def _is_rate_limited(response: httpx.Response, remaining: int | None) -> bool:
+    """A 429, or a 403 that GitHub marks as a primary or secondary rate limit."""
+    if response.status_code == 429:
+        return True
+    if response.status_code != 403:
+        return False
+    if remaining == 0 or "retry-after" in response.headers:
+        return True
+    return "rate limit" in response.text.lower()
+
+
 class EnrichGitHub:
     """GitHub reader that stops before the rate limit eats into a reserve."""
 
@@ -91,8 +102,8 @@ class EnrichGitHub:
         raw = response.headers.get("x-ratelimit-remaining")
         if raw is not None and raw.isdigit():
             self._remaining = int(raw)
-        if response.status_code in (403, 429) and self._remaining == 0:
-            raise GitHubBudgetExhaustedError("GitHub rate limit exhausted")
+        if _is_rate_limited(response, self._remaining):
+            raise GitHubBudgetExhaustedError("GitHub rate limit hit")
         if response.status_code == 404:
             raise GitHubNotFoundError(path)
         response.raise_for_status()

@@ -128,8 +128,13 @@ async def fetch_change_summary(
 ) -> ChangeResult:
     """Summary of what changed between two deployed versions; budget errors propagate."""
     from_ref = await resolve_tag(gh, repository, from_version)
+    if from_ref is None:
+        return ChangeResult(
+            status=STATUS_UNAVAILABLE,
+            error="versione non corrispondente a un tag",
+        )
     to_ref = await resolve_tag(gh, repository, to_version)
-    if from_ref is None or to_ref is None:
+    if to_ref is None:
         return ChangeResult(
             status=STATUS_UNAVAILABLE,
             from_ref=from_ref,

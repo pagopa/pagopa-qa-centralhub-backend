@@ -163,6 +163,16 @@ async def test_unresolved_tag_is_unavailable_without_compare() -> None:
 
 
 @pytest.mark.asyncio
+async def test_unresolved_from_tag_skips_resolving_to() -> None:
+    calls: list[str] = []
+    async with _gh(_router({}, tags={"1.1.0"}), calls) as c:
+        r = await fetch_change_summary(EnrichGitHub(c, 0), "svc", "9.9.9", "1.1.0")
+    assert r.status == "UNAVAILABLE"
+    assert len(calls) == 2  # only the two spellings of the from tag
+    assert not any("1.1.0" in p for p in calls)
+
+
+@pytest.mark.asyncio
 async def test_budget_error_propagates() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(403, headers={"x-ratelimit-remaining": "0"})

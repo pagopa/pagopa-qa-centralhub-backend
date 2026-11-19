@@ -82,7 +82,7 @@ class ChangeItemOut(BaseModel):
     number: int | None
     title: str
     author: str | None
-    url: str | None
+    url: str
 
 
 class ChangeSummaryOut(BaseModel):

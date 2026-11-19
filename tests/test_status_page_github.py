@@ -61,10 +61,36 @@ async def test_rate_limited_raises_budget(status: int) -> None:
 
 
 @pytest.mark.asyncio
-async def test_403_with_remaining_is_http_error() -> None:
-    t = httpx.MockTransport(lambda r: httpx.Response(403, headers=_rl(50)))
+async def test_plain_403_is_http_error() -> None:
+    t = httpx.MockTransport(
+        lambda r: httpx.Response(403, headers=_rl(50), json={"message": "Forbidden"})
+    )
     async with _client(t) as c:
         with pytest.raises(httpx.HTTPStatusError):
+            await EnrichGitHub(c, 10).get_json("/x")
+
+
+@pytest.mark.asyncio
+async def test_429_without_headers_raises_budget() -> None:
+    async with _client(httpx.MockTransport(lambda r: httpx.Response(429))) as c:
+        with pytest.raises(GitHubBudgetExhaustedError):
+            await EnrichGitHub(c, 10).get_json("/x")
+
+
+@pytest.mark.asyncio
+async def test_403_with_retry_after_raises_budget() -> None:
+    t = httpx.MockTransport(lambda r: httpx.Response(403, headers={"retry-after": "60", **_rl(50)}))
+    async with _client(t) as c:
+        with pytest.raises(GitHubBudgetExhaustedError):
+            await EnrichGitHub(c, 10).get_json("/x")
+
+
+@pytest.mark.asyncio
+async def test_403_with_secondary_rate_limit_message_raises_budget() -> None:
+    body = {"message": "You have exceeded a Secondary Rate Limit. Please wait."}
+    t = httpx.MockTransport(lambda r: httpx.Response(403, headers=_rl(50), json=body))
+    async with _client(t) as c:
+        with pytest.raises(GitHubBudgetExhaustedError):
             await EnrichGitHub(c, 10).get_json("/x")
 
 

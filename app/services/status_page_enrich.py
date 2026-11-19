@@ -27,6 +27,8 @@ logger = structlog.get_logger(__name__)
 ENRICH_LOCK_ID = 672
 MAX_ATTEMPTS = 3
 MAX_ERROR_LENGTH = 500
+# Consecutive transport / 5xx failures after which the run assumes GitHub is down and stops.
+MAX_CONSECUTIVE_OUTAGES = 3
 
 
 _EMPTY_SUMMARY: dict[str, Any] = {
@@ -40,7 +42,38 @@ _EMPTY_SUMMARY: dict[str, Any] = {
 
 
 def _zeros() -> dict[str, int]:
-    return {"summaries": 0, "stacks": 0, "stopped_by_budget": 0}
+    # ``stopped_by_budget``: the rate-limit budget ran out. ``stopped_by_errors``: the circuit
+    # breaker opened after repeated transport errors or GitHub 5xx responses.
+    return {"summaries": 0, "stacks": 0, "stopped_by_budget": 0, "stopped_by_errors": 0}
+
+
+class GitHubOutageError(Exception):
+    """Raised when too many consecutive items failed with transport errors or GitHub 5xx."""
+
+
+class _Breaker:
+    """Counts consecutive outage-type failures; a success (or any other outcome) resets it."""
+
+    def __init__(self) -> None:
+        self._streak = 0
+
+    def success(self) -> None:
+        self._streak = 0
+
+    def failure(self, exc: Exception) -> None:
+        """Record a failed item; raise ``GitHubOutageError`` when it trips the breaker."""
+        if not _is_outage(exc):
+            self._streak = 0
+            return
+        self._streak += 1
+        if self._streak >= MAX_CONSECUTIVE_OUTAGES:
+            raise GitHubOutageError(_error_text(exc)) from exc
+
+
+def _is_outage(exc: Exception) -> bool:
+    if isinstance(exc, httpx.TransportError):
+        return True
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code >= 500
 
 
 def _error_text(exc: Exception) -> str:
@@ -120,7 +153,12 @@ async def _pending_stacks(db: AsyncSession, limit: int) -> list[tuple[str, str]]
 
 
 async def _store_summary(
-    db: AsyncSession, repository: str, from_version: str, to_version: str, gh: EnrichGitHub
+    db: AsyncSession,
+    repository: str,
+    from_version: str,
+    to_version: str,
+    gh: EnrichGitHub,
+    breaker: _Breaker,
 ) -> None:
     error: str | None
     try:
@@ -128,10 +166,12 @@ async def _store_summary(
     except GitHubBudgetExhaustedError:
         raise
     except Exception as exc:  # noqa: BLE001
+        breaker.failure(exc)
         logger.warning("status_page_summary_failed", repository=repository, error=str(exc))
         status, error = "ERROR", _error_text(exc)
         fields: dict[str, Any] = dict(_EMPTY_SUMMARY)
     else:
+        breaker.success()
         status, error = result.status, result.error
         fields = {
             "direction": result.direction,
@@ -205,15 +245,18 @@ async def _write_summary(
 
 
 async def _store_stack(
-    db: AsyncSession, repository: str, repo_version: str, gh: EnrichGitHub
+    db: AsyncSession, repository: str, repo_version: str, gh: EnrichGitHub, breaker: _Breaker
 ) -> None:
     try:
         result = await detect_stack(gh, repository, repo_version)
     except GitHubBudgetExhaustedError:
         raise
     except Exception as exc:  # noqa: BLE001
+        breaker.failure(exc)
         logger.warning("status_page_stack_failed", repository=repository, error=str(exc))
         result = StackResult(status="ERROR", error=_error_text(exc))
+    else:
+        breaker.success()
     try:
         await _write_stack(db, repository, repo_version, result)
     except SQLAlchemyError:
@@ -252,18 +295,23 @@ async def _write_stack(
 async def _process(db: AsyncSession, gh: EnrichGitHub) -> dict[str, int]:
     counters = _zeros()
     batch = settings.status_page_enrich_batch
+    breaker = _Breaker()
     try:
         for repository, from_version, to_version in await _pending_pairs(db, batch):
-            await _store_summary(db, repository, from_version, to_version, gh)
+            await _store_summary(db, repository, from_version, to_version, gh, breaker)
             counters["summaries"] += 1
         remaining = batch - counters["summaries"]
         for repository, repo_version in await _pending_stacks(db, remaining):
-            await _store_stack(db, repository, repo_version, gh)
+            await _store_stack(db, repository, repo_version, gh, breaker)
             counters["stacks"] += 1
     except GitHubBudgetExhaustedError:
         await db.rollback()
         counters["stopped_by_budget"] = 1
         logger.warning("status_page_enrichment_stopped_by_budget", **counters)
+    except GitHubOutageError:
+        await db.rollback()
+        counters["stopped_by_errors"] = 1
+        logger.warning("status_page_enrichment_stopped_by_errors", **counters)
     except Exception:
         await db.rollback()
         raise

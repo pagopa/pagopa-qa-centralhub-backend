@@ -7394,9 +7394,8 @@
             "nullable": true
           },
           "url": {
-            "title": "Url",
             "type": "string",
-            "nullable": true
+            "title": "Url"
           }
         },
         "type": "object",

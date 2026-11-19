@@ -42,6 +42,7 @@ class Ctx:
         self.summary_status = "OK"
         self.stack_status = "OK"
         self.budget_after: int | None = None
+        self.outcomes: list[str] = []
 
 
 @pytest_asyncio.fixture
@@ -79,6 +80,15 @@ def _fakes(c: Ctx) -> Any:
         c.summary_calls.append((repository, frm, to))
         if c.summary_status == "BOOM":
             raise httpx.ReadTimeout("x" * 600)
+        if c.outcomes:
+            outcome = c.outcomes.pop(0)
+            if outcome == "transport":
+                raise httpx.ConnectError("down")
+            if outcome == "5xx":
+                req = httpx.Request("GET", "https://api.github.com/x")
+                raise httpx.HTTPStatusError(
+                    "boom", request=req, response=httpx.Response(502, request=req)
+                )
         return ChangeResult(
             status=c.summary_status,
             direction="forward" if c.summary_status == "OK" else None,
@@ -234,12 +244,40 @@ async def test_budget_exhaustion_keeps_work_and_leaves_rest_pending(ctx: Ctx) ->
     await _repo_state(ctx, "1.2.0")
     ctx.budget_after = 1
     counters = await _run(ctx)
-    assert counters == {"summaries": 1, "stacks": 0, "stopped_by_budget": 1}
+    assert counters == {"summaries": 1, "stacks": 0, "stopped_by_budget": 1, "stopped_by_errors": 0}
     assert len(await _summaries(ctx)) == 1
     ctx.budget_after = None
     counters = await _run(ctx)
-    assert counters == {"summaries": 1, "stacks": 1, "stopped_by_budget": 0}
+    assert counters == {"summaries": 1, "stacks": 1, "stopped_by_budget": 0, "stopped_by_errors": 0}
     assert len(await _summaries(ctx)) == 2
+
+
+@pytest.mark.anyio
+async def test_three_consecutive_outages_stop_the_run_without_an_error_row_for_the_last(
+    ctx: Ctx,
+) -> None:
+    for i in range(5):
+        await _event(ctx, "DEV", f"1.{i}.0", f"1.{i + 1}.0", T0 + timedelta(hours=i))
+    ctx.outcomes = ["transport", "5xx", "transport"]
+    counters = await _run(ctx)
+    assert counters["stopped_by_errors"] == 1
+    assert counters["stopped_by_budget"] == 0
+    assert counters["summaries"] == 2
+    rows = await _summaries(ctx)
+    assert len(rows) == 2
+    assert all(r.status == "ERROR" and r.attempts == 1 for r in rows)
+    assert len(ctx.summary_calls) == 3
+
+
+@pytest.mark.anyio
+async def test_a_success_resets_the_outage_counter(ctx: Ctx) -> None:
+    for i in range(5):
+        await _event(ctx, "DEV", f"1.{i}.0", f"1.{i + 1}.0", T0 + timedelta(hours=i))
+    ctx.outcomes = ["transport", "transport", "ok", "transport", "transport"]
+    counters = await _run(ctx)
+    assert counters["stopped_by_errors"] == 0
+    assert counters["summaries"] == 5
+    assert len(await _summaries(ctx)) == 5
 
 
 @pytest.mark.anyio
@@ -269,7 +307,7 @@ async def test_no_token_makes_no_calls(ctx: Ctx, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(settings, "github_token", "")
     await _event(ctx, "DEV", "1.0.0", "1.1.0", T0)
     counters = await _run(ctx)
-    assert counters == {"summaries": 0, "stacks": 0, "stopped_by_budget": 0}
+    assert counters == {"summaries": 0, "stacks": 0, "stopped_by_budget": 0, "stopped_by_errors": 0}
     assert ctx.summary_calls == []
 
 
@@ -283,7 +321,7 @@ async def test_lock_held_skips_run(ctx: Ctx) -> None:
             counters = await _run(ctx)
         finally:
             await conn.execute(select(func.pg_advisory_unlock(svc.ENRICH_LOCK_ID)))
-    assert counters == {"summaries": 0, "stacks": 0, "stopped_by_budget": 0}
+    assert counters == {"summaries": 0, "stacks": 0, "stopped_by_budget": 0, "stopped_by_errors": 0}
     assert ctx.summary_calls == []
 
 
