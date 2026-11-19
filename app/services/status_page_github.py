@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import binascii
+import re
 from typing import Any
 from urllib.parse import quote
 
@@ -8,6 +10,49 @@ import httpx
 
 from app.config import settings
 from app.services.status_page_sources import GITHUB_API_BASE, GITHUB_OWNER, is_valid_repository
+
+_SAFE_PATH_RE = re.compile(r"^/[A-Za-z0-9._~%/\-:]*$")
+
+
+def _check_path(path: str) -> None:
+    """Reject anything that could leave the intended GitHub API endpoint."""
+    # The compare endpoint legitimately contains ``base...head``; drop that one separator
+    # before looking for ``..`` traversal.
+    probe = path.replace("...", "", 1) if "/compare/" in path else path
+    if (
+        not path.startswith("/")
+        or "//" in path
+        or ".." in probe
+        or "?" in path
+        or "#" in path
+        or not _SAFE_PATH_RE.fullmatch(path)
+    ):
+        raise ValueError(f"Unsafe GitHub API path: {path!r}")
+
+
+def _segment(value: str) -> str:
+    if value in ("", ".", ".."):
+        raise ValueError(f"Invalid GitHub API path segment: {value!r}")
+    return quote(value, safe="")
+
+
+def repo_path(repository: str, *segments: str) -> str:
+    """``/repos/pagopa/{repository}/...`` with every segment validated and quoted."""
+    if not is_valid_repository(repository):
+        raise ValueError(f"Invalid repository name: {repository!r}")
+    parts = [_segment(s) for s in segments]
+    return "/".join(["/repos", GITHUB_OWNER, quote(repository, safe=""), *parts])
+
+
+def contents_path(repository: str, file_path: str = "") -> str:
+    """Contents API path; the repository root listing when ``file_path`` is empty."""
+    segments = file_path.split("/") if file_path else []
+    return repo_path(repository, "contents", *segments)
+
+
+def compare_path(repository: str, base: str, head: str) -> str:
+    """Compare API path for ``base...head``; refs are validated and quoted."""
+    return f"{repo_path(repository, 'compare')}/{_segment(base)}...{_segment(head)}"
 
 
 class GitHubBudgetExhaustedError(Exception):
@@ -37,6 +82,7 @@ class EnrichGitHub:
         return headers
 
     async def _get(self, path: str, params: dict[str, str] | None = None) -> httpx.Response:
+        _check_path(path)
         if self._remaining is not None and self._remaining < self._reserve:
             raise GitHubBudgetExhaustedError("GitHub rate-limit budget below the reserve")
         response = await self._client.get(
@@ -64,19 +110,23 @@ class EnrichGitHub:
         data = response.json()
         if not isinstance(data, dict) or data.get("encoding") != "base64":
             return None
-        return base64.b64decode(data.get("content", "")).decode("utf-8", errors="replace")
+        try:
+            return base64.b64decode(data.get("content", "")).decode("utf-8", errors="replace")
+        except (binascii.Error, ValueError):
+            return None
 
 
 async def resolve_tag(gh: EnrichGitHub, repository: str, version: str) -> str | None:
     """The existing tag for ``version``, trying it as is and with the ``v`` toggled."""
-    if not is_valid_repository(repository):
+    if not version or not is_valid_repository(repository):
         return None
     alternate = version[1:] if version.startswith("v") else f"v{version}"
-    segment = quote(repository, safe="")
     for tag in (version, alternate):
-        if not tag:
+        try:
+            path = repo_path(repository, "git", "ref", "tags", tag)
+            _check_path(path)
+        except ValueError:
             continue
-        path = f"/repos/{GITHUB_OWNER}/{segment}/git/ref/tags/{quote(tag, safe='')}"
         try:
             await gh.get_json(path)
         except GitHubNotFoundError:

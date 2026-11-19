@@ -11,6 +11,9 @@ from app.services.status_page_github import (
     EnrichGitHub,
     GitHubBudgetExhaustedError,
     GitHubNotFoundError,
+    compare_path,
+    contents_path,
+    repo_path,
     resolve_tag,
 )
 
@@ -159,3 +162,74 @@ async def test_get_text_decodes_base64() -> None:
 async def test_get_text_404_none() -> None:
     async with _client(httpx.MockTransport(lambda r: httpx.Response(404))) as c:
         assert await EnrichGitHub(c, 100).get_text("/repos/pagopa/x/contents/f", "v1") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path", ["@evil.example/x", "/repos/../x", "/repos/x?a=b", "/repos//x", "/a#b", "/a b"]
+)
+async def test_unsafe_paths_rejected_without_request(path: str) -> None:
+    def handler(r: httpx.Request) -> httpx.Response:
+        raise AssertionError("no request expected")
+
+    async with _client(httpx.MockTransport(handler)) as c:
+        with pytest.raises(ValueError):
+            await EnrichGitHub(c, 100).get_json(path)
+
+
+def test_builders_encode_and_validate() -> None:
+    assert repo_path("repo", "git", "a/b") == "/repos/pagopa/repo/git/a%2Fb"
+    assert contents_path("repo") == "/repos/pagopa/repo/contents"
+    assert contents_path("repo", "src/a b.txt") == "/repos/pagopa/repo/contents/src/a%20b.txt"
+    assert compare_path("repo", "v1/x", "v2") == "/repos/pagopa/repo/compare/v1%2Fx...v2"
+    for bad in ("", ".", ".."):
+        with pytest.raises(ValueError):
+            repo_path("repo", bad)
+        with pytest.raises(ValueError):
+            compare_path("repo", bad, "v2")
+    with pytest.raises(ValueError):
+        repo_path("../x", "a")
+
+
+@pytest.mark.asyncio
+async def test_compare_path_is_accepted_by_get() -> None:
+    seen: list[str] = []
+
+    def handler(r: httpx.Request) -> httpx.Response:
+        seen.append(r.url.raw_path.decode())
+        return httpx.Response(200, json={}, headers=_rl(4000))
+
+    async with _client(httpx.MockTransport(handler)) as c:
+        await EnrichGitHub(c, 100).get_json(compare_path("repo", "v1", "v2"))
+    assert seen == ["/repos/pagopa/repo/compare/v1...v2"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_tag_empty_version_no_request() -> None:
+    def handler(r: httpx.Request) -> httpx.Response:
+        raise AssertionError("no request expected")
+
+    async with _client(httpx.MockTransport(handler)) as c:
+        assert await resolve_tag(EnrichGitHub(c, 100), "repo", "") is None
+        assert await resolve_tag(EnrichGitHub(c, 100), "repo", "..") is None
+
+
+@pytest.mark.asyncio
+async def test_get_text_malformed_base64_none() -> None:
+    body = {"content": "abc", "encoding": "base64"}
+    async with _client(httpx.MockTransport(lambda r: httpx.Response(200, json=body))) as c:
+        assert await EnrichGitHub(c, 100).get_text("/repos/pagopa/x/contents/f", "v1") is None
+
+
+@pytest.mark.asyncio
+async def test_no_authorization_header_without_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "github_token", "")
+    seen: list[httpx.Request] = []
+
+    def handler(r: httpx.Request) -> httpx.Response:
+        seen.append(r)
+        return httpx.Response(200, json={})
+
+    async with _client(httpx.MockTransport(handler)) as c:
+        await EnrichGitHub(c, 100).get_json("/x")
+    assert "Authorization" not in seen[0].headers
