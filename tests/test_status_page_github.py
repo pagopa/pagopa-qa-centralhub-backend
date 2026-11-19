@@ -233,3 +233,28 @@ async def test_no_authorization_header_without_token(monkeypatch: pytest.MonkeyP
     async with _client(httpx.MockTransport(handler)) as c:
         await EnrichGitHub(c, 100).get_json("/x")
     assert "Authorization" not in seen[0].headers
+
+
+@pytest.mark.asyncio
+async def test_list_dir_sends_ref_as_query_param() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(r: httpx.Request) -> httpx.Response:
+        seen.append(r)
+        return httpx.Response(200, json=[{"name": "Dockerfile", "type": "file"}])
+
+    async with _client(httpx.MockTransport(handler)) as c:
+        gh = EnrichGitHub(c, 100)
+        assert await gh.list_dir(contents_path("repo"), "v1.0.0") == [
+            {"name": "Dockerfile", "type": "file"}
+        ]
+    assert seen[0].url.path == "/repos/pagopa/repo/contents"
+    assert seen[0].url.params["ref"] == "v1.0.0"
+
+
+@pytest.mark.asyncio
+async def test_list_dir_404_and_non_list() -> None:
+    async with _client(httpx.MockTransport(lambda r: httpx.Response(404))) as c:
+        assert await EnrichGitHub(c, 100).list_dir("/repos/pagopa/r/contents", "v1") is None
+    async with _client(httpx.MockTransport(lambda r: httpx.Response(200, json={"a": 1}))) as c:
+        assert await EnrichGitHub(c, 100).list_dir("/repos/pagopa/r/contents", "v1") is None

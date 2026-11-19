@@ -101,6 +101,16 @@ class EnrichGitHub:
     async def get_json(self, path: str) -> Any:
         return (await self._get(path)).json()
 
+    async def list_dir(self, path: str, ref: str) -> list[dict[str, Any]] | None:
+        """Contents API directory listing at ``ref``; None on 404 or a non-directory."""
+        try:
+            data = (await self._get(path, params={"ref": ref})).json()
+        except GitHubNotFoundError:
+            return None
+        if not isinstance(data, list):
+            return None
+        return [item for item in data if isinstance(item, dict)]
+
     async def get_text(self, path: str, ref: str) -> str | None:
         """Decoded file content from a contents API ``path`` at ``ref``; None on 404."""
         try:
