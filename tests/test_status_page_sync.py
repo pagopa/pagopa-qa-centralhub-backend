@@ -657,3 +657,45 @@ async def test_patch_to_manual_then_sync_keeps_last_good_prod(
                 delete(AuditLog).where(AuditLog.resource_id.in_([str(i) for i in ids]))
             )
             await db.commit()
+
+
+@pytest.mark.anyio
+async def test_sync_task_enqueues_enrichment_after_success_and_failure() -> None:
+    import importlib
+
+    task_module = importlib.import_module("app.tasks.sync_status_page")
+    row = SpSyncStatus(id=1, status="OK", trigger="SCHEDULED", errors=[])
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def fake_session() -> Any:
+        yield object()
+
+    with (
+        patch("app.core.db.async_session", fake_session),
+        patch("app.services.status_page_sync.run_sync", AsyncMock(return_value=row)),
+        patch("app.tasks.enrich_status_page.enrich_status_page.delay") as delay,
+    ):
+        await task_module._async_sync("SCHEDULED", None)
+    delay.assert_called_once_with()
+
+    with (
+        patch("app.core.db.async_session", fake_session),
+        patch("app.services.status_page_sync.run_sync", AsyncMock(side_effect=RuntimeError("x"))),
+        patch("app.tasks.enrich_status_page.enrich_status_page.delay") as delay,
+        pytest.raises(RuntimeError),
+    ):
+        await task_module._async_sync("SCHEDULED", None)
+    delay.assert_called_once_with()
+
+    with (
+        patch("app.core.db.async_session", fake_session),
+        patch("app.services.status_page_sync.run_sync", AsyncMock(return_value=row)),
+        patch(
+            "app.tasks.enrich_status_page.enrich_status_page.delay",
+            side_effect=ConnectionError("broker down"),
+        ),
+    ):
+        payload = await task_module._async_sync("SCHEDULED", None)
+    assert payload["status"] == "OK"
