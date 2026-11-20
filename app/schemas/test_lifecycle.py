@@ -501,3 +501,15 @@ class TlIssueOut(BaseModel):
 class TlIssueUpdate(BaseModel):
     status: Literal["acknowledged", "resolved"]
     actor_email: str
+
+
+# ── Indice degli step ────────────────────────────────────────────────────────
+
+
+class TlStepPhraseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    keyword: Literal["given", "when", "then"]
+    text: str
+    occurrences: int
+    implemented: bool

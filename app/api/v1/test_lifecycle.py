@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
+from sqlalchemy import case, select
 
 from app.deps import DbDep
-from app.models.test_lifecycle import TlFeatureStatus, TlIssueKind, TlIssueStatus
+from app.models.test_lifecycle import (
+    TlFeatureStatus,
+    TlIssueKind,
+    TlIssueStatus,
+    TlStepPhrase,
+)
 from app.schemas.test_lifecycle import (
     TlCommentCreate,
     TlCommentOut,
@@ -29,6 +36,7 @@ from app.schemas.test_lifecycle import (
     TlScopeCreate,
     TlScopeOut,
     TlScopeUpdate,
+    TlStepPhraseOut,
     TlTransitionRequest,
     TlVersionOut,
 )
@@ -442,3 +450,28 @@ async def update_issue(issue_id: uuid.UUID, body: TlIssueUpdate, db: DbDep) -> T
         )
     except Exception as exc:
         raise _translate(exc) from exc
+
+
+@router.get("/steps", response_model=list[TlStepPhraseOut])
+async def search_steps(
+    db: DbDep,
+    q: str = "",
+    keyword: Literal["given", "when", "then"] | None = None,
+    limit: int = Query(10, ge=1, le=50),
+) -> list[TlStepPhraseOut]:
+    """Autocompletamento step: prefisso, poi sottostringa; a parità implementati e più usati."""
+    q = q.strip()
+    stmt = select(TlStepPhrase)
+    order = []
+    if q:
+        stmt = stmt.where(TlStepPhrase.text.icontains(q, autoescape=True))
+        order.append(case((TlStepPhrase.text.istartswith(q, autoescape=True), 0), else_=1))
+    if keyword:
+        stmt = stmt.where(TlStepPhrase.keyword == keyword)
+    stmt = stmt.order_by(
+        *order,
+        TlStepPhrase.implemented.desc(),
+        TlStepPhrase.occurrences.desc(),
+        TlStepPhrase.text,
+    ).limit(limit)
+    return [TlStepPhraseOut.model_validate(r) for r in (await db.execute(stmt)).scalars()]
