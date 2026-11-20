@@ -7,7 +7,14 @@ import pytest
 from sqlalchemy import delete, select, update
 
 from app.models.audit_log import AuditLog
-from app.models.test_lifecycle import TlFeature, TlPolarity, TlReviewComment, TlScenarioKind
+from app.models.test_lifecycle import (
+    TlFeature,
+    TlFeatureStatus,
+    TlFeatureVersion,
+    TlPolarity,
+    TlReviewComment,
+    TlScenarioKind,
+)
 from app.models.user import User
 from app.services.test_lifecycle.gherkin import (
     RenderFeature,
@@ -316,3 +323,68 @@ async def test_history_lists_events_and_versions_desc(client, scope, actor, revi
     assert items[-1]["actor"] == actor["email"]
     missing = await client.get(f"{BASE}/features/{uuid.uuid4()}/history")
     assert missing.status_code == 404
+
+
+async def test_feature_status_unchanged_when_already_published(client, scope, actor, reviewer):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    rev_id = uuid.UUID(detail["working_revision"]["id"])
+    async with TestSession() as s:
+        await s.execute(
+            update(TlFeature)
+            .where(TlFeature.id == uuid.UUID(detail["id"]))
+            .values(published_revision_id=rev_id, status=TlFeatureStatus.IMPLEMENTED)
+        )
+        await s.commit()
+
+    out = (await _do(client, detail, "submit", actor["email"])).json()
+    assert out["working_revision"]["status"] == "in_review"
+    assert out["status"] == "implemented"
+
+    out = (await _do(client, out, "request_changes", reviewer["email"], note="Rivedi")).json()
+    assert out["working_revision"]["status"] == "draft"
+    assert out["status"] == "implemented"
+
+    out = (await _do(client, out, "submit", actor["email"])).json()
+    out = (await _do(client, out, "approve", reviewer["email"])).json()
+    assert out["working_revision"]["status"] == "approved"
+    assert out["status"] == "implemented"
+
+
+async def test_second_approve_is_blocked_and_single_version(client, scope, actor, reviewer):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    out = (await _do(client, detail, "submit", actor["email"])).json()
+    assert (await _do(client, out, "approve", reviewer["email"])).status_code == 200
+    resp = await _do(client, out, "approve", reviewer["email"])
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "transition_not_allowed"
+    async with TestSession() as s:
+        versions = (
+            await s.execute(
+                select(TlFeatureVersion).where(
+                    TlFeatureVersion.feature_id == uuid.UUID(detail["id"])
+                )
+            )
+        ).scalars().all()
+    assert len(versions) == 1
+
+
+async def test_submit_on_non_draft_revision_returns_409(client, scope, actor, reviewer):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    out = (await _do(client, detail, "submit", actor["email"])).json()
+    resp = await _do(client, out, "submit", actor["email"])
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "transition_not_allowed"
+
+
+async def test_approve_on_draft_revision_returns_409(client, scope, actor, reviewer):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    resp = await _do(client, detail, "approve", reviewer["email"])
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "transition_not_allowed"
+
+
+async def test_transition_with_unknown_actor_returns_403(client, scope, actor, reviewer):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    resp = await _do(client, detail, "submit", "nessuno@example.test")
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "unknown_actor"
