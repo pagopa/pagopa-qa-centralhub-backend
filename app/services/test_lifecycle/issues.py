@@ -51,7 +51,38 @@ async def open_issue(
     deve tenere il lock di riga della feature o il lock advisory del sync, e rispettare l'ordine
     dei lock feature -> issue.
     """
-    key = detail.get("key")
+    existing = await find_open_issue(
+        db, kind=kind, feature_id=feature_id, path=path, key=detail.get("key")
+    )
+    if existing is not None:
+        existing.detail = detail
+        if revision_id is not None:
+            existing.revision_id = revision_id
+        if commit_sha is not None:
+            existing.commit_sha = commit_sha
+        return existing
+    issue = TlIssue(
+        kind=kind,
+        status=TlIssueStatus.OPEN,
+        feature_id=feature_id,
+        revision_id=revision_id,
+        path=path,
+        commit_sha=commit_sha,
+        detail=detail,
+    )
+    db.add(issue)
+    return issue
+
+
+async def find_open_issue(
+    db: AsyncSession,
+    *,
+    kind: TlIssueKind,
+    feature_id: uuid.UUID | None,
+    path: str | None,
+    key: Any,
+) -> TlIssue | None:
+    """L'anomalia `open` con identità `(kind, feature_id, path, detail.key)`, se esiste."""
     candidates = (
         await db.execute(
             select(TlIssue)
@@ -66,25 +97,7 @@ async def open_issue(
             .order_by(TlIssue.created_at, TlIssue.id)
         )
     ).scalars()
-    for existing in candidates:
-        if (existing.detail or {}).get("key") == key:
-            existing.detail = detail
-            if revision_id is not None:
-                existing.revision_id = revision_id
-            if commit_sha is not None:
-                existing.commit_sha = commit_sha
-            return existing
-    issue = TlIssue(
-        kind=kind,
-        status=TlIssueStatus.OPEN,
-        feature_id=feature_id,
-        revision_id=revision_id,
-        path=path,
-        commit_sha=commit_sha,
-        detail=detail,
-    )
-    db.add(issue)
-    return issue
+    return next((i for i in candidates if (i.detail or {}).get("key") == key), None)
 
 
 async def resolve_issues(
@@ -111,6 +124,47 @@ async def resolve_issues(
         if actor is not None:
             issue.updated_by = actor.email
     return rows
+
+
+async def resolve_feature_issues(
+    db: AsyncSession, *, kind: TlIssueKind, feature_id: uuid.UUID
+) -> list[TlIssue]:
+    """Risolve le anomalie `open` di quel tipo per la feature (azione di sistema). Nessun commit.
+
+    Il chiamante tiene il lock di riga della feature (ordine feature -> issue).
+    """
+    rows = list(
+        (
+            await db.execute(
+                select(TlIssue).where(
+                    TlIssue.feature_id == feature_id,
+                    TlIssue.kind == kind,
+                    TlIssue.status == TlIssueStatus.OPEN,
+                )
+            )
+        ).scalars()
+    )
+    for issue in rows:
+        issue.status = TlIssueStatus.RESOLVED
+    return rows
+
+
+async def count_unresolved(
+    db: AsyncSession, *, kind: TlIssueKind, feature_id: uuid.UUID
+) -> int:
+    """Anomalie non risolte (aperte o riconosciute) di quel tipo per la feature."""
+    await db.flush()
+    return (
+        await db.execute(
+            select(func.count())
+            .select_from(TlIssue)
+            .where(
+                TlIssue.feature_id == feature_id,
+                TlIssue.kind == kind,
+                TlIssue.status != TlIssueStatus.RESOLVED,
+            )
+        )
+    ).scalar_one()
 
 
 async def _to_out(

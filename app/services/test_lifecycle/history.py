@@ -28,6 +28,8 @@ from app.services.test_lifecycle.gherkin import (
 )
 
 RESOURCE_TYPE = "tl_feature"
+# Attore delle azioni di sistema (sync da Git): nessun utente, `actor_id` NULL negli eventi.
+SYSTEM_ACTOR = "qa-hub-sync"
 
 
 class VersionNotFoundError(Exception):
@@ -38,13 +40,16 @@ def record_event(
     db: AsyncSession,
     feature_id: uuid.UUID,
     action: str,
-    actor: User,
+    actor: User | None,
     detail: dict[str, Any],
 ) -> None:
-    """Scrive un evento di storico in `audit_logs` (unico punto di scrittura del modulo)."""
+    """Scrive un evento di storico in `audit_logs` (unico punto di scrittura del modulo).
+
+    `actor=None`: azione di sistema (sync da Git), registrata senza utente.
+    """
     db.add(
         AuditLog(
-            actor_id=actor.id,
+            actor_id=actor.id if actor is not None else None,
             action=action,
             resource_type=RESOURCE_TYPE,
             resource_id=str(feature_id),
@@ -98,8 +103,9 @@ async def snapshot(
     db: AsyncSession,
     feature: TlFeature,
     revision: TlFeatureRevision,
-    actor: User,
+    actor: User | None,
     origin: str = "hub",
+    commit_sha: str | None = None,
 ) -> TlFeatureVersion:
     """Crea la versione: metadati della revisione, scenari (tag + contenuto) e file generato."""
     render, rows = await build_render(db, feature, revision)
@@ -148,7 +154,8 @@ async def snapshot(
         revision_id=revision.id,
         origin=origin,
         snapshot=data,
-        actor=actor.email,
+        commit_sha=commit_sha,
+        actor=actor.email if actor is not None else SYSTEM_ACTOR,
     )
     db.add(version)
     await db.flush()

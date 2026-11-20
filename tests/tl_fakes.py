@@ -73,6 +73,26 @@ class FakeGitClient:
         self.branches[branch] = self._commit(files)
         return self.branches[branch]
 
+    def remove_file(self, path: str, branch: str | None = None) -> str:
+        """Delete `path` on `branch` (default base) directly; returns the new head sha."""
+        branch = branch or self.base
+        files = dict(self.commits[self.branches[branch]])
+        files.pop(path, None)
+        self.branches[branch] = self._commit(files)
+        return self.branches[branch]
+
+    def merge_pull(self, number: int) -> str:
+        """Merge the PR head into the base: files that differ on the head win. Returns the sha."""
+        pull = self.pulls[number]
+        files = dict(self.commits[self.branches[self.base]])
+        for path, entry in self.commits[self.branches[pull.head_branch]].items():
+            if files.get(path, (None,))[0] != entry[0]:
+                files[path] = entry
+        sha = self._commit(files)
+        self.branches[self.base] = sha
+        self.set_pull_state(number, "merged", sha)
+        return sha
+
     def files(self, branch: str) -> dict[str, tuple[str, str]]:
         return self.commits[self.branches[branch]]
 
