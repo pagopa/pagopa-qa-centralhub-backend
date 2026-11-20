@@ -47,6 +47,15 @@ from app.models.status_page import (  # noqa: F401
     SpVersionState,
 )
 from app.models.suite import Suite
+from app.models.test_lifecycle import (  # noqa: F401
+    TlFeature,
+    TlFeatureRevision,
+    TlFeatureVersion,
+    TlReviewComment,
+    TlScenario,
+    TlScenarioContent,
+    TlScope,
+)
 from app.models.tm import ExternalResource, ResourceAbsence  # noqa: F401
 from app.models.user import User
 
@@ -88,4 +97,11 @@ __all__ = [
     "TestSuite",
     "TestRun",
     "TestExecution",
+    "TlScope",
+    "TlFeature",
+    "TlFeatureRevision",
+    "TlScenario",
+    "TlScenarioContent",
+    "TlFeatureVersion",
+    "TlReviewComment",
 ]
