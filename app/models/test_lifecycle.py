@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
     text,
 )
@@ -53,6 +54,22 @@ class TlPolarity(str, enum.Enum):
     NEGATIVO = "negativo"
 
 
+class TlIssueKind(str, enum.Enum):
+    STRUCTURAL_CHANGE = "structural_change"
+    NEW_SCENARIO_FROM_GIT = "new_scenario_from_git"
+    FILE_DELETED = "file_deleted"
+    UNKNOWN_FEATURE_CODE = "unknown_feature_code"
+    PARSE_ERROR = "parse_error"
+    PR_CLOSED_UNMERGED = "pr_closed_unmerged"
+    PR_CREATION_FAILED = "pr_creation_failed"
+
+
+class TlIssueStatus(str, enum.Enum):
+    OPEN = "open"
+    ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
+
+
 def _enum(cls: type[enum.Enum], name: str) -> ENUM:
     return ENUM(
         cls,
@@ -67,6 +84,8 @@ tl_feature_status_enum = _enum(TlFeatureStatus, "tl_feature_status")
 tl_revision_status_enum = _enum(TlRevisionStatus, "tl_revision_status")
 tl_scenario_kind_enum = _enum(TlScenarioKind, "tl_scenario_kind")
 tl_polarity_enum = _enum(TlPolarity, "tl_polarity")
+tl_issue_kind_enum = _enum(TlIssueKind, "tl_issue_kind")
+tl_issue_status_enum = _enum(TlIssueStatus, "tl_issue_status")
 
 
 def _uuid_pk() -> Mapped[uuid.UUID]:
@@ -142,6 +161,8 @@ class TlFeature(Base):
     next_scenario_number: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"
     )
+    git_path: Mapped[str | None] = mapped_column(String(500))
+    git_blob_sha: Mapped[str | None] = mapped_column(String(64))
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
@@ -181,6 +202,19 @@ class TlFeatureRevision(Base):
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String(255))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    origin: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="hub", server_default="hub"
+    )  # "hub" | "git"
+    pr_number: Mapped[int | None] = mapped_column(Integer)
+    pr_url: Mapped[str | None] = mapped_column(String(1024))
+    pr_branch: Mapped[str | None] = mapped_column(String(255))
+    pr_state: Mapped[str | None] = mapped_column(String(10))  # open | merged | closed
+    pr_error: Mapped[str | None] = mapped_column(Text)
+    base_commit_sha: Mapped[str | None] = mapped_column(String(64))
+    merged_commit_sha: Mapped[str | None] = mapped_column(String(64))
+    base_stale: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
 
@@ -271,3 +305,61 @@ class TlReviewComment(Base):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
     created_at: Mapped[datetime] = _created_at()
+
+
+class TlIssue(Base):
+    __tablename__ = "tl_issues"
+    __table_args__ = (
+        Index("ix_tl_issues_status_created_at", "status", "created_at"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    feature_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(f"{SCHEMA}.tl_features.id", ondelete="CASCADE")
+    )
+    revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(f"{SCHEMA}.tl_feature_revisions.id", ondelete="SET NULL")
+    )
+    kind: Mapped[TlIssueKind] = mapped_column(tl_issue_kind_enum, nullable=False)
+    status: Mapped[TlIssueStatus] = mapped_column(
+        tl_issue_status_enum, nullable=False, default=TlIssueStatus.OPEN
+    )
+    path: Mapped[str | None] = mapped_column(String(500))
+    commit_sha: Mapped[str | None] = mapped_column(String(64))
+    detail: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = _created_at()
+    updated_by: Mapped[str | None] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class TlGitSyncState(Base):
+    """Single row (id=1) holding the state of the last git sync run."""
+
+    __tablename__ = "tl_git_sync_state"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    last_main_sha: Mapped[str | None] = mapped_column(String(64))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class TlStepPhrase(Base):
+    __tablename__ = "tl_step_phrases"
+    __table_args__ = (
+        UniqueConstraint("keyword", "text", name="uq_tl_step_phrases_keyword_text"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    keyword: Mapped[str] = mapped_column(String(10), nullable=False)  # given | when | then
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    occurrences: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    implemented: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    updated_at: Mapped[datetime] = _updated_at()
