@@ -366,3 +366,114 @@ async def test_extra_tags_deduplicated(client, scope, actor):
 async def test_unknown_feature_returns_404(client):
     resp = await client.get(f"{BASE}/features/{uuid.uuid4()}")
     assert resp.status_code == 404
+
+
+async def _set_status(rev_id: str, status):
+    from app.models.test_lifecycle import TlFeatureRevision
+
+    async with TestSession() as s:
+        rev = await s.get(TlFeatureRevision, uuid.UUID(rev_id))
+        rev.status = status
+        await s.commit()
+
+
+async def test_extra_tags_null_returns_422(client, scope, actor):
+    feat = await _new_feature(client, scope, actor)
+    rev = feat["working_revision"]["id"]
+    sc = await _new_scenario(client, feat, actor)
+    resp = await client.patch(
+        f"{BASE}/features/{feat['id']}/revisions/{rev}/scenarios/{sc['id']}",
+        json={"actor_email": actor["email"], "lock_version": 1, "extra_tags": None},
+    )
+    assert resp.status_code == 422
+
+
+async def test_scenario_writes_on_non_draft_revision_return_409(client, scope, actor):
+    from app.models.test_lifecycle import TlRevisionStatus
+
+    feat = await _new_feature(client, scope, actor)
+    rev = feat["working_revision"]["id"]
+    sc = await _new_scenario(client, feat, actor)
+    await _set_status(rev, TlRevisionStatus.IN_REVIEW)
+    base = f"{BASE}/features/{feat['id']}/revisions/{rev}/scenarios"
+    responses = [
+        await client.post(base, json={"actor_email": actor["email"], "title": "x"}),
+        await client.patch(
+            f"{base}/{sc['id']}",
+            json={"actor_email": actor["email"], "lock_version": 1, "title": "y"},
+        ),
+        await client.delete(f"{base}/{sc['id']}", params={"actor_email": actor["email"]}),
+    ]
+    for resp in responses:
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "revision_locked"
+
+
+async def test_scenario_update_with_stale_lock_returns_409(client, scope, actor):
+    feat = await _new_feature(client, scope, actor)
+    rev = feat["working_revision"]["id"]
+    sc = await _new_scenario(client, feat, actor)
+    resp = await client.patch(
+        f"{BASE}/features/{feat['id']}/revisions/{rev}/scenarios/{sc['id']}",
+        json={"actor_email": actor["email"], "lock_version": 0, "title": "y"},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "stale_lock"
+
+
+async def test_unknown_owner_returns_422(client, scope, actor):
+    resp = await client.post(
+        f"{BASE}/features",
+        json={
+            "scope_id": scope["id"],
+            "title": "X",
+            "actor_email": actor["email"],
+            "design_owner_id": str(uuid.uuid4()),
+        },
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "unknown_user"
+
+
+async def test_scenario_of_other_feature_or_revision_returns_404(client, scope, actor):
+    a = await _new_feature(client, scope, actor)
+    b = await _new_feature(client, scope, actor, title="B")
+    sc_b = await _new_scenario(client, b, actor)
+    rev_a = a["working_revision"]["id"]
+    url = f"{BASE}/features/{a['id']}/revisions/{rev_a}/scenarios/{sc_b['id']}"
+    patch = await client.patch(
+        url, json={"actor_email": actor["email"], "lock_version": 0, "title": "y"}
+    )
+    delete = await client.delete(url, params={"actor_email": actor["email"]})
+    assert patch.status_code == 404
+    assert delete.status_code == 404
+    # revisione di un'altra feature nel path
+    cross = await client.delete(
+        f"{BASE}/features/{a['id']}/revisions/{b['working_revision']['id']}"
+        f"/scenarios/{sc_b['id']}",
+        params={"actor_email": actor["email"]},
+    )
+    assert cross.status_code == 404
+
+
+async def test_background_errors_populated(client, scope, actor):
+    feat = await _new_feature(client, scope, actor)
+    rev = feat["working_revision"]["id"]
+    resp = await client.patch(
+        f"{BASE}/features/{feat['id']}/revisions/{rev}",
+        json={
+            "lock_version": 0,
+            "actor_email": actor["email"],
+            "background_steps": "Dato qualcosa\nQuando fa altro",
+        },
+    )
+    assert resp.status_code == 200
+    errors = resp.json()["background_errors"]
+    assert errors and errors[0]["line"] == 2
+
+
+async def test_get_feature_accepts_actor_email(client, scope, actor):
+    feat = await _new_feature(client, scope, actor)
+    resp = await client.get(f"{BASE}/features/{feat['id']}", params={"actor_email": actor["email"]})
+    assert resp.status_code == 200
+    assert resp.json()["transitions"] == []

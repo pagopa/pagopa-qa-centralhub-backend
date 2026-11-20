@@ -247,7 +247,7 @@ class TlScenarioUpdate(BaseModel):
 
     _v_tags = field_validator("extra_tags")(_check_extra_tags)
 
-    @field_validator("kind", "polarity", "steps", "position")
+    @field_validator("kind", "polarity", "steps", "position", "extra_tags")
     @classmethod
     def _v_not_null(cls, value: Any) -> Any:
         if value is None:
