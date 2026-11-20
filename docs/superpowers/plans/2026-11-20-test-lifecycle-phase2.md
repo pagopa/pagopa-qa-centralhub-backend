@@ -18,7 +18,7 @@
 ## Decisioni già prese
 
 - **Sync via polling** (risposta dell'utente: non si sa se l'hub è raggiungibile da GitHub). Un job Celery gira ogni `tl_sync_interval_s` (default 300) e c'è il pulsante "Sincronizza ora". Niente webhook in questa fase.
-- **Token dedicato** `tl_github_token` con permessi Contents RW e Pull requests RW sul repo dei test, separato da `github_token` (sola lettura) e da `tas_github_token` (Actions). Se è vuoto, il sync e la creazione delle PR sono disattivati con un messaggio esplicito.
+- **Token: si riusa quello esistente.** Il backend ha già `TAS_GITHUB_TOKEN` (secret `pagopa-platform-tas-github-bot-pat`, il bot del repo dei test). Si aggiunge l'impostazione `tl_github_token`; se è vuota si usa `tas_github_token`. Il bot deve avere anche Contents RW e Pull requests RW sul repo: se oggi ha solo Actions, l'utente estende i permessi del PAT, senza modifiche al codice. Il sync gira nel **worker** Celery, i cui values helm oggi non montano `TAS_GITHUB_TOKEN`: il Task 8 lo aggiunge. Se non c'è nessun token, sync e PR sono disattivati con un messaggio esplicito.
 - **File gestiti** = file `.feature` la cui prima riga è `# qa-hub: <codice>`. Gli altri file del repo sono ignorati fino alla migrazione (fase 5).
 - **Il sync verso Confluence (`syncFeatureFile.yaml`) resta acceso.** Si spegne in fase 5, a migrazione conclusa (spec §12).
 - **La PR non si mergia dall'hub.** Il merge resta su GitHub, con la review dei CODEOWNERS.
@@ -27,7 +27,7 @@
 
 - Migrazione Alembic `0037`, `down_revision = "0036"`; tabelle nuove nello schema `qachub` con prefisso `tl_`; enum come nella fase 1 (`create_type=False`, tipo creato nella migrazione).
 - Settings nuovi in `app/config.py`:
-  - `tl_github_token: str = ""`
+  - `tl_github_token: str = ""` (vuoto → si usa `tas_github_token`)
   - `tl_repo: str = "pagopa/pagopa-platform-integration-test"`
   - `tl_base_branch: str = "main"`
   - `tl_sync_interval_s: float = 300.0`
@@ -79,7 +79,7 @@
 - Produces:
   - `class TlGitError(Exception)` con `status: int`, `message: str`
   - `class TlGitNotConfigured(Exception)`
-  - `def get_git_client() -> TlGitClient` (solleva `TlGitNotConfigured` se il token è vuoto)
+  - `def get_git_client() -> TlGitClient`: token `settings.tl_github_token or settings.tas_github_token`; se entrambi sono vuoti solleva `TlGitNotConfigured`
   - `class TlGitClient(token, repo)` con metodi async:
     - `head_sha(branch) -> str`
     - `branch_exists(branch) -> bool`
@@ -101,7 +101,8 @@
   - `test_compare_maps_renamed_previous_path`;
   - `test_get_file_strips_bom`;
   - `test_error_carries_github_message`;
-  - `test_get_git_client_without_token_raises`.
+  - `test_get_git_client_without_token_raises`;
+  - `test_get_git_client_falls_back_to_tas_token`.
 - [ ] **Step 2: Eseguire** `uv run --extra dev pytest tests/test_tl_git_client.py -q`. Atteso: FAIL.
 - [ ] **Step 3: Implementare** (stile di `app/services/github.py`, header `X-GitHub-Api-Version: 2022-11-28`, timeout 30 s).
 - [ ] **Step 4: Eseguire.** Atteso: PASS.
@@ -314,6 +315,7 @@
 **Files:**
 - Create: `app/services/test_lifecycle/git_sync.py`, `app/tasks/sync_test_lifecycle.py`
 - Modify: `app/tasks/schedule.py` (voce beat `sync-test-lifecycle-git`, `schedule: settings.tl_sync_interval_s`, `options.expires` uguale), `app/api/v1/test_lifecycle.py`
+- Modify: `helm/values-worker-dev.yaml`, `helm/values-worker-uat.yaml`, `helm/values-worker-prod.yaml` (in `envSecret` aggiungere `TAS_GITHUB_TOKEN: "pagopa-platform-tas-github-bot-pat"`, come già fatto nei values del backend; in prod il backend non lo monta ancora e non serve per questo task)
 - Test: `tests/test_tl_git_sync.py`
 
 **Interfaces:**
