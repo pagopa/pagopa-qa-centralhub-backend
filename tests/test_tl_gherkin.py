@@ -52,7 +52,7 @@ def test_validate_steps_rejects_empty_steps():
 def test_validate_steps_outline_requires_examples():
     errs = validate_steps("Dato <a>", kind=OUT, examples=None)
     assert errs and "Esempi" in errs[0].message
-    errs = validate_steps("Dato <a>", kind=OUT, examples={"columns": ["a"], "rows": []})
+    errs = validate_steps("Dato <a>", kind=OUT, examples={"headers": ["a"], "rows": []})
     assert errs
 
 
@@ -60,14 +60,14 @@ def test_validate_steps_outline_placeholder_without_column():
     errs = validate_steps(
         "Dato un utente\nQuando chiama <flowid>",
         kind=OUT,
-        examples={"columns": ["altro"], "rows": [["1"]]},
+        examples={"headers": ["altro"], "rows": [["1"]]},
     )
     assert [e.line for e in errs] == [2]
     assert "flowid" in errs[0].message
 
 
 def test_validate_steps_outline_valid():
-    ex = {"columns": ["a", "b"], "rows": [["1", "2"], ["3", "4"]]}
+    ex = {"headers": ["a", "b"], "rows": [["1", "2"], ["3", "4"]]}
     assert validate_steps("Dato <a>\nQuando <b>", kind=OUT, examples=ex) == []
 
 
@@ -137,7 +137,7 @@ def _feature() -> RenderFeature:
                 extra_tags=[],
                 steps="Dato un flusso <flowid>\nAllora riceve <esito>",
                 examples={
-                    "columns": ["flowid", "esito"],
+                    "headers": ["flowid", "esito"],
                     "rows": [["a1", "errore"], ["b22", "rifiuto"]],
                 },
                 detail_link=None,

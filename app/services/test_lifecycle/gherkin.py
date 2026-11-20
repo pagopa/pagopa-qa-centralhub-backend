@@ -46,7 +46,7 @@ class GherkinError:
 def _example_table(examples: dict[str, Any] | None) -> tuple[list[str], list[list[str]]]:
     if not examples:
         return [], []
-    columns = [str(c) for c in (examples.get("columns") or [])]
+    columns = [str(c) for c in (examples.get("headers") or [])]
     rows = [[str(c) for c in row] for row in (examples.get("rows") or [])]
     return columns, rows
 
