@@ -13,7 +13,7 @@ from app.models.test_lifecycle import TlPolarity, TlScenarioKind
 from app.services.test_lifecycle.gherkin import (
     ALLOWED_EXTRA_TAGS,
     RenderFeature,
-    RenderScenario,
+    render_feature_file,
 )
 
 _IDENTITY_RE = re.compile(r"^@[A-Z0-9]+_\d{3}_\d{2}$")
@@ -129,7 +129,7 @@ def parse_feature_file(text: str) -> ParsedFeature:
         return ParsedFeature(code=code, feature_tag=None, errors=["Nessuna funzionalità trovata."])
 
     links = {
-        c["location"]["line"]: c["text"].strip()[len(_LINK_PREFIX) :]
+        c["location"]["line"]: c["text"].strip()[len(_LINK_PREFIX) :].strip()
         for c in doc.get("comments", [])
         if c["text"].strip().startswith(_LINK_PREFIX)
     }
@@ -141,6 +141,21 @@ def parse_feature_file(text: str) -> ParsedFeature:
         description=_description(feature.get("description")),
     )
     for child in feature.get("children", []):
+        if "rule" in child:
+            return ParsedFeature(
+                code=code,
+                feature_tag=parsed.feature_tag,
+                errors=["Le regole (Regola:) non sono supportate: usa solo Scenario e Contesto."],
+            )
+        if "scenario" in child and len(child["scenario"].get("examples", [])) > 1:
+            return ParsedFeature(
+                code=code,
+                feature_tag=parsed.feature_tag,
+                errors=[
+                    f"Riga {child['scenario']['location']['line']}: "
+                    "è ammessa una sola tabella Esempi per scenario."
+                ],
+            )
         if "background" in child:
             parsed.background_steps = _steps_text(child["background"]["steps"]) or None
         elif "scenario" in child:
@@ -186,8 +201,8 @@ def _norm(value: str | None) -> str:
     return (value or "").strip()
 
 
-def _diff_scenario(exp: RenderScenario, got: ParsedScenario) -> list[str]:
-    tag = exp.tag
+def _diff_scenario(exp: ParsedScenario, got: ParsedScenario) -> list[str]:
+    tag = exp.identity_tag
     out: list[str] = []
     if _norm(exp.title) != _norm(got.title):
         out.append(f"{tag}: titolo modificato.")
@@ -204,6 +219,39 @@ def _diff_scenario(exp: RenderScenario, got: ParsedScenario) -> list[str]:
     if _norm(exp.detail_link) != _norm(got.detail_link):
         out.append(f"{tag}: link di dettaglio modificato.")
     return out
+
+
+def _canonical(expected: RenderFeature) -> ParsedFeature:
+    """Il lato atteso passa dallo stesso render + parse del file reale: stessa normalizzazione."""
+    canon = parse_feature_file(render_feature_file(expected))
+    if canon.errors or len(canon.scenarios) != len(expected.scenarios):
+        # contenuto atteso non renderizzabile: si confronta il testo grezzo normalizzato
+        canon = ParsedFeature(
+            code=expected.code,
+            feature_tag=expected.feature_tag,
+            title=expected.title,
+            description=expected.description,
+            background_steps=expected.background_steps,
+            scenarios=[
+                ParsedScenario(
+                    identity_tag=sc.tag,
+                    all_tags=[sc.tag],
+                    title=sc.title,
+                    kind=sc.kind,
+                    polarity=sc.polarity,
+                    extra_tags=list(sc.extra_tags),
+                    steps=sc.steps,
+                    examples=sc.examples,
+                    detail_link=sc.detail_link,
+                    line=0,
+                )
+                for sc in expected.scenarios
+            ],
+        )
+    else:
+        for ps, sc in zip(canon.scenarios, expected.scenarios, strict=True):
+            ps.identity_tag = sc.tag
+    return canon
 
 
 def classify(
@@ -238,15 +286,16 @@ def classify(
             )
         )
 
-    if _norm(expected.title) != _norm(parsed.title):
+    canon = _canonical(expected)
+    if _norm(canon.title) != _norm(parsed.title):
         result.textual.append("Titolo della funzionalità modificato.")
-    if _norm(expected.description) != _norm(parsed.description):
+    if _norm(canon.description) != _norm(parsed.description):
         result.textual.append("Descrizione modificata.")
-    if _norm(expected.background_steps) != _norm(parsed.background_steps):
+    if _norm(canon.background_steps) != _norm(parsed.background_steps):
         result.textual.append("Contesto modificato.")
 
     prefix_re = re.compile(rf"^@{re.escape(scope_prefix.upper())}_{feature_number:03d}_\d{{2}}$")
-    known = {s.tag: s for s in expected.scenarios}
+    known = {s.identity_tag: s for s in canon.scenarios if s.identity_tag}
     seen: set[str] = set()
     for sc in parsed.scenarios:
         tag = sc.identity_tag
@@ -259,6 +308,16 @@ def classify(
                 )
             )
             continue
+        identities = [t for t in sc.all_tags if _IDENTITY_RE.match(t)]
+        if len(identities) > 1:
+            structural.append(
+                StructuralChange(
+                    "duplicate_identity",
+                    tag,
+                    f"Riga {sc.line}: lo scenario «{sc.title}» ha più tag identità "
+                    f"({', '.join(identities)}).",
+                )
+            )
         if not prefix_re.match(tag):
             structural.append(
                 StructuralChange(

@@ -132,3 +132,63 @@ def test_classify_unknown_extra_tag_is_textual():
     )
     assert r.textual
     assert r.structural == []
+
+
+def _roundtrip_clean(mutate):
+    exp = _expected()
+    mutate(exp)
+    r = classify(exp, parse_feature_file(render_feature_file(exp)), **KW)
+    assert (r.textual, r.structural, r.new_scenarios) == ([], [], [])
+
+
+def test_no_false_diff_docstring_indentation():
+    def m(e):
+        e.scenarios[0].steps = 'Dato un body\n  """\n  x\n    y\n  """\nQuando paga'
+
+    _roundtrip_clean(m)
+
+
+def test_no_false_diff_multiline_description():
+    _roundtrip_clean(lambda e: setattr(e, "description", "a\n  b"))
+
+
+def test_no_false_diff_crlf_and_inner_spaces():
+    def m(e):
+        e.scenarios[0].steps = "Dato  un   carrello\r\nQuando paga\r\nAllora vede la conferma"
+        e.background_steps = "Dati  un utente\r\n  E altro"
+
+    _roundtrip_clean(m)
+
+
+def test_no_false_diff_int_example_cells():
+    _roundtrip_clean(lambda e: e.scenarios[1].examples.update(rows=[[1, 2], [3, 4]]))
+
+
+def test_rule_is_parse_error():
+    p = parse_feature_file(
+        "# qa-hub: FEAT_001_FdR3\n# language: it\nFunzionalità: x\n"
+        "  Regola: r\n    Scenario: a\n      Dato b\n"
+    )
+    assert p.errors
+    assert p.scenarios == []
+
+
+def test_two_examples_blocks_is_parse_error():
+    text = GOLDEN + "\n    Esempi:\n      | flowid | esito |\n      | z | y |\n"
+    p = parse_feature_file(text)
+    assert p.errors
+    assert p.scenarios == []
+
+
+def test_two_identity_tags_is_structural():
+    r = classify(
+        _expected(),
+        _parsed(GOLDEN.replace("  @FDR3_001_01\n", "  @FDR3_001_01 @FDR3_001_09\n")),
+        **KW,
+    )
+    assert any(c.kind == "duplicate_identity" for c in r.structural)
+
+
+def test_detail_link_is_stripped():
+    p = _parsed(GOLDEN.replace("#link:req-1|Requisito", "#link:req-1|Requisito  "))
+    assert p.scenarios[0].detail_link == "req-1|Requisito"
