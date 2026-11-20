@@ -11,6 +11,7 @@ from app.schemas.test_lifecycle import (
     TlFeatureDetail,
     TlFeatureListItem,
     TlFeatureUpdate,
+    TlHistoryItem,
     TlRevisionOut,
     TlRevisionUpdate,
     TlScenarioCreate,
@@ -19,9 +20,13 @@ from app.schemas.test_lifecycle import (
     TlScopeCreate,
     TlScopeOut,
     TlScopeUpdate,
+    TlTransitionRequest,
+    TlVersionOut,
 )
 from app.services.test_lifecycle import features as features_svc
+from app.services.test_lifecycle import history as history_svc
 from app.services.test_lifecycle import scopes as scopes_svc
+from app.services.test_lifecycle import workflow as workflow_svc
 from app.services.test_lifecycle.actors import UnknownActorError
 
 router = APIRouter()
@@ -110,6 +115,21 @@ def _translate(exc: Exception) -> HTTPException:
             detail={
                 "code": "revision_locked",
                 "message": f"La revisione non è modificabile nello stato {exc.status.value}",
+            },
+        )
+    if isinstance(exc, history_svc.VersionNotFoundError):
+        return HTTPException(status_code=404, detail="Versione non trovata")
+    if isinstance(exc, workflow_svc.TransitionNotAllowedError):
+        return HTTPException(
+            status_code=409,
+            detail={"code": "transition_not_allowed", "reasons": exc.reasons},
+        )
+    if isinstance(exc, workflow_svc.NotReviewerError):
+        return HTTPException(
+            status_code=403,
+            detail={
+                "code": "not_reviewer",
+                "message": "Solo il reviewer assegnato può approvare o richiedere modifiche",
             },
         )
     raise exc
@@ -211,5 +231,42 @@ async def remove_scenario(
         return await features_svc.remove_scenario(
             db, feature_id, revision_id, scenario_id, actor_email
         )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post(
+    "/features/{feature_id}/revisions/{revision_id}/transitions",
+    response_model=TlFeatureDetail,
+)
+async def transition_revision(
+    feature_id: uuid.UUID, revision_id: uuid.UUID, body: TlTransitionRequest, db: DbDep
+) -> TlFeatureDetail:
+    """Transizione di workflow. Bloccata -> 409 con `reasons`; non reviewer -> 403.
+
+    `request_changes` senza nota è bloccata con 409 `transition_not_allowed` (nessuna
+    validazione di schema: la nota è obbligatoria solo per quell'azione).
+    """
+    try:
+        return await workflow_svc.apply_transition(
+            db, feature_id, revision_id, body.action, body.actor_email, body.note
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/features/{feature_id}/history", response_model=list[TlHistoryItem])
+async def feature_history(feature_id: uuid.UUID, db: DbDep) -> list[TlHistoryItem]:
+    try:
+        await features_svc.get_feature_detail(db, feature_id)
+        return await history_svc.list_history(db, feature_id)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/features/{feature_id}/versions/{version_id}", response_model=TlVersionOut)
+async def get_version(feature_id: uuid.UUID, version_id: uuid.UUID, db: DbDep) -> TlVersionOut:
+    try:
+        return await history_svc.get_version(db, feature_id, version_id)
     except Exception as exc:
         raise _translate(exc) from exc

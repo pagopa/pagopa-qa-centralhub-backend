@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import json
 import uuid
-from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.audit_log import AuditLog
 from app.models.test_lifecycle import (
     TlFeature,
     TlFeatureRevision,
@@ -31,7 +28,8 @@ from app.schemas.test_lifecycle import (
     TlScenarioOut,
     TlScenarioUpdate,
 )
-from app.services.test_lifecycle.actors import resolve_actor
+from app.services.test_lifecycle import history
+from app.services.test_lifecycle.actors import UnknownActorError, resolve_actor
 from app.services.test_lifecycle.gherkin import (
     feature_code,
     scenario_tag,
@@ -67,21 +65,6 @@ class RevisionLockedError(Exception):
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
-
-def _record_event(
-    db: AsyncSession, actor: User, action: str, feature: TlFeature, detail: dict[str, Any]
-) -> None:
-    """Scrive l'evento di storico (sostituibile da history.record_event, Task 5)."""
-    db.add(
-        AuditLog(
-            actor_id=actor.id,
-            action=action,
-            resource_type="tl_feature",
-            resource_id=str(feature.id),
-            detail=json.dumps(detail),
-        )
-    )
-
 
 async def _ensure_users(db: AsyncSession, ids: list[uuid.UUID | None]) -> None:
     wanted = {i for i in ids if i is not None}
@@ -244,8 +227,9 @@ async def create_feature(db: AsyncSession, data: TlFeatureCreate) -> uuid.UUID:
     db.add(revision)
     await db.flush()
     feature.working_revision_id = revision.id
-    _record_event(
-        db, actor, "tl.feature.created", feature, {"code": feature.code, "title": data.title}
+    history.record_event(
+        db, feature.id, "tl.feature.created", actor,
+        {"code": feature.code, "title": data.title},
     )
     await db.commit()
     return feature.id
@@ -263,8 +247,8 @@ async def update_feature(
     for key, value in changes.items():
         setattr(feature, key, value)
     if changes:
-        _record_event(
-            db, actor, "tl.feature.updated", feature,
+        history.record_event(
+            db, feature.id, "tl.feature.updated", actor,
             {k: (str(v) if v is not None else None) for k, v in changes.items()},
         )
     await db.commit()
@@ -274,7 +258,9 @@ async def update_feature(
 async def get_feature_detail(
     db: AsyncSession, feature_id: uuid.UUID, actor_email: str | None = None
 ) -> TlFeatureDetail:
-    # actor_email: usato dal Task 5 per calcolare `transitions`; per ora ignorato.
+    # import locale: workflow importa features (helper di lock/serializzazione)
+    from app.services.test_lifecycle import workflow
+
     row = (
         await db.execute(
             select(TlFeature, TlScope.code)
@@ -286,12 +272,19 @@ async def get_feature_detail(
         raise FeatureNotFoundError(str(feature_id))
     feature, scope_code = row
     working = published = None
+    working_rev = None
     if feature.working_revision_id:
-        rev = await db.get(TlFeatureRevision, feature.working_revision_id)
-        working = await _revision_out(db, rev) if rev else None
+        working_rev = await db.get(TlFeatureRevision, feature.working_revision_id)
+        working = await _revision_out(db, working_rev) if working_rev else None
     if feature.published_revision_id:
         rev = await db.get(TlFeatureRevision, feature.published_revision_id)
         published = await _revision_out(db, rev) if rev else None
+    actor: User | None = None
+    if actor_email:
+        try:
+            actor = await resolve_actor(db, actor_email)
+        except UnknownActorError:
+            actor = None
     return TlFeatureDetail(
         id=feature.id,
         code=feature.code,
@@ -309,7 +302,7 @@ async def get_feature_detail(
         updated_at=feature.updated_at,
         working_revision=working,
         published_revision=published,
-        transitions=[],
+        transitions=workflow.available_transitions(feature, working_rev, actor, working),
     )
 
 

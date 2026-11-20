@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import enum
 import re
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -329,4 +330,47 @@ class TlFeatureDetail(BaseModel):
     updated_at: datetime
     working_revision: TlRevisionOut | None = None
     published_revision: TlRevisionOut | None = None
-    transitions: list[Any] = []
+    transitions: list[TlTransitionOut] = []
+
+
+# ── Workflow e storico ────────────────────────────────────────────────────────
+
+class TlTransitionAction(str, enum.Enum):
+    SUBMIT = "submit"
+    APPROVE = "approve"
+    REQUEST_CHANGES = "request_changes"
+    REOPEN = "reopen"
+
+
+class TlTransitionRequest(BaseModel):
+    action: TlTransitionAction
+    actor_email: str
+    note: str | None = None
+
+
+class TlTransitionOut(BaseModel):
+    action: TlTransitionAction
+    allowed: bool
+    reasons: list[str] = []
+
+
+class TlHistoryItem(BaseModel):
+    kind: Literal["event", "version"]
+    at: datetime
+    actor: str | None = None
+    action: str | None = None
+    detail: dict[str, Any] | None = None
+    version_id: uuid.UUID | None = None
+
+
+class TlVersionOut(BaseModel):
+    id: uuid.UUID
+    feature_id: uuid.UUID
+    revision_id: uuid.UUID
+    origin: str
+    snapshot: dict[str, Any]
+    commit_sha: str | None = None
+    actor: str
+    created_at: datetime
+
+TlFeatureDetail.model_rebuild()

@@ -97,7 +97,10 @@ async def test_create_feature_assigns_code_and_draft_revision(client, scope, act
     assert rev["title"] == "Pagamento"
     assert rev["lock_version"] == 0
     assert feat["published_revision"] is None
-    assert feat["transitions"] == []
+    assert [t["action"] for t in feat["transitions"]] == [
+        "submit", "approve", "request_changes", "reopen"
+    ]
+    assert not any(t["allowed"] for t in feat["transitions"])
     async with TestSession() as s:
         logs = (
             await s.execute(
@@ -476,4 +479,4 @@ async def test_get_feature_accepts_actor_email(client, scope, actor):
     feat = await _new_feature(client, scope, actor)
     resp = await client.get(f"{BASE}/features/{feat['id']}", params={"actor_email": actor["email"]})
     assert resp.status_code == 200
-    assert resp.json()["transitions"] == []
+    assert len(resp.json()["transitions"]) == 4
