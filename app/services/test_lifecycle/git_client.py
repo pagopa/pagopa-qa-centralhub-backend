@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import quote
@@ -10,6 +11,9 @@ from urllib.parse import quote
 import httpx
 
 from app.config import settings
+
+_PAGE_SIZE = 100
+_SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 PullState = Literal["open", "merged", "closed"]
 FileStatus = Literal["added", "modified", "removed", "renamed"]
@@ -65,9 +69,16 @@ def _pull_from(data: dict[str, Any]) -> PullInfo:
     )
 
 
+def _json(resp: httpx.Response) -> Any:
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise TlGitError(502, "risposta GitHub non valida (JSON atteso)") from exc
+
+
 def _error_message(resp: httpx.Response) -> str:
     try:
-        msg = resp.json().get("message")
+        msg = _json(resp).get("message")
         if msg:
             return str(msg)
     except (ValueError, AttributeError):
@@ -115,7 +126,10 @@ class TlGitClient:
 
     async def head_sha(self, branch: str) -> str:
         resp = await self._request("GET", f"git/ref/heads/{quote(branch, safe='/')}")
-        return resp.json()["object"]["sha"]
+        try:
+            return _json(resp)["object"]["sha"]
+        except (KeyError, TypeError) as exc:
+            raise TlGitError(502, f"risposta GitHub non valida: {exc}") from exc
 
     async def branch_exists(self, branch: str) -> bool:
         resp = await self._request(
@@ -139,9 +153,16 @@ class TlGitClient:
         )
         if resp.status_code == 404:
             return None
-        data = resp.json()
-        raw = base64.b64decode(data["content"].replace("\n", ""))
-        return GitFile(path=path, text=raw.decode("utf-8-sig"), blob_sha=data["sha"])
+        data = _json(resp)
+        if isinstance(data, list):
+            raise TlGitError(400, "il percorso è una cartella")
+        if data.get("encoding") != "base64" or "content" not in data:
+            raise TlGitError(413, "file troppo grande")
+        try:
+            raw = base64.b64decode(data["content"].replace("\n", ""))
+            return GitFile(path=path, text=raw.decode("utf-8-sig"), blob_sha=data["sha"])
+        except (ValueError, KeyError) as exc:
+            raise TlGitError(502, f"contenuto del file non valido: {exc}") from exc
 
     async def put_file(
         self, path: str, text: str, branch: str, message: str, blob_sha: str | None = None
@@ -154,47 +175,62 @@ class TlGitClient:
         if blob_sha:
             body["sha"] = blob_sha
         resp = await self._request("PUT", f"contents/{quote(path, safe='/')}", json=body)
-        return resp.json()["commit"]["sha"]
+        return _json(resp)["commit"]["sha"]
 
     async def find_open_pull(self, head_branch: str) -> PullInfo | None:
         owner = self.repo.split("/", 1)[0]
         resp = await self._request(
             "GET", "pulls", params={"head": f"{owner}:{head_branch}", "state": "open"}
         )
-        pulls = resp.json()
+        pulls = _json(resp)
         return _pull_from(pulls[0]) if pulls else None
 
     async def create_pull(self, head: str, base: str, title: str, body: str) -> PullInfo:
         resp = await self._request(
             "POST", "pulls", json={"head": head, "base": base, "title": title, "body": body}
         )
-        return _pull_from(resp.json())
+        return _pull_from(_json(resp))
 
     async def get_pull(self, number: int) -> PullInfo:
         resp = await self._request("GET", f"pulls/{number}")
-        return _pull_from(resp.json())
+        return _pull_from(_json(resp))
 
     async def compare(self, base_sha: str, head_sha: str) -> list[ChangedFile]:
-        resp = await self._request("GET", f"compare/{base_sha}...{head_sha}")
         out: list[ChangedFile] = []
-        for f in resp.json().get("files", []):
-            status = f.get("status")
-            if status not in ("added", "removed", "renamed"):
-                status = "modified"
-            out.append(
-                ChangedFile(
-                    path=f["filename"],
-                    status=status,
-                    previous_path=f.get("previous_filename") if status == "renamed" else None,
-                )
+        page = 1
+        while True:
+            resp = await self._request(
+                "GET",
+                f"compare/{base_sha}...{head_sha}",
+                params={"per_page": str(_PAGE_SIZE), "page": str(page)},
             )
-        return out
+            files = _json(resp).get("files", [])
+            for f in files:
+                status = f.get("status")
+                if status not in ("added", "removed", "renamed"):
+                    status = "modified"
+                out.append(
+                    ChangedFile(
+                        path=f["filename"],
+                        status=status,
+                        previous_path=f.get("previous_filename") if status == "renamed" else None,
+                    )
+                )
+            if len(files) < _PAGE_SIZE:
+                return out
+            page += 1
 
     async def list_tree(self, ref: str) -> list[str]:
-        resp = await self._request(
-            "GET", f"git/trees/{quote(ref, safe='/')}", params={"recursive": "1"}
-        )
-        return [e["path"] for e in resp.json().get("tree", []) if e.get("type") == "blob"]
+        """Blob paths of the tree at `ref` (a commit sha, or a branch name resolved via head_sha).
+
+        Raises TlGitError if GitHub truncated the listing, so callers never act on partial data.
+        """
+        sha = ref if _SHA_RE.fullmatch(ref) else await self.head_sha(ref)
+        resp = await self._request("GET", f"git/trees/{sha}", params={"recursive": "1"})
+        data = _json(resp)
+        if data.get("truncated"):
+            raise TlGitError(502, "elenco dei file troncato da GitHub (repository troppo grande)")
+        return [e["path"] for e in data.get("tree", []) if e.get("type") == "blob"]
 
 
 def get_git_client() -> TlGitClient:

@@ -5,7 +5,6 @@ import httpx
 import pytest
 
 from app.config import settings
-from app.services.test_lifecycle import git_client
 from app.services.test_lifecycle.git_client import (
     TlGitClient,
     TlGitError,
@@ -115,7 +114,9 @@ async def test_get_file_returns_text_and_sha():
 
 async def test_get_file_strips_bom():
     def handler(req: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"content": b64(b"\xef\xbb\xbf# qa-hub: X"), "sha": "s"})
+        return httpx.Response(
+            200, json={"content": b64(b"\xef\xbb\xbf# qa-hub: X"), "encoding": "base64", "sha": "s"}
+        )
 
     f = await make_client(handler).get_file("x", "main")
     assert f.text == "# qa-hub: X"
@@ -237,20 +238,94 @@ async def test_compare_maps_renamed_previous_path():
     ]
 
 
-async def test_list_tree_returns_blobs_only():
+SHA40 = "a" * 40
+
+
+async def test_list_tree_resolves_branch_and_returns_blobs_only():
     def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/git/ref/heads/main"):
+            return httpx.Response(200, json={"object": {"sha": SHA40}})
+        assert req.url.path == f"/repos/org/repo/git/trees/{SHA40}"
         assert req.url.params["recursive"] == "1"
         return httpx.Response(
             200,
             json={
+                "truncated": False,
                 "tree": [
                     {"path": "a", "type": "tree"},
                     {"path": "a/b.feature", "type": "blob"},
-                ]
+                ],
             },
         )
 
     assert await make_client(handler).list_tree("main") == ["a/b.feature"]
+    assert await make_client(handler).list_tree(SHA40) == ["a/b.feature"]
+
+
+async def test_list_tree_truncated_raises():
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"truncated": True, "tree": []})
+
+    with pytest.raises(TlGitError):
+        await make_client(handler).list_tree(SHA40)
+
+
+async def test_compare_paginates():
+    def handler(req: httpx.Request) -> httpx.Response:
+        page = int(req.url.params["page"])
+        n = 100 if page == 1 else 5
+        return httpx.Response(
+            200,
+            json={"files": [{"filename": f"f{page}_{i}", "status": "added"} for i in range(n)]},
+        )
+
+    files = await make_client(handler).compare("a", "b")
+    assert len(files) == 105
+
+
+async def test_get_file_directory_raises():
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[{"name": "x", "type": "file"}])
+
+    with pytest.raises(TlGitError) as ei:
+        await make_client(handler).get_file("dir", "main")
+    assert "cartella" in ei.value.message
+
+
+async def test_get_file_too_large_raises():
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"content": "", "encoding": "none", "sha": "s"})
+
+    with pytest.raises(TlGitError) as ei:
+        await make_client(handler).get_file("big", "main")
+    assert "troppo grande" in ei.value.message
+
+
+async def test_invalid_utf8_and_non_json_raise_git_error():
+    def bad_utf8(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"content": b64(b"\xff\xfe"), "encoding": "base64", "sha": "s"}
+        )
+
+    with pytest.raises(TlGitError) as ei:
+        await make_client(bad_utf8).get_file("x", "main")
+    assert ei.value.status == 502
+
+    def not_json(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>")
+
+    with pytest.raises(TlGitError) as ei:
+        await make_client(not_json).get_pull(1)
+    assert ei.value.status == 502
+
+
+async def test_network_error_becomes_502():
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("boom")
+
+    with pytest.raises(TlGitError) as ei:
+        await make_client(handler).head_sha("main")
+    assert ei.value.status == 502
 
 
 async def test_error_carries_github_message():
@@ -294,12 +369,20 @@ def test_get_git_client_prefers_tl_token(monkeypatch):
     assert get_git_client().token == "tl-tok"  # noqa: S105
 
 
-def test_settings_defaults():
+def test_settings_defaults(monkeypatch):
     from app.config import Settings
 
-    s = Settings()
+    for name in (
+        "TL_GITHUB_TOKEN",
+        "TL_REPO",
+        "TL_BASE_BRANCH",
+        "TL_SYNC_INTERVAL_S",
+        "TL_HUB_BASE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    s = Settings(_env_file=None)
     assert s.tl_base_branch == "main"
     assert s.tl_sync_interval_s == 300.0
     assert s.tl_repo == "pagopa/pagopa-platform-integration-test"
-    assert hasattr(s, "tl_hub_base_url")
-    assert git_client.TlGitClient
+    assert s.tl_hub_base_url == ""
+    assert s.tl_github_token == ""
