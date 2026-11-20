@@ -14,13 +14,15 @@ from app.models.user import User
 from app.schemas.test_lifecycle import TlScenarioCreate
 from app.services.test_lifecycle import features as features_svc
 from tests._db import TestSession, get_test_db
+from tests.tl_fakes import uninstall_git
 
 BASE = "/api/v1/test-lifecycle"
 
 
 @pytest.fixture(autouse=True)
-def _use_test_db():
+def _use_test_db(monkeypatch):
     app.dependency_overrides[get_db] = get_test_db
+    uninstall_git(monkeypatch)  # no real GitHub calls; git tests install a FakeGitClient
     yield
     app.dependency_overrides.pop(get_db, None)
 
@@ -43,7 +45,10 @@ async def actor():
 @pytest.fixture
 async def scope(client, actor):
     code = "T" + uuid.uuid4().hex[:8]
-    resp = await client.post(f"{BASE}/scopes", json={"code": code, "name": "Ambito"})
+    resp = await client.post(
+        f"{BASE}/scopes",
+        json={"code": code, "name": "Ambito", "repo_folder": "features/ambito"},
+    )
     assert resp.status_code == 201
     data = resp.json()
     yield data

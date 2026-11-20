@@ -315,6 +315,13 @@ class TlRevisionOut(BaseModel):
     created_by: str
     approved_by: str | None = None
     approved_at: datetime | None = None
+    origin: str = "hub"
+    pr_number: int | None = None
+    pr_url: str | None = None
+    pr_state: Literal["open", "merged", "closed"] | None = None
+    pr_error: str | None = None
+    base_stale: bool = False
+    merged_commit_sha: str | None = None
     created_at: datetime
     updated_at: datetime
     scenarios: list[TlScenarioOut] = []
@@ -354,6 +361,8 @@ class TlFeatureDetail(BaseModel):
     working_revision: TlRevisionOut | None = None
     published_revision: TlRevisionOut | None = None
     transitions: list[TlTransitionOut] = []
+    git_path: str | None = None
+    open_issues: int = 0
 
 
 # ── Workflow e storico ────────────────────────────────────────────────────────
@@ -377,6 +386,10 @@ class TlTransitionRequest(BaseModel):
         if value is not None and len(value.strip()) > COMMENT_MAX_LEN:
             raise ValueError(f"La nota non può superare {COMMENT_MAX_LEN} caratteri")
         return value
+
+
+class TlPrRequest(BaseModel):
+    actor_email: str
 
 
 class TlTransitionOut(BaseModel):

@@ -212,6 +212,12 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
     },
     {
+        "key": "manage:tl_git",
+        "label": "Test Lifecycle (sincronizzazione Git, PR e anomalie)",
+        "category": "Test Lifecycle",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False},
+    },
+    {
         "key": "manage:tl_scopes",
         "label": "Test Lifecycle (gestione ambiti)",
         "category": "Test Lifecycle",

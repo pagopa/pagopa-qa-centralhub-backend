@@ -9,6 +9,8 @@ from app.models.test_lifecycle import (
     TlFeature,
     TlFeatureRevision,
     TlFeatureStatus,
+    TlIssue,
+    TlIssueStatus,
     TlRevisionStatus,
     TlScenario,
     TlScenarioContent,
@@ -183,6 +185,13 @@ async def _revision_out(db: AsyncSession, rev: TlFeatureRevision) -> TlRevisionO
         created_by=rev.created_by,
         approved_by=rev.approved_by,
         approved_at=rev.approved_at,
+        origin=rev.origin,
+        pr_number=rev.pr_number,
+        pr_url=rev.pr_url,
+        pr_state=rev.pr_state,
+        pr_error=rev.pr_error,
+        base_stale=rev.base_stale,
+        merged_commit_sha=rev.merged_commit_sha,
         created_at=rev.created_at,
         updated_at=rev.updated_at,
         scenarios=[_scenario_out(s, c) for s, c in rows],
@@ -313,14 +322,22 @@ async def get_feature_detail(
 
     row = (
         await db.execute(
-            select(TlFeature, TlScope.code)
+            select(TlFeature, TlScope)
             .join(TlScope, TlScope.id == TlFeature.scope_id)
             .where(TlFeature.id == feature_id)
         )
     ).first()
     if row is None:
         raise FeatureNotFoundError(str(feature_id))
-    feature, scope_code = row
+    feature, scope = row
+    scope_code = scope.code
+    open_issues = (
+        await db.execute(
+            select(func.count())
+            .select_from(TlIssue)
+            .where(TlIssue.feature_id == feature_id, TlIssue.status == TlIssueStatus.OPEN)
+        )
+    ).scalar_one()
     working = published = None
     working_rev = None
     if feature.working_revision_id:
@@ -352,7 +369,11 @@ async def get_feature_detail(
         updated_at=feature.updated_at,
         working_revision=working,
         published_revision=published,
-        transitions=workflow.available_transitions(feature, working_rev, actor, working),
+        transitions=workflow.available_transitions(
+            feature, working_rev, actor, working, scope
+        ),
+        git_path=feature.git_path,
+        open_issues=open_issues,
     )
 
 

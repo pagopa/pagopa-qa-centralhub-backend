@@ -9,7 +9,7 @@ def test_action_keys_match_catalog() -> None:
 
 
 def test_action_catalog_size() -> None:
-    assert len(ACTION_CATALOG) == 34
+    assert len(ACTION_CATALOG) == 35
 
 
 def test_quality_gate_report_is_readable_by_every_role_including_guest() -> None:
@@ -108,3 +108,11 @@ def test_test_lifecycle_actions_defaults() -> None:
     }
     for key in ("view:test_lifecycle", "edit:tl_feature", "review:tl_feature", "manage:tl_scopes"):
         assert by_key[key]["category"] == "Test Lifecycle"
+
+
+def test_tl_git_permission_defaults() -> None:
+    entry = next(e for e in ACTION_CATALOG if e["key"] == "manage:tl_git")
+    assert entry["category"] == "Test Lifecycle"
+    assert entry["defaults"] == {
+        "qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False,
+    }

@@ -17,6 +17,7 @@ from app.schemas.test_lifecycle import (
     TlGherkinValidateOut,
     TlGherkinValidateRequest,
     TlHistoryItem,
+    TlPrRequest,
     TlPreviewOut,
     TlRevisionOut,
     TlRevisionUpdate,
@@ -30,11 +31,14 @@ from app.schemas.test_lifecycle import (
     TlVersionOut,
 )
 from app.services.test_lifecycle import features as features_svc
+from app.services.test_lifecycle import git_client as git_client_mod
+from app.services.test_lifecycle import git_publish as git_publish_svc
 from app.services.test_lifecycle import history as history_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle import scopes as scopes_svc
 from app.services.test_lifecycle import workflow as workflow_svc
-from app.services.test_lifecycle.actors import UnknownActorError
+from app.services.test_lifecycle.actors import UnknownActorError, resolve_actor
+from app.services.test_lifecycle.git_client import TlGitError, TlGitNotConfigured
 
 router = APIRouter()
 
@@ -159,6 +163,37 @@ def _translate(exc: Exception) -> HTTPException:
                 ),
             },
         )
+    if isinstance(exc, TlGitNotConfigured):
+        return HTTPException(
+            status_code=503,
+            detail={
+                "code": "git_not_configured",
+                "message": "Integrazione Git non configurata: manca il token GitHub",
+            },
+        )
+    if isinstance(exc, TlGitError):
+        return HTTPException(
+            status_code=502, detail={"code": "github_error", "message": exc.message}
+        )
+    if isinstance(exc, git_publish_svc.PublishNotAllowedError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "pr_not_allowed",
+                "message": (
+                    "La PR si può (ri)creare solo per una revisione approvata "
+                    "senza PR aperta o mergiata"
+                ),
+            },
+        )
+    if isinstance(exc, git_publish_svc.RepoFolderMissingError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "repo_folder_missing",
+                "message": "L'ambito non ha una cartella del repository configurata",
+            },
+        )
     raise exc
 
 
@@ -279,6 +314,23 @@ async def transition_revision(
         return await workflow_svc.apply_transition(
             db, feature_id, revision_id, body.action, body.actor_email, body.note
         )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post(
+    "/features/{feature_id}/revisions/{revision_id}/pr",
+    response_model=TlFeatureDetail,
+)
+async def publish_revision_pr(
+    feature_id: uuid.UUID, revision_id: uuid.UUID, body: TlPrRequest, db: DbDep
+) -> TlFeatureDetail:
+    """(Ri)prova la creazione di branch, feature file e PR (permesso UI manage:tl_git o
+    edit:tl_feature). Senza token 503; errore GitHub 502 (salvato anche in `pr_error`)."""
+    try:
+        actor = await resolve_actor(db, body.actor_email)
+        client = git_client_mod.get_git_client()
+        return await git_publish_svc.publish_revision(db, feature_id, revision_id, actor, client)
     except Exception as exc:
         raise _translate(exc) from exc
 
