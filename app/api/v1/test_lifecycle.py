@@ -102,6 +102,11 @@ def _translate(exc: Exception) -> HTTPException:
             status_code=403,
             detail={"code": "unknown_actor", "message": "Utente non riconosciuto o non attivo"},
         )
+    if isinstance(exc, issues_svc.IssueAlreadyResolvedError):
+        return HTTPException(
+            status_code=409,
+            detail={"code": "issue_already_resolved", "message": "L'anomalia è già risolta"},
+        )
     if isinstance(exc, issues_svc.IssueNotFoundError):
         return HTTPException(status_code=404, detail="Anomalia non trovata")
     if isinstance(exc, features_svc.FeatureNotFoundError):

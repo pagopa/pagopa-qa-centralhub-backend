@@ -1,6 +1,7 @@
 # ruff: noqa: F811, S101
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from sqlalchemy import select, update
@@ -199,3 +200,56 @@ async def test_patch_rejects_invalid_status(client, scope, actor):
         f"{BASE}/issues/{iid}", json={"status": "open", "actor_email": actor["email"]}
     )
     assert resp.status_code == 422
+
+
+async def test_patch_idempotent_and_resolved_is_final(client, scope, actor):
+    feat = await _new_feature(client, scope, actor)
+    fid = uuid.UUID(feat["id"])
+    iid = await _open(kind=TlIssueKind.PARSE_ERROR, feature_id=fid, detail={})
+    body = {"status": "resolved", "actor_email": actor["email"]}
+    assert (await client.patch(f"{BASE}/issues/{iid}", json=body)).status_code == 200
+    again = await client.patch(f"{BASE}/issues/{iid}", json=body)
+    assert again.status_code == 200 and again.json()["status"] == "resolved"
+    back = await client.patch(
+        f"{BASE}/issues/{iid}", json={"status": "acknowledged", "actor_email": actor["email"]}
+    )
+    assert back.status_code == 409
+    assert back.json()["detail"]["code"] == "issue_already_resolved"
+    async with TestSession() as s:
+        actions = (
+            (await s.execute(select(AuditLog.action).where(AuditLog.resource_id == str(fid))))
+            .scalars()
+            .all()
+        )
+        assert actions.count("tl.issue.updated") == 1
+
+
+async def test_parallel_resolve_last_two_structural(client, scope, actor):
+    feat = await _new_feature(client, scope, actor)
+    fid = uuid.UUID(feat["id"])
+    async with TestSession() as s:
+        await s.execute(
+            update(TlFeature)
+            .where(TlFeature.id == fid)
+            .values(
+                status=TlFeatureStatus.DESIGNED,
+                published_revision_id=uuid.UUID(feat["working_revision"]["id"]),
+            )
+        )
+        await s.commit()
+    ids = [
+        await _open(kind=TlIssueKind.STRUCTURAL_CHANGE, feature_id=fid, detail={"key": k})
+        for k in "ab"
+    ]
+    body = {"status": "resolved", "actor_email": actor["email"]}
+    rs = await asyncio.gather(*(client.patch(f"{BASE}/issues/{i}", json=body) for i in ids))
+    assert [r.status_code for r in rs] == [200, 200]
+    async with TestSession() as s:
+        assert (await s.get(TlFeature, fid)).status == TlFeatureStatus.IMPLEMENTED
+        actions = (
+            (await s.execute(select(AuditLog.action).where(AuditLog.resource_id == str(fid))))
+            .scalars()
+            .all()
+        )
+        assert actions.count("tl.feature.implemented") == 1
+        assert actions.count("tl.issue.updated") == 2

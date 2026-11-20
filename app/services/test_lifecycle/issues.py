@@ -22,8 +22,15 @@ from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import history
 from app.services.test_lifecycle.actors import resolve_actor
 
+# Ordine globale dei lock di riga: feature -> issue (mai il contrario), per evitare deadlock
+# tra `update_issue` e i writer che aprono/aggiornano anomalie dopo aver bloccato la feature.
+
 
 class IssueNotFoundError(Exception):
+    pass
+
+
+class IssueAlreadyResolvedError(Exception):
     pass
 
 
@@ -40,7 +47,9 @@ async def open_issue(
     """Apre un'anomalia, riusando (e aggiornando) quella aperta con la stessa identità.
 
     Identità: `(kind, feature_id, path, detail.get("key"))`, solo tra le anomalie `open`.
-    Non esegue il commit: lo fa il chiamante.
+    Non esegue il commit: lo fa il chiamante. La deduplica non è imposta dal DB: il chiamante
+    deve tenere il lock di riga della feature o il lock advisory del sync, e rispettare l'ordine
+    dei lock feature -> issue.
     """
     key = detail.get("key")
     candidates = (
@@ -148,6 +157,14 @@ async def update_issue(
     db: AsyncSession, issue_id: uuid.UUID, new_status: TlIssueStatus, actor_email: str
 ) -> TlIssueOut:
     actor = await resolve_actor(db, actor_email)
+    feature_id = (
+        await db.execute(select(TlIssue.feature_id).where(TlIssue.id == issue_id))
+    ).one_or_none()
+    if feature_id is None:
+        raise IssueNotFoundError(str(issue_id))
+    locked_feature = (
+        await features_svc._lock_feature(db, feature_id[0]) if feature_id[0] is not None else None
+    )
     issue = (
         await db.execute(
             select(TlIssue)
@@ -156,13 +173,19 @@ async def update_issue(
             .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
-    if issue is None:
+    if issue is None or issue.feature_id != feature_id[0]:
         raise IssueNotFoundError(str(issue_id))
+    if issue.status == new_status:
+        await db.rollback()
+        return await _get_out(db, issue_id)
+    if issue.status == TlIssueStatus.RESOLVED:
+        await db.rollback()
+        raise IssueAlreadyResolvedError(str(issue_id))
     previous = issue.status
     issue.status = new_status
     issue.updated_by = actor.email
-    if issue.feature_id is not None:
-        feature = await features_svc._lock_feature(db, issue.feature_id)
+    if locked_feature is not None:
+        feature = locked_feature
         history.record_event(
             db,
             feature.id,
@@ -203,5 +226,9 @@ async def update_issue(
                     {"reason": "structural_changes_resolved", "issue_id": str(issue.id)},
                 )
     await db.commit()
+    return await _get_out(db, issue_id)
+
+
+async def _get_out(db: AsyncSession, issue_id: uuid.UUID) -> TlIssueOut:
     rows = (await db.execute(_title_query().where(TlIssue.id == issue_id))).all()
     return (await _to_out(db, [(r[0], r[1], r[2]) for r in rows]))[0]
