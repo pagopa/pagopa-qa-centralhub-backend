@@ -50,3 +50,25 @@ async def test_update_feature_visibility_rejects_unknown_key_without_writing(
 ) -> None:
     with pytest.raises(LookupError, match="Unknown feature: unknown"):
         await update_feature_visibility(db, "unknown", False)
+
+
+
+@pytest.mark.anyio
+async def test_test_lifecycle_feature_disabled_by_default(db: AsyncSession) -> None:
+    key = "test_lifecycle"
+    await db.execute(delete(FeatureVisibility).where(FeatureVisibility.key == key))
+    await db.commit()
+    try:
+        listing = await list_feature_visibility(db)
+        by_key = {item.key: item for item in listing.items}
+        assert by_key[key].enabled is False
+        assert by_key[key].route == "/test-lifecycle"
+        assert by_key[key].action == "view:test_lifecycle"
+        assert by_key["nrt_metrics"].enabled is True
+
+        await update_feature_visibility(db, key, True)
+        listing = await list_feature_visibility(db)
+        assert {item.key: item.enabled for item in listing.items}[key] is True
+    finally:
+        await db.execute(delete(FeatureVisibility).where(FeatureVisibility.key == key))
+        await db.commit()

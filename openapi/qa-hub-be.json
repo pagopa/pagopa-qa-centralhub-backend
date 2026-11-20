@@ -6711,6 +6711,1035 @@
           }
         }
       }
+    },
+    "/api/v1/test-lifecycle/scopes": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "List Scopes",
+        "operationId": "list_scopes_api_v1_test_lifecycle_scopes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TlScopeOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Scopes Api V1 Test Lifecycle Scopes Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Create Scope",
+        "operationId": "create_scope_api_v1_test_lifecycle_scopes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlScopeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlScopeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/scopes/{scope_id}": {
+      "patch": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Update Scope",
+        "operationId": "update_scope_api_v1_test_lifecycle_scopes__scope_id__patch",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Scope Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlScopeUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlScopeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "List Features",
+        "operationId": "list_features_api_v1_test_lifecycle_features_get",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Scope Id",
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Status",
+              "$ref": "#/components/schemas/TlFeatureStatus",
+              "nullable": true
+            }
+          },
+          {
+            "name": "owner_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Owner Id",
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TlFeatureListItem"
+                  },
+                  "title": "Response List Features Api V1 Test Lifecycle Features Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Create Feature",
+        "operationId": "create_feature_api_v1_test_lifecycle_features_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlFeatureCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlFeatureDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Get Feature",
+        "operationId": "get_feature_api_v1_test_lifecycle_features__feature_id__get",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "actor_email",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Actor Email",
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlFeatureDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Update Feature",
+        "operationId": "update_feature_api_v1_test_lifecycle_features__feature_id__patch",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlFeatureUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlFeatureDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}/revisions/{revision_id}": {
+      "patch": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Update Revision",
+        "operationId": "update_revision_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__patch",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlRevisionUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlRevisionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}/revisions/{revision_id}/scenarios": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Add Scenario",
+        "operationId": "add_scenario_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__scenarios_post",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlScenarioCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlScenarioOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}/revisions/{revision_id}/scenarios/{scenario_id}": {
+      "patch": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Update Scenario",
+        "operationId": "update_scenario_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__scenarios__scenario_id__patch",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          },
+          {
+            "name": "scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Scenario Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlScenarioUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlScenarioOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Remove Scenario",
+        "description": "Toglie lo scenario dalla revisione; il numero resta consumato. Ritorna la revisione.",
+        "operationId": "remove_scenario_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__scenarios__scenario_id__delete",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          },
+          {
+            "name": "scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Scenario Id"
+            }
+          },
+          {
+            "name": "actor_email",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Actor Email"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlRevisionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}/revisions/{revision_id}/transitions": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Transition Revision",
+        "description": "Transizione di workflow. Bloccata -> 409 con `reasons`; non reviewer -> 403.\n\n`request_changes` senza nota è bloccata con 409 `transition_not_allowed` (nessuna\nvalidazione di schema: la nota è obbligatoria solo per quell'azione).",
+        "operationId": "transition_revision_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__transitions_post",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlTransitionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlFeatureDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}/history": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Feature History",
+        "operationId": "feature_history_api_v1_test_lifecycle_features__feature_id__history_get",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TlHistoryItem"
+                  },
+                  "title": "Response Feature History Api V1 Test Lifecycle Features  Feature Id  History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}/versions/{version_id}": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Get Version",
+        "operationId": "get_version_api_v1_test_lifecycle_features__feature_id__versions__version_id__get",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlVersionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}/revisions/{revision_id}/comments": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "List Comments",
+        "operationId": "list_comments_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__comments_get",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TlCommentOut"
+                  },
+                  "title": "Response List Comments Api V1 Test Lifecycle Features  Feature Id  Revisions  Revision Id  Comments Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Add Comment",
+        "operationId": "add_comment_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__comments_post",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlCommentCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlCommentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/comments/{comment_id}": {
+      "patch": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Resolve Comment",
+        "operationId": "resolve_comment_api_v1_test_lifecycle_comments__comment_id__patch",
+        "parameters": [
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Comment Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlCommentResolve"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlCommentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}/revisions/{revision_id}/preview": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Preview Revision",
+        "operationId": "preview_revision_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__preview_get",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlPreviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/gherkin/validate": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Validate Gherkin",
+        "description": "Validazione live di un blocco di step: pura, nessuna dipendenza dal DB.",
+        "operationId": "validate_gherkin_api_v1_test_lifecycle_gherkin_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlGherkinValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlGherkinValidateOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -14108,6 +15137,1154 @@
           "test_object_version"
         ],
         "title": "TestSuiteOut"
+      },
+      "TlCommentCreate": {
+        "properties": {
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "scenario_id": {
+            "title": "Scenario Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "actor_email",
+          "body"
+        ],
+        "title": "TlCommentCreate"
+      },
+      "TlCommentOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Revision Id"
+          },
+          "scenario_id": {
+            "title": "Scenario Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "scenario_tag": {
+            "title": "Scenario Tag",
+            "type": "string",
+            "nullable": true
+          },
+          "author": {
+            "type": "string",
+            "title": "Author"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "resolved": {
+            "type": "boolean",
+            "title": "Resolved"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "revision_id",
+          "author",
+          "body",
+          "resolved",
+          "created_at"
+        ],
+        "title": "TlCommentOut"
+      },
+      "TlCommentResolve": {
+        "properties": {
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          },
+          "resolved": {
+            "type": "boolean",
+            "title": "Resolved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "actor_email",
+          "resolved"
+        ],
+        "title": "TlCommentResolve"
+      },
+      "TlExamples": {
+        "properties": {
+          "headers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Headers"
+          },
+          "rows": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Rows",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "headers"
+        ],
+        "title": "TlExamples"
+      },
+      "TlFeatureCreate": {
+        "properties": {
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Scope Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "design_owner_id": {
+            "title": "Design Owner Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope_id",
+          "title",
+          "actor_email"
+        ],
+        "title": "TlFeatureCreate"
+      },
+      "TlFeatureDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TlFeatureStatus"
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Scope Id"
+          },
+          "scope_code": {
+            "type": "string",
+            "title": "Scope Code"
+          },
+          "design_owner_id": {
+            "title": "Design Owner Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "reviewer_id": {
+            "title": "Reviewer Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "impl_owner_id": {
+            "title": "Impl Owner Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "jira_design_key": {
+            "title": "Jira Design Key",
+            "type": "string",
+            "nullable": true
+          },
+          "jira_impl_key": {
+            "title": "Jira Impl Key",
+            "type": "string",
+            "nullable": true
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "working_revision": {
+            "$ref": "#/components/schemas/TlRevisionOut",
+            "nullable": true
+          },
+          "published_revision": {
+            "$ref": "#/components/schemas/TlRevisionOut",
+            "nullable": true
+          },
+          "transitions": {
+            "items": {
+              "$ref": "#/components/schemas/TlTransitionOut"
+            },
+            "type": "array",
+            "title": "Transitions",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "number",
+          "status",
+          "scope_id",
+          "scope_code",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "TlFeatureDetail"
+      },
+      "TlFeatureListItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "$ref": "#/components/schemas/TlFeatureStatus"
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Scope Id"
+          },
+          "scope_code": {
+            "type": "string",
+            "title": "Scope Code"
+          },
+          "design_owner_id": {
+            "title": "Design Owner Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "reviewer_id": {
+            "title": "Reviewer Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "impl_owner_id": {
+            "title": "Impl Owner Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "scenario_count": {
+            "type": "integer",
+            "title": "Scenario Count",
+            "default": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "number",
+          "status",
+          "scope_id",
+          "scope_code",
+          "updated_at"
+        ],
+        "title": "TlFeatureListItem"
+      },
+      "TlFeatureStatus": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "in_review",
+          "designed",
+          "implemented",
+          "running"
+        ],
+        "title": "TlFeatureStatus"
+      },
+      "TlFeatureUpdate": {
+        "properties": {
+          "design_owner_id": {
+            "title": "Design Owner Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "reviewer_id": {
+            "title": "Reviewer Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "impl_owner_id": {
+            "title": "Impl Owner Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "jira_design_key": {
+            "title": "Jira Design Key",
+            "type": "string",
+            "nullable": true
+          },
+          "jira_impl_key": {
+            "title": "Jira Impl Key",
+            "type": "string",
+            "nullable": true
+          },
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "actor_email"
+        ],
+        "title": "TlFeatureUpdate"
+      },
+      "TlGherkinValidateOut": {
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/TlLineError"
+            },
+            "type": "array",
+            "title": "Errors",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "TlGherkinValidateOut"
+      },
+      "TlGherkinValidateRequest": {
+        "properties": {
+          "steps": {
+            "type": "string",
+            "title": "Steps"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TlScenarioKind",
+            "default": "scenario"
+          },
+          "examples": {
+            "$ref": "#/components/schemas/TlExamples",
+            "nullable": true
+          },
+          "background": {
+            "type": "boolean",
+            "title": "Background",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "steps"
+        ],
+        "title": "TlGherkinValidateRequest"
+      },
+      "TlHistoryItem": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "event",
+              "version"
+            ],
+            "title": "Kind"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "actor": {
+            "title": "Actor",
+            "type": "string",
+            "nullable": true
+          },
+          "action": {
+            "title": "Action",
+            "type": "string",
+            "nullable": true
+          },
+          "detail": {
+            "title": "Detail",
+            "additionalProperties": true,
+            "type": "object",
+            "nullable": true
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "at"
+        ],
+        "title": "TlHistoryItem"
+      },
+      "TlLineError": {
+        "properties": {
+          "line": {
+            "type": "integer",
+            "title": "Line"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "line",
+          "message"
+        ],
+        "title": "TlLineError"
+      },
+      "TlPolarity": {
+        "type": "string",
+        "enum": [
+          "positivo",
+          "negativo"
+        ],
+        "title": "TlPolarity"
+      },
+      "TlPreviewError": {
+        "properties": {
+          "scenario_tag": {
+            "title": "Scenario Tag",
+            "type": "string",
+            "nullable": true
+          },
+          "line": {
+            "type": "integer",
+            "title": "Line"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "line",
+          "message"
+        ],
+        "title": "TlPreviewError"
+      },
+      "TlPreviewOut": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "title": "File"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/TlPreviewError"
+            },
+            "type": "array",
+            "title": "Errors",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "TlPreviewOut"
+      },
+      "TlRevisionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TlRevisionStatus"
+          },
+          "lock_version": {
+            "type": "integer",
+            "title": "Lock Version"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string",
+            "nullable": true
+          },
+          "background_steps": {
+            "title": "Background Steps",
+            "type": "string",
+            "nullable": true
+          },
+          "requirements_url": {
+            "title": "Requirements Url",
+            "type": "string",
+            "nullable": true
+          },
+          "product_issue_key": {
+            "title": "Product Issue Key",
+            "type": "string",
+            "nullable": true
+          },
+          "reverse_engineering": {
+            "type": "boolean",
+            "title": "Reverse Engineering",
+            "default": false
+          },
+          "design_estimate_days": {
+            "title": "Design Estimate Days",
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "nullable": true
+          },
+          "impl_estimate_days": {
+            "title": "Impl Estimate Days",
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "nullable": true
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "approved_by": {
+            "title": "Approved By",
+            "type": "string",
+            "nullable": true
+          },
+          "approved_at": {
+            "title": "Approved At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "scenarios": {
+            "items": {
+              "$ref": "#/components/schemas/TlScenarioOut"
+            },
+            "type": "array",
+            "title": "Scenarios",
+            "default": []
+          },
+          "background_errors": {
+            "items": {
+              "$ref": "#/components/schemas/TlLineError"
+            },
+            "type": "array",
+            "title": "Background Errors",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "number",
+          "status",
+          "lock_version",
+          "title",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "TlRevisionOut"
+      },
+      "TlRevisionStatus": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "in_review",
+          "approved",
+          "merged",
+          "superseded"
+        ],
+        "title": "TlRevisionStatus"
+      },
+      "TlRevisionUpdate": {
+        "properties": {
+          "lock_version": {
+            "type": "integer",
+            "title": "Lock Version"
+          },
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "title": "Description",
+            "type": "string",
+            "nullable": true
+          },
+          "background_steps": {
+            "title": "Background Steps",
+            "type": "string",
+            "nullable": true
+          },
+          "requirements_url": {
+            "title": "Requirements Url",
+            "type": "string",
+            "maxLength": 1024,
+            "nullable": true
+          },
+          "product_issue_key": {
+            "title": "Product Issue Key",
+            "type": "string",
+            "nullable": true
+          },
+          "reverse_engineering": {
+            "title": "Reverse Engineering",
+            "type": "boolean",
+            "nullable": true
+          },
+          "design_estimate_days": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,4}|(?=[\\d.]{1,6}0*$)\\d{0,4}\\.\\d{0,1}0*$)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Design Estimate Days"
+          },
+          "impl_estimate_days": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,4}|(?=[\\d.]{1,6}0*$)\\d{0,4}\\.\\d{0,1}0*$)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impl Estimate Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lock_version",
+          "actor_email"
+        ],
+        "title": "TlRevisionUpdate"
+      },
+      "TlScenarioCreate": {
+        "properties": {
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TlScenarioKind",
+            "default": "scenario"
+          },
+          "polarity": {
+            "$ref": "#/components/schemas/TlPolarity",
+            "default": "positivo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "actor_email",
+          "title"
+        ],
+        "title": "TlScenarioCreate"
+      },
+      "TlScenarioKind": {
+        "type": "string",
+        "enum": [
+          "scenario",
+          "outline"
+        ],
+        "title": "TlScenarioKind"
+      },
+      "TlScenarioOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "tag": {
+            "type": "string",
+            "title": "Tag"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TlScenarioKind"
+          },
+          "polarity": {
+            "$ref": "#/components/schemas/TlPolarity"
+          },
+          "extra_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Extra Tags",
+            "default": []
+          },
+          "steps": {
+            "type": "string",
+            "title": "Steps"
+          },
+          "examples": {
+            "title": "Examples",
+            "additionalProperties": true,
+            "type": "object",
+            "nullable": true
+          },
+          "detail_link": {
+            "title": "Detail Link",
+            "type": "string",
+            "nullable": true
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/TlLineError"
+            },
+            "type": "array",
+            "title": "Errors",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "number",
+          "tag",
+          "position",
+          "title",
+          "kind",
+          "polarity",
+          "steps"
+        ],
+        "title": "TlScenarioOut"
+      },
+      "TlScenarioUpdate": {
+        "properties": {
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          },
+          "lock_version": {
+            "type": "integer",
+            "title": "Lock Version"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string",
+            "nullable": true
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TlScenarioKind",
+            "nullable": true
+          },
+          "polarity": {
+            "$ref": "#/components/schemas/TlPolarity",
+            "nullable": true
+          },
+          "extra_tags": {
+            "title": "Extra Tags",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "nullable": true
+          },
+          "steps": {
+            "title": "Steps",
+            "type": "string",
+            "nullable": true
+          },
+          "examples": {
+            "$ref": "#/components/schemas/TlExamples",
+            "nullable": true
+          },
+          "detail_link": {
+            "title": "Detail Link",
+            "type": "string",
+            "maxLength": 1024,
+            "nullable": true
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer",
+            "minimum": 1.0,
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "actor_email",
+          "lock_version"
+        ],
+        "title": "TlScenarioUpdate"
+      },
+      "TlScopeCreate": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "area": {
+            "title": "Area",
+            "type": "string",
+            "nullable": true
+          },
+          "repo_folder": {
+            "title": "Repo Folder",
+            "type": "string",
+            "nullable": true
+          },
+          "owner_team": {
+            "title": "Owner Team",
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "TlScopeCreate"
+      },
+      "TlScopeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "area": {
+            "title": "Area",
+            "type": "string",
+            "nullable": true
+          },
+          "repo_folder": {
+            "title": "Repo Folder",
+            "type": "string",
+            "nullable": true
+          },
+          "owner_team": {
+            "title": "Owner Team",
+            "type": "string",
+            "nullable": true
+          },
+          "next_feature_number": {
+            "type": "integer",
+            "title": "Next Feature Number"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "feature_count": {
+            "type": "integer",
+            "title": "Feature Count",
+            "default": 0
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status Counts",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "name",
+          "next_feature_number",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "TlScopeOut"
+      },
+      "TlScopeUpdate": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "title": "Name",
+            "type": "string",
+            "nullable": true
+          },
+          "area": {
+            "title": "Area",
+            "type": "string",
+            "nullable": true
+          },
+          "repo_folder": {
+            "title": "Repo Folder",
+            "type": "string",
+            "nullable": true
+          },
+          "owner_team": {
+            "title": "Owner Team",
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "title": "TlScopeUpdate"
+      },
+      "TlTransitionAction": {
+        "type": "string",
+        "enum": [
+          "submit",
+          "approve",
+          "request_changes",
+          "reopen"
+        ],
+        "title": "TlTransitionAction"
+      },
+      "TlTransitionOut": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/TlTransitionAction"
+          },
+          "allowed": {
+            "type": "boolean",
+            "title": "Allowed"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "allowed"
+        ],
+        "title": "TlTransitionOut"
+      },
+      "TlTransitionRequest": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/TlTransitionAction"
+          },
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "actor_email"
+        ],
+        "title": "TlTransitionRequest"
+      },
+      "TlVersionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "feature_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Feature Id"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Revision Id"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          },
+          "snapshot": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Snapshot"
+          },
+          "commit_sha": {
+            "title": "Commit Sha",
+            "type": "string",
+            "nullable": true
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "feature_id",
+          "revision_id",
+          "origin",
+          "snapshot",
+          "actor",
+          "created_at"
+        ],
+        "title": "TlVersionOut"
       },
       "TrendWeek": {
         "properties": {

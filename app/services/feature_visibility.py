@@ -4,7 +4,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.features import FEATURE_CATALOG, FEATURE_KEYS
+from app.core.features import DEFAULT_DISABLED_FEATURES, FEATURE_CATALOG, FEATURE_KEYS
 from app.models.feature_visibility import FeatureVisibility
 from app.schemas.feature_visibility import (
     FeatureVisibilityItem,
@@ -23,7 +23,12 @@ async def list_feature_visibility(db: AsyncSession) -> FeatureVisibilityResponse
             logger.info("list_feature_visibility query succeeded with 0 results; using defaults")
         return FeatureVisibilityResponse(
             items=[
-                FeatureVisibilityItem(**feature, enabled=enabled_by_key.get(feature["key"], True))
+                FeatureVisibilityItem(
+                    **feature,
+                    enabled=enabled_by_key.get(
+                        feature["key"], feature["key"] not in DEFAULT_DISABLED_FEATURES
+                    ),
+                )
                 for feature in FEATURE_CATALOG
             ]
         )
