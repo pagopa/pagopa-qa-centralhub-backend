@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 
 from app.deps import DbDep
-from app.models.test_lifecycle import TlFeatureStatus
+from app.models.test_lifecycle import TlFeatureStatus, TlIssueKind, TlIssueStatus
 from app.schemas.test_lifecycle import (
     TlCommentCreate,
     TlCommentOut,
@@ -17,8 +17,10 @@ from app.schemas.test_lifecycle import (
     TlGherkinValidateOut,
     TlGherkinValidateRequest,
     TlHistoryItem,
-    TlPrRequest,
+    TlIssueOut,
+    TlIssueUpdate,
     TlPreviewOut,
+    TlPrRequest,
     TlRevisionOut,
     TlRevisionUpdate,
     TlScenarioCreate,
@@ -34,6 +36,7 @@ from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_client as git_client_mod
 from app.services.test_lifecycle import git_publish as git_publish_svc
 from app.services.test_lifecycle import history as history_svc
+from app.services.test_lifecycle import issues as issues_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle import scopes as scopes_svc
 from app.services.test_lifecycle import workflow as workflow_svc
@@ -99,6 +102,8 @@ def _translate(exc: Exception) -> HTTPException:
             status_code=403,
             detail={"code": "unknown_actor", "message": "Utente non riconosciuto o non attivo"},
         )
+    if isinstance(exc, issues_svc.IssueNotFoundError):
+        return HTTPException(status_code=404, detail="Anomalia non trovata")
     if isinstance(exc, features_svc.FeatureNotFoundError):
         return HTTPException(status_code=404, detail="Feature non trovata")
     if isinstance(exc, features_svc.RevisionNotFoundError):
@@ -412,3 +417,23 @@ async def preview_revision(
 async def validate_gherkin(body: TlGherkinValidateRequest) -> TlGherkinValidateOut:
     """Validazione live di un blocco di step: pura, nessuna dipendenza dal DB."""
     return TlGherkinValidateOut(errors=reviews_svc.validate_block(body))
+
+
+@router.get("/issues", response_model=list[TlIssueOut])
+async def list_issues(
+    db: DbDep,
+    status: TlIssueStatus | None = None,
+    feature_id: uuid.UUID | None = None,
+    kind: TlIssueKind | None = None,
+) -> list[TlIssueOut]:
+    return await issues_svc.list_issues(db, status, feature_id, kind)
+
+
+@router.patch("/issues/{issue_id}", response_model=TlIssueOut)
+async def update_issue(issue_id: uuid.UUID, body: TlIssueUpdate, db: DbDep) -> TlIssueOut:
+    try:
+        return await issues_svc.update_issue(
+            db, issue_id, TlIssueStatus(body.status), body.actor_email
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc

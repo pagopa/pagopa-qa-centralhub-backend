@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.models.test_lifecycle import (
     TlFeatureStatus,
+    TlIssueKind,
+    TlIssueStatus,
     TlPolarity,
     TlRevisionStatus,
     TlScenarioKind,
@@ -475,3 +477,27 @@ class TlGherkinValidateOut(BaseModel):
 
 
 TlFeatureDetail.model_rebuild()
+
+
+# ── Anomalie ─────────────────────────────────────────────────────────────────
+
+
+class TlIssueOut(BaseModel):
+    id: uuid.UUID
+    feature_id: uuid.UUID | None = None
+    revision_id: uuid.UUID | None = None
+    kind: TlIssueKind
+    status: TlIssueStatus
+    path: str | None = None
+    commit_sha: str | None = None
+    detail: dict[str, Any] = {}
+    created_at: datetime
+    updated_by: str | None = None
+    updated_at: datetime
+    feature_code: str | None = None
+    feature_title: str | None = None
+
+
+class TlIssueUpdate(BaseModel):
+    status: Literal["acknowledged", "resolved"]
+    actor_email: str

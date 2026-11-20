@@ -9,16 +9,14 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.test_lifecycle import (
     TlFeature,
     TlFeatureRevision,
-    TlIssue,
     TlIssueKind,
-    TlIssueStatus,
     TlRevisionStatus,
     TlScope,
 )
@@ -26,6 +24,7 @@ from app.models.user import User
 from app.schemas.test_lifecycle import TlFeatureDetail
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import history
+from app.services.test_lifecycle import issues as issues_svc
 from app.services.test_lifecycle.gherkin import render_feature_file
 from app.services.test_lifecycle.git_client import TlGitClient, TlGitError
 
@@ -85,41 +84,6 @@ def pr_body(feature: TlFeature, revision: TlFeatureRevision, scenario_tags: list
     return "\n".join(lines) + "\n"
 
 
-def _create_issue(
-    db: AsyncSession,
-    feature: TlFeature,
-    revision: TlFeatureRevision,
-    kind: TlIssueKind,
-    detail: dict,
-    path: str | None = None,
-) -> TlIssue:
-    """Unico punto di creazione anomalie di questo modulo (sostituito da issues.open_issue)."""
-    issue = TlIssue(
-        feature_id=feature.id,
-        revision_id=revision.id,
-        kind=kind,
-        status=TlIssueStatus.OPEN,
-        path=path,
-        detail=detail,
-    )
-    db.add(issue)
-    return issue
-
-
-async def _open_failure_issues(db: AsyncSession, revision_id: uuid.UUID) -> list[TlIssue]:
-    return list(
-        (
-            await db.execute(
-                select(TlIssue).where(
-                    TlIssue.revision_id == revision_id,
-                    TlIssue.kind == TlIssueKind.PR_CREATION_FAILED,
-                    TlIssue.status == TlIssueStatus.OPEN,
-                )
-            )
-        ).scalars()
-    )
-
-
 async def record_not_configured(db: AsyncSession, revision_id: uuid.UUID) -> None:
     """Git non configurato: l'approvazione resta valida, nessuna anomalia (non è un guasto)."""
     rev = await db.get(TlFeatureRevision, revision_id)
@@ -161,11 +125,18 @@ async def _record_failure(
     feature = await features_svc._lock_feature(db, feature_id)
     rev = await features_svc._lock_revision(db, feature_id, revision_id)
     rev.pr_error = message
-    if not await _open_failure_issues(db, rev.id):
-        _create_issue(
-            db, feature, rev, TlIssueKind.PR_CREATION_FAILED,
-            {"error": message, "branch": branch, "revision_number": rev.number},
-        )
+    await issues_svc.open_issue(
+        db,
+        kind=TlIssueKind.PR_CREATION_FAILED,
+        feature_id=feature.id,
+        revision_id=rev.id,
+        detail={
+            "key": str(rev.id),  # al massimo un'anomalia aperta per revisione
+            "error": message,
+            "branch": branch,
+            "revision_number": rev.number,
+        },
+    )
     await db.commit()
     await db.refresh(rev)  # updated_at è calcolato dal DB: il chiamante serializza la revisione
 
@@ -247,9 +218,9 @@ async def publish_revision(
             rev.base_commit_sha = base_sha
         if feature.git_path is None:
             feature.git_path = path
-        for issue in await _open_failure_issues(db, rev.id):
-            issue.status = TlIssueStatus.RESOLVED
-            issue.updated_by = actor.email
+        await issues_svc.resolve_issues(
+            db, kind=TlIssueKind.PR_CREATION_FAILED, revision_id=rev.id, actor=actor
+        )
         history.record_event(
             db, feature.id, "tl.pr.created", actor,
             {
