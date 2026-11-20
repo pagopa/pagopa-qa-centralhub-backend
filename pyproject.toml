@@ -28,6 +28,7 @@ dependencies = [
     "requests>=2.34.2",
     "pyyaml>=6.0",
     "python-hcl2>=7",
+    "gherkin-official>=43.0.0",
 ]
 
 [project.optional-dependencies]
