@@ -315,7 +315,7 @@
 **Files:**
 - Create: `app/services/test_lifecycle/git_sync.py`, `app/tasks/sync_test_lifecycle.py`
 - Modify: `app/tasks/schedule.py` (voce beat `sync-test-lifecycle-git`, `schedule: settings.tl_sync_interval_s`, `options.expires` uguale), `app/api/v1/test_lifecycle.py`
-- Modify: `helm/values-worker-dev.yaml`, `helm/values-worker-uat.yaml`, `helm/values-worker-prod.yaml` (in `envSecret` aggiungere `TAS_GITHUB_TOKEN: "pagopa-platform-tas-github-bot-pat"`, come già fatto nei values del backend; in prod il backend non lo monta ancora e non serve per questo task)
+- Modify: `helm/values-worker-dev.yaml`, `helm/values-worker-uat.yaml`, `helm/values-worker-prod.yaml` (in `envSecret` aggiungere `TAS_GITHUB_TOKEN: "pagopa-platform-tas-github-bot-pat"`, come già fatto nei values del backend per dev, uat e prod)
 - Test: `tests/test_tl_git_sync.py`
 
 **Interfaces:**
