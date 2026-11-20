@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     # Comma-separated suites that can be launched; empty means any well-formed suite name.
     qg_launch_suites: str = ""
 
+    # Test Lifecycle git integration (empty tl_github_token falls back to tas_github_token).
+    tl_github_token: str = ""
+    tl_repo: str = "pagopa/pagopa-platform-integration-test"
+    tl_base_branch: str = "main"
+    tl_sync_interval_s: float = 300.0
+    # Public URL of the portal, used in PR body links.
+    tl_hub_base_url: str = ""
+
     # Flaky scenarios scoring (design: docs/superpowers/specs/2026-11-14-flaky-*-design.md)
     flaky_window_days: int = 30
     flaky_max_runs: int = 30

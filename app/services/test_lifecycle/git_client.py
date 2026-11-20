@@ -1,0 +1,204 @@
+"""GitHub write client for the Test Lifecycle git integration."""
+
+from __future__ import annotations
+
+import base64
+from dataclasses import dataclass
+from typing import Any, Literal
+from urllib.parse import quote
+
+import httpx
+
+from app.config import settings
+
+PullState = Literal["open", "merged", "closed"]
+FileStatus = Literal["added", "modified", "removed", "renamed"]
+
+
+class TlGitError(Exception):
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(f"GitHub {status}: {message}")
+        self.status = status
+        self.message = message
+
+
+class TlGitNotConfigured(Exception):  # noqa: N818 - name fixed by the interface
+    pass
+
+
+@dataclass(frozen=True)
+class GitFile:
+    path: str
+    text: str
+    blob_sha: str
+
+
+@dataclass(frozen=True)
+class PullInfo:
+    number: int
+    url: str
+    state: PullState
+    merge_commit_sha: str | None
+    head_branch: str
+
+
+@dataclass(frozen=True)
+class ChangedFile:
+    path: str
+    status: FileStatus
+    previous_path: str | None = None
+
+
+def _pull_from(data: dict[str, Any]) -> PullInfo:
+    if data.get("merged") or data.get("merged_at"):
+        state: PullState = "merged"
+    elif data.get("state") == "closed":
+        state = "closed"
+    else:
+        state = "open"
+    return PullInfo(
+        number=data["number"],
+        url=data.get("html_url", ""),
+        state=state,
+        merge_commit_sha=data.get("merge_commit_sha") if state == "merged" else None,
+        head_branch=(data.get("head") or {}).get("ref", ""),
+    )
+
+
+def _error_message(resp: httpx.Response) -> str:
+    try:
+        msg = resp.json().get("message")
+        if msg:
+            return str(msg)
+    except (ValueError, AttributeError):
+        pass  # noqa: S110 - non-JSON body, fall back to raw text
+    return resp.text or resp.reason_phrase or "error"
+
+
+class TlGitClient:
+    BASE_URL = "https://api.github.com"
+
+    def __init__(
+        self, token: str, repo: str, transport: httpx.AsyncBaseTransport | None = None
+    ) -> None:
+        self.token = token
+        self.repo = repo
+        self._transport = transport
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        ok_statuses: tuple[int, ...] = (),
+    ) -> httpx.Response:
+        url = f"{self.BASE_URL}/repos/{self.repo}/{path}"
+        try:
+            async with httpx.AsyncClient(transport=self._transport, timeout=30.0) as client:
+                resp = await client.request(
+                    method, url, params=params, json=json, headers=self._headers()
+                )
+        except httpx.HTTPError as exc:
+            raise TlGitError(502, f"GitHub non raggiungibile: {exc}") from exc
+        if resp.status_code >= 400 and resp.status_code not in ok_statuses:
+            raise TlGitError(resp.status_code, _error_message(resp))
+        return resp
+
+    async def head_sha(self, branch: str) -> str:
+        resp = await self._request("GET", f"git/ref/heads/{quote(branch, safe='/')}")
+        return resp.json()["object"]["sha"]
+
+    async def branch_exists(self, branch: str) -> bool:
+        resp = await self._request(
+            "GET", f"git/ref/heads/{quote(branch, safe='/')}", ok_statuses=(404,)
+        )
+        return resp.status_code != 404
+
+    async def create_branch(self, branch: str, from_sha: str) -> None:
+        resp = await self._request(
+            "POST",
+            "git/refs",
+            json={"ref": f"refs/heads/{branch}", "sha": from_sha},
+            ok_statuses=(422,),
+        )
+        if resp.status_code == 422 and "already exists" not in _error_message(resp):
+            raise TlGitError(422, _error_message(resp))
+
+    async def get_file(self, path: str, ref: str) -> GitFile | None:
+        resp = await self._request(
+            "GET", f"contents/{quote(path, safe='/')}", params={"ref": ref}, ok_statuses=(404,)
+        )
+        if resp.status_code == 404:
+            return None
+        data = resp.json()
+        raw = base64.b64decode(data["content"].replace("\n", ""))
+        return GitFile(path=path, text=raw.decode("utf-8-sig"), blob_sha=data["sha"])
+
+    async def put_file(
+        self, path: str, text: str, branch: str, message: str, blob_sha: str | None = None
+    ) -> str:
+        body: dict[str, Any] = {
+            "message": message,
+            "content": base64.b64encode(text.encode("utf-8")).decode("ascii"),
+            "branch": branch,
+        }
+        if blob_sha:
+            body["sha"] = blob_sha
+        resp = await self._request("PUT", f"contents/{quote(path, safe='/')}", json=body)
+        return resp.json()["commit"]["sha"]
+
+    async def find_open_pull(self, head_branch: str) -> PullInfo | None:
+        owner = self.repo.split("/", 1)[0]
+        resp = await self._request(
+            "GET", "pulls", params={"head": f"{owner}:{head_branch}", "state": "open"}
+        )
+        pulls = resp.json()
+        return _pull_from(pulls[0]) if pulls else None
+
+    async def create_pull(self, head: str, base: str, title: str, body: str) -> PullInfo:
+        resp = await self._request(
+            "POST", "pulls", json={"head": head, "base": base, "title": title, "body": body}
+        )
+        return _pull_from(resp.json())
+
+    async def get_pull(self, number: int) -> PullInfo:
+        resp = await self._request("GET", f"pulls/{number}")
+        return _pull_from(resp.json())
+
+    async def compare(self, base_sha: str, head_sha: str) -> list[ChangedFile]:
+        resp = await self._request("GET", f"compare/{base_sha}...{head_sha}")
+        out: list[ChangedFile] = []
+        for f in resp.json().get("files", []):
+            status = f.get("status")
+            if status not in ("added", "removed", "renamed"):
+                status = "modified"
+            out.append(
+                ChangedFile(
+                    path=f["filename"],
+                    status=status,
+                    previous_path=f.get("previous_filename") if status == "renamed" else None,
+                )
+            )
+        return out
+
+    async def list_tree(self, ref: str) -> list[str]:
+        resp = await self._request(
+            "GET", f"git/trees/{quote(ref, safe='/')}", params={"recursive": "1"}
+        )
+        return [e["path"] for e in resp.json().get("tree", []) if e.get("type") == "blob"]
+
+
+def get_git_client() -> TlGitClient:
+    token = settings.tl_github_token or settings.tas_github_token
+    if not token:
+        raise TlGitNotConfigured("Nessun token GitHub configurato")
+    return TlGitClient(token, settings.tl_repo)
