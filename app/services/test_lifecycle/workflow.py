@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -28,6 +29,8 @@ from app.services.test_lifecycle import git_publish, history
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle.actors import resolve_actor
 from app.services.test_lifecycle.git_client import TlGitError, TlGitNotConfigured
+
+logger = logging.getLogger(__name__)
 
 REOPEN_PHASE1_REASON = "Disponibile dopo il merge del feature file (fase Git)"
 REVIEWER_REQUIRED_REASON = "Accesso come reviewer richiesto"
@@ -226,3 +229,7 @@ async def _publish_best_effort(
         await git_publish.publish_revision(db, feature_id, revision_id, actor, client)
     except (TlGitError, git_publish.RepoFolderMissingError):
         pass  # già registrato da publish_revision
+    except Exception:
+        # l'approvazione è già committata: mai trasformarla in un 500
+        logger.exception("Creazione PR fallita per la revisione %s", revision_id)
+        await git_publish.record_unexpected_error(db, revision_id)

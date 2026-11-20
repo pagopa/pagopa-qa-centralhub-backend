@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from dataclasses import replace
 from typing import Any
@@ -27,6 +28,8 @@ class FakeGitClient:
         self.pulls: dict[int, PullInfo] = {}
         self.put_messages: list[str] = []
         self._failures: dict[str, TlGitError] = {}
+        self._gates: dict[str, tuple[asyncio.Event, asyncio.Event]] = {}
+        self.pull_meta: dict[int, dict[str, str]] = {}
         self._n = 0
         self.branches[base] = self._commit({})
 
@@ -40,14 +43,24 @@ class FakeGitClient:
         self.commits[sha] = dict(files)
         return sha
 
-    def _enter(self, method: str, *args: Any) -> None:
+    async def _enter(self, method: str, *args: Any) -> None:
         self.calls.append((method, *args))
+        gate = self._gates.get(method)
+        if gate is not None:
+            gate[0].set()
+            await gate[1].wait()
         err = self._failures.pop(method, None)
         if err is not None:
             raise err
 
     def fail_once(self, method: str, status: int = 500, message: str = "boom") -> None:
         self._failures[method] = TlGitError(status, message)
+
+    def block(self, method: str) -> tuple[asyncio.Event, asyncio.Event]:
+        """Pause the next calls of `method`: returns (started, release) events."""
+        gate = (asyncio.Event(), asyncio.Event())
+        self._gates[method] = gate
+        return gate
 
     def calls_of(self, method: str) -> list[tuple[Any, ...]]:
         return [c for c in self.calls if c[0] == method]
@@ -65,23 +78,23 @@ class FakeGitClient:
 
     # -- TlGitClient API ---------------------------------------------------
     async def head_sha(self, branch: str) -> str:
-        self._enter("head_sha", branch)
+        await self._enter("head_sha", branch)
         if branch not in self.branches:
             raise TlGitError(404, "Not Found")
         return self.branches[branch]
 
     async def branch_exists(self, branch: str) -> bool:
-        self._enter("branch_exists", branch)
+        await self._enter("branch_exists", branch)
         return branch in self.branches
 
     async def create_branch(self, branch: str, from_sha: str) -> None:
-        self._enter("create_branch", branch, from_sha)
+        await self._enter("create_branch", branch, from_sha)
         if branch in self.branches:
             return  # idempotent, like the real client on "already exists"
         self.branches[branch] = from_sha
 
     async def get_file(self, path: str, ref: str) -> GitFile | None:
-        self._enter("get_file", path, ref)
+        await self._enter("get_file", path, ref)
         sha = self.branches.get(ref, ref)
         entry = self.commits.get(sha, {}).get(path)
         return None if entry is None else GitFile(path=path, text=entry[0], blob_sha=entry[1])
@@ -89,7 +102,7 @@ class FakeGitClient:
     async def put_file(
         self, path: str, text: str, branch: str, message: str, blob_sha: str | None = None
     ) -> str:
-        self._enter("put_file", path, text, branch, message, blob_sha)
+        await self._enter("put_file", path, text, branch, message, blob_sha)
         files = dict(self.commits[self.branches[branch]])
         current = files.get(path)
         if current is not None and blob_sha != current[1]:
@@ -100,14 +113,14 @@ class FakeGitClient:
         return self.branches[branch]
 
     async def find_open_pull(self, head_branch: str) -> PullInfo | None:
-        self._enter("find_open_pull", head_branch)
+        await self._enter("find_open_pull", head_branch)
         for pull in self.pulls.values():
             if pull.head_branch == head_branch and pull.state == "open":
                 return pull
         return None
 
     async def create_pull(self, head: str, base: str, title: str, body: str) -> PullInfo:
-        self._enter("create_pull", head, base, title, body)
+        await self._enter("create_pull", head, base, title, body)
         number = 100 + len(self.pulls) + 1
         pull = PullInfo(
             number=number,
@@ -117,12 +130,11 @@ class FakeGitClient:
             head_branch=head,
         )
         self.pulls[number] = pull
-        self.pull_meta = getattr(self, "pull_meta", {})
         self.pull_meta[number] = {"base": base, "title": title, "body": body}
         return pull
 
     async def get_pull(self, number: int) -> PullInfo:
-        self._enter("get_pull", number)
+        await self._enter("get_pull", number)
         return self.pulls[number]
 
     def set_pull_state(
@@ -133,7 +145,7 @@ class FakeGitClient:
         )
 
     async def compare(self, base_sha: str, head_sha: str) -> list[ChangedFile]:
-        self._enter("compare", base_sha, head_sha)
+        await self._enter("compare", base_sha, head_sha)
         old = self.commits.get(base_sha, {})
         new = self.commits.get(head_sha, {})
         out: list[ChangedFile] = []
@@ -147,7 +159,7 @@ class FakeGitClient:
         return out
 
     async def list_tree(self, ref: str) -> list[str]:
-        self._enter("list_tree", ref)
+        await self._enter("list_tree", ref)
         return sorted(self.commits[self.branches.get(ref, ref)])
 
 

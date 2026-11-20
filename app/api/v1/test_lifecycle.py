@@ -186,6 +186,11 @@ def _translate(exc: Exception) -> HTTPException:
                 ),
             },
         )
+    if isinstance(exc, git_publish_svc.PublishInProgressError):
+        return HTTPException(
+            status_code=409,
+            detail={"code": "pr_in_progress", "message": "Creazione della PR già in corso"},
+        )
     if isinstance(exc, git_publish_svc.RepoFolderMissingError):
         return HTTPException(
             status_code=409,

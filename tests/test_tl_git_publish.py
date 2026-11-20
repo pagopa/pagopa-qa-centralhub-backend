@@ -1,6 +1,7 @@
 # ruff: noqa: F811, S101
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import pytest
@@ -70,6 +71,7 @@ def test_slugify():
     assert slugify("  --Già  fatto__ ") == "Gia_fatto"
     assert len(slugify("a" * 100)) == 60
     assert not slugify("x" * 59 + " y").endswith("_")
+    assert slugify("!!!") == "feature"
 
 
 async def test_approve_creates_branch_file_and_pr(client, scope, actor, reviewer, fake):
@@ -232,3 +234,75 @@ async def test_retry_not_allowed_when_pr_open(client, scope, actor, reviewer, fa
     resp = await client.post(_retry_url(done), json={"actor_email": actor["email"]})
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "pr_not_allowed"
+
+
+async def test_base_commit_sha_kept_when_branch_exists(client, scope, actor, reviewer, fake):
+    fake.fail_once("create_pull", 502, "bad gateway")
+    done = await _approved(client, scope, actor, reviewer)  # branch creato, nessuna PR
+    rev_id = uuid.UUID(done["working_revision"]["id"])
+    first_main = fake.branches["main"]
+    fake.seed_file("altro.txt", "x")  # main avanza
+    second_main = fake.branches["main"]
+    assert second_main != first_main
+    # base non nota (la prima pubblicazione e' fallita): si registra il main usato ora
+    resp = await client.post(_retry_url(done), json={"actor_email": actor["email"]})
+    assert resp.status_code == 200, resp.text
+    async with TestSession() as s:
+        assert (await s.get(TlFeatureRevision, rev_id)).base_commit_sha == second_main
+    # PR chiusa, branch esistente e base gia' nota: resta quella
+    fake.set_pull_state(101, "closed")
+    async with TestSession() as s:
+        await s.execute(
+            update(TlFeatureRevision)
+            .where(TlFeatureRevision.id == rev_id)
+            .values(pr_state="closed")
+        )
+        await s.commit()
+    fake.seed_file("altro2.txt", "y")
+    resp = await client.post(_retry_url(done), json={"actor_email": actor["email"]})
+    assert resp.status_code == 200, resp.text
+    async with TestSession() as s:
+        assert (await s.get(TlFeatureRevision, rev_id)).base_commit_sha == second_main
+
+
+async def test_publish_holds_no_row_lock_and_rejects_concurrent(
+    client, scope, actor, reviewer, fake
+):
+    fake.fail_once("put_file", 500, "boom")
+    done = await _approved(client, scope, actor, reviewer)
+    started, release = fake.block("put_file")
+    first = asyncio.create_task(
+        client.post(_retry_url(done), json={"actor_email": actor["email"]})
+    )
+    await asyncio.wait_for(started.wait(), 10)
+    try:
+        second = await asyncio.wait_for(
+            client.post(_retry_url(done), json={"actor_email": actor["email"]}), 10
+        )
+        assert second.status_code == 409
+        assert second.json()["detail"]["code"] == "pr_in_progress"
+        # una modifica non correlata sulla stessa feature non aspetta la pubblicazione
+        edit = await asyncio.wait_for(
+            client.patch(
+                f"{BASE}/features/{done['id']}",
+                json={"impl_owner_id": actor["id"], "actor_email": actor["email"]},
+            ),
+            10,
+        )
+        assert edit.status_code == 200, edit.text
+    finally:
+        release.set()
+    out = await asyncio.wait_for(first, 10)
+    assert out.status_code == 200, out.text
+    assert out.json()["working_revision"]["pr_state"] == "open"
+    assert out.json()["impl_owner_id"] == actor["id"]
+
+
+async def test_unexpected_error_keeps_approval(client, scope, actor, reviewer, fake):
+    async def _boom(branch):
+        raise RuntimeError("inatteso")
+
+    fake.head_sha = _boom
+    done = await _approved(client, scope, actor, reviewer)
+    assert done["working_revision"]["status"] == "approved"
+    assert done["working_revision"]["pr_error"] == "Errore imprevisto nella creazione della PR"
