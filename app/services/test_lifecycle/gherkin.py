@@ -13,10 +13,14 @@ from app.models.test_lifecycle import TlPolarity, TlScenarioKind
 
 ALLOWED_EXTRA_TAGS: tuple[str, ...] = ("runnable", "e2e", "ui", "skip")
 
+# Parole chiave di sezione italiane (gherkin-official, lingua "it")
 _SECTION_RE = re.compile(
-    r"^(Funzionalit[àa]|Contesto|Scenario|Schema dello scenario|Esempi|Regola)\s*:",
+    r"^(Funzionalit[àa]|Esigenza di Business|Abilit[àa]|Contesto|Esempio|Scenario"
+    r"|Schema dello scenario|Esempi|Regola)\s*:",
     re.IGNORECASE,
 )
+_NO_KEYWORD_MSG = "Riga non valida: usa una parola chiave italiana (Dato, Quando, E, Ma)."
+_STEP_RE = re.compile(r"^(Dato|Data|Dati|Date|Quando|Allora|E|Ed|Ma|\*)\s+\S")
 _BACKGROUND_RE = re.compile(r"^(Dato|Data|Dati|Date|E)\b")
 _PLACEHOLDER_RE = re.compile(r"<([^<>\s|]+)>")
 
@@ -85,9 +89,20 @@ def validate_steps(
     columns, rows = _example_table(examples)
     is_outline = kind == TlScenarioKind.OUTLINE and not background
 
+    step_count = 0
+    in_docstring = False
     for i, raw in enumerate(lines, start=1):
         text = raw.strip()
         if not text:
+            continue
+        if text.startswith(('"""', "```")):
+            in_docstring = not in_docstring
+            if step_count == 0:
+                errors.append(GherkinError(i, _NO_KEYWORD_MSG))
+            continue
+        if in_docstring:
+            continue
+        if text.startswith("|") and step_count > 0:
             continue
         if text.startswith("#"):
             errors.append(GherkinError(i, "I commenti non sono ammessi negli step."))
@@ -107,6 +122,13 @@ def validate_steps(
                     "Nel Contesto sono ammessi solo step che iniziano con Dato/Data/Dati/Date o E.",
                 )
             )
+        elif not _STEP_RE.match(text):
+            errors.append(GherkinError(i, _NO_KEYWORD_MSG))
+        else:
+            step_count += 1
+
+    if step_count == 0 and not errors:
+        errors.append(GherkinError(1, "Servono almeno uno step."))
 
     if is_outline:
         if not columns or not rows:
@@ -114,6 +136,10 @@ def validate_steps(
                 GherkinError(
                     1, "Uno Schema dello scenario richiede una tabella Esempi con almeno una riga."
                 )
+            )
+        elif any(len(r) != len(columns) for r in rows):
+            errors.append(
+                GherkinError(1, "Ogni riga degli Esempi deve avere tante celle quante le colonne.")
             )
         else:
             seen: set[tuple[int, str]] = set()
@@ -147,7 +173,8 @@ def validate_steps(
         seen_lines: set[int] = set()
         for err in _parser_errors(exc):
             line = err.location.get("line", 1) - _HEADER_LINES
-            line = min(max(line, 1), len(lines))
+            if line < 1 or line > len(lines):
+                line = 1  # errore nella tabella Esempi: riportato sulla riga 1
             if line in seen_lines:
                 continue
             seen_lines.add(line)

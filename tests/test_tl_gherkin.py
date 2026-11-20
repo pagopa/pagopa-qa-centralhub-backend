@@ -80,6 +80,24 @@ def test_validate_steps_background_allows_only_given_and_and():
     assert [e.line for e in errs] == [2]
 
 
+def test_validate_steps_rejects_non_keyword_first_line_and_zero_steps():
+    assert [e.line for e in validate_steps("il sistema risponde", kind=S, examples=None)] == [1]
+    assert [e.line for e in validate_steps("testo libero\nDato a", kind=S, examples=None)] == [1]
+    assert [e.line for e in validate_steps("Dato", kind=S, examples=None)] == [1]
+
+
+def test_validate_steps_rejects_all_italian_section_keywords():
+    for kw in ("Esempio", "Esempi", "Regola", "Contesto", "Abilità", "Esigenza di Business"):
+        errs = validate_steps(f"Dato a\n{kw}: b\nQuando c", kind=S, examples=None)
+        assert [e.line for e in errs] == [2], kw
+
+
+def test_validate_steps_examples_table_error_on_line_1():
+    ex = {"headers": ["a", "b"], "rows": [["1"]]}
+    errs = validate_steps("Dato <a>\nQuando <b>\nAllora ok", kind=OUT, examples=ex)
+    assert [e.line for e in errs] == [1]
+
+
 GOLDEN = """\
 # qa-hub: FEAT_001_FdR3
 # language: it
