@@ -3,8 +3,18 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime
+from decimal import Decimal
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.models.test_lifecycle import (
+    TlFeatureStatus,
+    TlPolarity,
+    TlRevisionStatus,
+    TlScenarioKind,
+)
+from app.services.test_lifecycle.gherkin import ALLOWED_EXTRA_TAGS
 
 SCOPE_CODE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9]{1,19}$")
 
@@ -64,3 +74,259 @@ class TlScopeOut(BaseModel):
     updated_at: datetime
     feature_count: int = 0
     status_counts: dict[str, int] = {}
+
+
+# ── Feature, revisioni, scenari ───────────────────────────────────────────────
+
+PQ_KEY_PATTERN = re.compile(r"^PQ-\d+$")
+ISSUE_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9]+-\d+$")
+FEATURE_TITLE_MAX = 255  # limite della colonna tl_feature_revisions.title
+SCENARIO_TITLE_MAX = 500
+
+_DESCRIPTION_FORBIDDEN_RE = re.compile(
+    r"^(@|#|(Funzionalit[àa]|Contesto|Scenario|Schema dello scenario|Esempi|Esempio|Regola"
+    r"|Abilit[àa]|Esigenza di Business)\s*:)",
+    re.IGNORECASE,
+)
+
+
+def _check_title(value: str, max_len: int) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError("Il titolo non può essere vuoto")
+    if "\n" in value or "\r" in value:
+        raise ValueError("Il titolo deve stare su una sola riga")
+    if len(value) > max_len:
+        raise ValueError(f"Il titolo può avere al massimo {max_len} caratteri")
+    return value
+
+
+def _feature_title(value: str) -> str:
+    return _check_title(value, FEATURE_TITLE_MAX)
+
+
+def _scenario_title(value: str) -> str:
+    return _check_title(value, SCENARIO_TITLE_MAX)
+
+
+def _check_pattern(value: str | None, pattern: re.Pattern[str], label: str) -> str | None:
+    if value is None:
+        return None
+    if not pattern.fullmatch(value):
+        raise ValueError(f"Chiave Jira non valida per {label}")
+    return value
+
+
+def _check_description(value: str | None) -> str | None:
+    if value is None:
+        return None
+    for line in value.splitlines():
+        if _DESCRIPTION_FORBIDDEN_RE.match(line.strip()):
+            raise ValueError(
+                "La descrizione non può contenere righe che iniziano con @, # "
+                "o con una parola chiave di sezione Gherkin"
+            )
+    return value
+
+
+def _check_extra_tags(value: list[str] | None) -> list[str] | None:
+    if value is None:
+        return None
+    unknown = [t for t in value if t not in ALLOWED_EXTRA_TAGS]
+    if unknown:
+        raise ValueError(
+            f"Tag non ammessi: {', '.join(unknown)}. Ammessi: {', '.join(ALLOWED_EXTRA_TAGS)}"
+        )
+    return list(dict.fromkeys(value))
+
+
+class TlExamples(BaseModel):
+    headers: list[str]
+    rows: list[list[str]] = []
+
+    @model_validator(mode="after")
+    def _check(self) -> TlExamples:
+        if not self.headers or any(not h.strip() for h in self.headers):
+            raise ValueError("Gli Esempi richiedono intestazioni non vuote")
+        if len(set(self.headers)) != len(self.headers):
+            raise ValueError("Le intestazioni degli Esempi devono essere uniche")
+        if any(len(r) != len(self.headers) for r in self.rows):
+            raise ValueError("Ogni riga degli Esempi deve avere tante celle quante le intestazioni")
+        return self
+
+
+class TlFeatureCreate(BaseModel):
+    scope_id: uuid.UUID
+    title: str
+    design_owner_id: uuid.UUID | None = None
+    actor_email: str
+
+    _v_title = field_validator("title")(_feature_title)
+
+
+class TlFeatureUpdate(BaseModel):
+    design_owner_id: uuid.UUID | None = None
+    reviewer_id: uuid.UUID | None = None
+    impl_owner_id: uuid.UUID | None = None
+    jira_design_key: str | None = None
+    jira_impl_key: str | None = None
+    actor_email: str
+
+    @field_validator("jira_design_key")
+    @classmethod
+    def _v_design(cls, value: str | None) -> str | None:
+        return _check_pattern(value, PQ_KEY_PATTERN, "la progettazione (es. PQ-12)")
+
+    @field_validator("jira_impl_key")
+    @classmethod
+    def _v_impl(cls, value: str | None) -> str | None:
+        return _check_pattern(value, ISSUE_KEY_PATTERN, "l'implementazione (es. ABC-12)")
+
+
+class TlRevisionUpdate(BaseModel):
+    lock_version: int
+    actor_email: str
+    title: str | None = None
+    description: str | None = None
+    background_steps: str | None = None
+    requirements_url: str | None = Field(default=None, max_length=1024)
+    product_issue_key: str | None = None
+    reverse_engineering: bool | None = None
+    design_estimate_days: Decimal | None = Field(default=None, ge=0, max_digits=5, decimal_places=1)
+    impl_estimate_days: Decimal | None = Field(default=None, ge=0, max_digits=5, decimal_places=1)
+
+    @field_validator("title")
+    @classmethod
+    def _v_title(cls, value: str | None) -> str | None:
+        if value is None:
+            raise ValueError("Il titolo non può essere nullo")
+        return _feature_title(value)
+
+    _v_description = field_validator("description")(_check_description)
+
+    @field_validator("product_issue_key")
+    @classmethod
+    def _v_product(cls, value: str | None) -> str | None:
+        return _check_pattern(value, ISSUE_KEY_PATTERN, "l'Epic/Story prodotto")
+
+    @field_validator("reverse_engineering")
+    @classmethod
+    def _v_reverse(cls, value: bool | None) -> bool:
+        if value is None:
+            raise ValueError("Valore non nullo richiesto")
+        return value
+
+
+class TlScenarioCreate(BaseModel):
+    actor_email: str
+    title: str
+    kind: TlScenarioKind = TlScenarioKind.SCENARIO
+    polarity: TlPolarity = TlPolarity.POSITIVO
+
+    _v_title = field_validator("title")(_scenario_title)
+
+
+class TlScenarioUpdate(BaseModel):
+    actor_email: str
+    lock_version: int
+    title: str | None = None
+    kind: TlScenarioKind | None = None
+    polarity: TlPolarity | None = None
+    extra_tags: list[str] | None = None
+    steps: str | None = None
+    examples: TlExamples | None = None
+    detail_link: str | None = Field(default=None, max_length=1024)
+    position: int | None = Field(default=None, ge=1)
+
+    @field_validator("title")
+    @classmethod
+    def _v_title(cls, value: str | None) -> str | None:
+        if value is None:
+            raise ValueError("Il titolo non può essere nullo")
+        return _scenario_title(value)
+
+    _v_tags = field_validator("extra_tags")(_check_extra_tags)
+
+    @field_validator("kind", "polarity", "steps", "position")
+    @classmethod
+    def _v_not_null(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("Valore non nullo richiesto")
+        return value
+
+
+class TlLineError(BaseModel):
+    line: int
+    message: str
+
+
+class TlScenarioOut(BaseModel):
+    id: uuid.UUID
+    number: int
+    tag: str
+    position: int
+    title: str
+    kind: TlScenarioKind
+    polarity: TlPolarity
+    extra_tags: list[str] = []
+    steps: str
+    examples: dict[str, Any] | None = None
+    detail_link: str | None = None
+    errors: list[TlLineError] = []
+
+
+class TlRevisionOut(BaseModel):
+    id: uuid.UUID
+    number: int
+    status: TlRevisionStatus
+    lock_version: int
+    title: str
+    description: str | None = None
+    background_steps: str | None = None
+    requirements_url: str | None = None
+    product_issue_key: str | None = None
+    reverse_engineering: bool = False
+    design_estimate_days: Decimal | None = None
+    impl_estimate_days: Decimal | None = None
+    created_by: str
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    scenarios: list[TlScenarioOut] = []
+    background_errors: list[TlLineError] = []
+
+
+class TlFeatureListItem(BaseModel):
+    id: uuid.UUID
+    code: str
+    number: int
+    title: str | None = None
+    status: TlFeatureStatus
+    scope_id: uuid.UUID
+    scope_code: str
+    design_owner_id: uuid.UUID | None = None
+    reviewer_id: uuid.UUID | None = None
+    impl_owner_id: uuid.UUID | None = None
+    scenario_count: int = 0
+    updated_at: datetime
+
+
+class TlFeatureDetail(BaseModel):
+    id: uuid.UUID
+    code: str
+    number: int
+    status: TlFeatureStatus
+    scope_id: uuid.UUID
+    scope_code: str
+    design_owner_id: uuid.UUID | None = None
+    reviewer_id: uuid.UUID | None = None
+    impl_owner_id: uuid.UUID | None = None
+    jira_design_key: str | None = None
+    jira_impl_key: str | None = None
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    working_revision: TlRevisionOut | None = None
+    published_revision: TlRevisionOut | None = None
+    transitions: list[Any] = []
