@@ -69,6 +69,11 @@ def test_dockerfile_python_runtime() -> None:
         ("FROM rust:1.75-slim", ("RUST", "1.75")),
         ("FROM golang:1.22-alpine", ("GO", "1.22")),
         ("FROM openjdk:17-jdk-slim", ("JAVA", "17")),
+        # Red Hat UBI: the Java major is in the name, the tag is the image release
+        ("FROM registry.access.redhat.com/ubi8/openjdk-17:1.14@" + _D, ("JAVA", "17")),
+        ("FROM registry.access.redhat.com/ubi9/openjdk-21-runtime:1.20", ("JAVA", "21")),
+        ("FROM registry.access.redhat.com/ubi8/openjdk:1.14", ("JAVA", None)),
+        ("FROM eclipse-temurin:1.0", ("JAVA", None)),
         ("FROM eclipse-temurin:jre", ("JAVA", None)),
         ("FROM python:3", ("PYTHON", None)),
         ("FROM python:latest", ("PYTHON", None)),

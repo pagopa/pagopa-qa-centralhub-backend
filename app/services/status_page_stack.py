@@ -26,6 +26,14 @@ def _normalize_java(raw: str) -> str | None:
     return match.group(1) if match else None
 
 
+_MIN_JAVA = 8
+
+
+def _plausible_java(major: str) -> str | None:
+    """Java majors start at 8 in practice; anything lower is an image version, not Java's."""
+    return major if int(major) >= _MIN_JAVA else None
+
+
 def _major_minor(raw: str) -> str | None:
     match = re.match(r"(\d+)\.(\d+)(?!\d)", raw)
     return f"{match.group(1)}.{match.group(2)}" if match else None
@@ -62,11 +70,14 @@ def runtime_from_dockerfile(text: str) -> tuple[str, str | None] | None:
         return None
     name, tag = parsed
     if name.startswith(_JAVA_IMAGES) or "openjdk" in name:
-        in_name = re.search(r"openjdk(\d+)", name)
+        # e.g. docker-base-springboot-openjdk17, ubi8/openjdk-17, openjdk-21-runtime
+        in_name = re.search(r"openjdk-?(\d+)(?!\d)", name)
         if in_name:
-            return "JAVA", in_name.group(1)
+            return "JAVA", _plausible_java(in_name.group(1))
+        if not name.startswith(_JAVA_IMAGES):
+            return "JAVA", None  # the tag of a derived image is its own version, not Java's
         match = re.match(r"(?:jdk-|jre-)?(\d+)(?!\d)", tag)
-        return "JAVA", match.group(1) if match else None
+        return "JAVA", _plausible_java(match.group(1)) if match else None
     language = _OTHER_IMAGES.get(name)
     if language is None:
         return None
