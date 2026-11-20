@@ -305,6 +305,7 @@ async def test_no_test_object_never_untested(world: World) -> None:
     r = await row(world, a)
     assert r.envs["UAT"].tests == []
     assert "UNTESTED" not in r.flags
+    assert "UNDER_QA" not in r.flags
     assert "ALIGNED" in r.flags
 
 
@@ -324,12 +325,12 @@ async def test_flags(world: World) -> None:
     untested = await add_app(
         world, p, "untested", world.name("other"), states("1.0.0", "1.0.0", "1.0.0", "1.0.0")
     )
-    assert (await row(world, aligned)).flags == ["ALIGNED"]
+    assert (await row(world, aligned)).flags == ["ALIGNED", "UNDER_QA"]
     assert (await row(world, behind)).flags == ["DRIFT"]
     assert (await row(world, dev_ahead)).flags == ["ALIGNED"]
     b = await row(world, broken)
     assert "UNREACHABLE" in b.flags and "ALIGNED" not in b.flags
-    assert "UNTESTED" in (await row(world, untested)).flags
+    assert (await row(world, untested)).flags == ["UNTESTED", "UNDER_QA"]
     assert (await row(world, behind)).envs["PROD"].drift == "BEHIND"
 
 
@@ -385,6 +386,7 @@ async def test_summary_matches_flags(world: World) -> None:
     assert base.drift == flags.count("DRIFT")
     assert base.unreachable == flags.count("UNREACHABLE")
     assert base.untested == flags.count("UNTESTED")
+    assert base.under_qa == flags.count("UNDER_QA")
     assert base.aligned >= 1 and base.drift >= 1
 
 
@@ -449,6 +451,18 @@ def test_run_ref_failed_counts_broken_scenarios() -> None:
     assert ref(None, 2).failed == 2
     assert ref(1, None).failed == 1
     assert ref(None, None).failed is None
+
+
+async def test_under_qa_whatever_the_runs(world: World) -> None:
+    p = await add_product(world, "p")
+    obj = world.name("obj")
+    tested = await add_app(world, p, "tested", obj, states("1.0.0", "1.0.0", "1.0.0", "1.0.0"))
+    await add_run(world, obj, "1.0.0", "UAT")
+    no_runs = await add_app(
+        world, p, "noruns", world.name("other"), states("1.0.0", "1.0.0", "1.0.0", "1.0.0")
+    )
+    assert "UNDER_QA" in (await row(world, tested)).flags
+    assert "UNDER_QA" in (await row(world, no_runs)).flags
 
 
 async def test_flags_prod_ahead_is_drift(world: World) -> None:

@@ -325,6 +325,8 @@ def _build_row(
         for t in ("UAT", "PROD")
     ):
         flags.append("UNTESTED")
+    if app.test_object is not None:
+        flags.append("UNDER_QA")
 
     return ApplicationRowOut(
         id=app.id,
@@ -423,6 +425,7 @@ async def get_summary(db: AsyncSession) -> SummaryOut:
             drift=sum("DRIFT" in r.flags for r in rows),
             unreachable=sum("UNREACHABLE" in r.flags for r in rows),
             untested=sum("UNTESTED" in r.flags for r in rows),
+            under_qa=sum("UNDER_QA" in r.flags for r in rows),
             last_success_at=sync.last_success_at if sync is not None else None,
         )
     except Exception:
