@@ -494,8 +494,9 @@ async def test_approved_revision_returns_to_draft_when_stale(
 ):
     done, _ = await _merged(client, scope, actor, reviewer, fake)
     r1 = done["working_revision"]["id"]
+    pull = await fake.create_pull(f"qa-hub/{done['code']}-r2", "main", "r2", "")
     r2 = await _working_revision(
-        done["id"], r1, TlRevisionStatus.APPROVED, pr_state="open", pr_number=555
+        done["id"], r1, TlRevisionStatus.APPROVED, pr_state="open", pr_number=pull.number
     )
     path = done["git_path"]
     sha = fake.seed_file(path, _main_text(fake, done).replace("Quando paga\n", "Quando paga!\n"))
@@ -505,7 +506,7 @@ async def test_approved_revision_returns_to_draft_when_stale(
     assert rev.base_stale is True
     assert rev.status == TlRevisionStatus.DRAFT
     assert rev.pr_state == "open"  # la PR resta aperta, aggiornata dopo il riallineamento
-    assert rev.pr_number == 555
+    assert rev.pr_number == pull.number
     stale = await _events(done["id"], "tl.revision.stale")
     assert len(stale) == 1
     assert stale[0]["from"] == "approved"
@@ -542,3 +543,115 @@ async def test_header_removed_on_managed_path_is_structural(client, scope, actor
     assert [c["kind"] for c in issues[0].detail["changes"]] == ["header_missing"]
     # contenuto invariato: nessuna versione
     assert [v.origin for v in await _versions(done["id"])] == ["hub"]
+
+
+# ── fix round 1 ───────────────────────────────────────────────────────────────
+
+async def test_parse_error_at_merge_keeps_designed(client, scope, actor, reviewer, fake):
+    original = {}
+
+    def edit(text):
+        original["text"] = text
+        return text + "\n  Regola: non supportata\n"
+
+    done, _ = await _merged(client, scope, actor, reviewer, fake, edit)
+    detail = await _detail(client, done["id"])
+    assert detail["status"] == "designed"
+    assert detail["published_revision"]["pr_state"] == "merged"
+    parse = await _issues(done["id"], TlIssueKind.PARSE_ERROR)
+    assert [i.status for i in parse] == [TlIssueStatus.OPEN]
+
+    # Git corretto più tardi: l'anomalia si risolve e la feature diventa implemented
+    path = done["git_path"]
+    sha = fake.seed_file(path, original["text"])
+    await _import(fake, path, sha)
+    parse = await _issues(done["id"], TlIssueKind.PARSE_ERROR)
+    assert [i.status for i in parse] == [TlIssueStatus.RESOLVED]
+    assert (await _detail(client, done["id"]))["status"] == "implemented"
+    assert len(await _events(done["id"], "tl.feature.implemented")) == 1
+
+
+async def test_removed_before_moved_import_opens_nothing(client, scope, actor, reviewer, fake):
+    done, _ = await _merged(client, scope, actor, reviewer, fake)
+    old = done["git_path"]
+    new = f"features/altro/{done['code']}_spostato.feature"
+    fake.seed_file(new, _main_text(fake, done))
+    sha = fake.remove_file(old)
+    # ordine inverso: prima la rimozione, con il contesto del compare
+    async with TestSession() as s:
+        await git_import.handle_removed_file(s, old, sha, fake, present_paths=[new])
+    assert await _issues(done["id"]) == []
+    await _import(fake, new, sha)
+    assert (await _detail(client, done["id"]))["git_path"] == new
+    assert await _issues(done["id"]) == []
+
+
+async def test_import_before_mark_merged_creates_no_extra_revision(
+    client, scope, actor, reviewer, fake
+):
+    done = await _approved(client, scope, actor, reviewer)
+    r1 = done["working_revision"]["id"]
+    sha = fake.merge_pull(PR)
+    # ordine sbagliato: il compare importa il file prima della registrazione del merge
+    await _import(fake, done["git_path"], sha)
+    detail = await _detail(client, done["id"])
+    assert detail["published_revision"]["id"] == r1
+    assert detail["published_revision"]["pr_state"] == "merged"
+    assert detail["working_revision"] is None
+    assert detail["status"] == "implemented"
+    assert await _events(done["id"], "tl.revision.stale") == []
+    assert [v.origin for v in await _versions(done["id"])] == ["hub"]
+    async with TestSession() as s:
+        rev = await s.get(TlFeatureRevision, uuid.UUID(r1))
+        await git_import.mark_revision_merged(s, rev, sha, fake)
+        n = (
+            await s.execute(
+                select(func.count())
+                .select_from(TlFeatureRevision)
+                .where(TlFeatureRevision.feature_id == uuid.UUID(done["id"]))
+            )
+        ).scalar_one()
+    assert n == 1
+    assert len(await _events(done["id"], "tl.pr.merged")) == 1
+
+
+async def test_known_identity_is_not_a_new_scenario(client, scope, actor, reviewer, fake):
+    from app.services.test_lifecycle import history
+    from app.services.test_lifecycle.gherkin import render_feature_file
+    from tests.test_tl_workflow import _ready_feature
+
+    detail = await _ready_feature(client, scope, actor, reviewer)  # bozza, identità 01 esiste
+    async with TestSession() as s:
+        feature = await s.get(TlFeature, uuid.UUID(detail["id"]))
+        rev = await s.get(TlFeatureRevision, uuid.UUID(detail["working_revision"]["id"]))
+        render, _ = await history.build_render(s, feature, rev)
+    path = f"features/ambito/{detail['code']}_diretto.feature"
+    sha = fake.seed_file(path, render_feature_file(render))  # push diretto su main
+    await _import(fake, path, sha)
+    out = await _detail(client, detail["id"])
+    assert [sc["tag"] for sc in out["published_revision"]["scenarios"]] == [
+        sc["tag"] for sc in detail["working_revision"]["scenarios"]
+    ]
+    assert await _issues(detail["id"], TlIssueKind.NEW_SCENARIO_FROM_GIT) == []
+
+
+async def test_acknowledged_structural_not_reopened(client, scope, actor, reviewer, fake):
+    _, tag = _tags(scope)
+    done, sha = await _merged(
+        client, scope, actor, reviewer, fake, lambda t: t.replace(f"  {tag(1)}\n", "")
+    )
+    async with TestSession() as s:
+        issue = (
+            await s.execute(
+                select(TlIssue).where(
+                    TlIssue.feature_id == uuid.UUID(done["id"]),
+                    TlIssue.kind == TlIssueKind.STRUCTURAL_CHANGE,
+                )
+            )
+        ).scalar_one()
+        issue.status = TlIssueStatus.ACKNOWLEDGED
+        await s.commit()
+    await _import(fake, done["git_path"], sha)
+    issues = await _issues(done["id"], TlIssueKind.STRUCTURAL_CHANGE)
+    assert [i.status for i in issues] == [TlIssueStatus.ACKNOWLEDGED]
+    assert (await _detail(client, done["id"]))["status"] == "designed"

@@ -81,14 +81,16 @@ async def find_open_issue(
     feature_id: uuid.UUID | None,
     path: str | None,
     key: Any,
+    statuses: tuple[TlIssueStatus, ...] = (TlIssueStatus.OPEN,),
 ) -> TlIssue | None:
-    """L'anomalia `open` con identità `(kind, feature_id, path, detail.key)`, se esiste."""
+    """L'anomalia con identità `(kind, feature_id, path, detail.key)` in uno degli stati dati
+    (default: solo `open`), se esiste."""
     candidates = (
         await db.execute(
             select(TlIssue)
             .where(
                 TlIssue.kind == kind,
-                TlIssue.status == TlIssueStatus.OPEN,
+                TlIssue.status.in_(statuses),
                 TlIssue.feature_id.is_(None)
                 if feature_id is None
                 else TlIssue.feature_id == feature_id,
@@ -149,22 +151,50 @@ async def resolve_feature_issues(
     return rows
 
 
-async def count_unresolved(
-    db: AsyncSession, *, kind: TlIssueKind, feature_id: uuid.UUID
-) -> int:
-    """Anomalie non risolte (aperte o riconosciute) di quel tipo per la feature."""
+# Anomalie che impediscono IMPLEMENTED finché non sono risolte (aperte o riconosciute):
+# il file su Git non è coerente con la pubblicata (spec §6, ruling R8/R10).
+BLOCKING_KINDS = (
+    TlIssueKind.STRUCTURAL_CHANGE,
+    TlIssueKind.PARSE_ERROR,
+    TlIssueKind.FILE_DELETED,
+)
+
+
+async def maybe_promote_feature(
+    db: AsyncSession,
+    feature: TlFeature,
+    actor: User | None,
+    *,
+    reason: str,
+    issue_id: uuid.UUID | None = None,
+) -> bool:
+    """Unica regola DESIGNED -> IMPLEMENTED: revisione pubblicata e nessuna anomalia bloccante
+    non risolta. Il chiamante tiene il lock della feature. Nessun commit."""
+    if feature.status != TlFeatureStatus.DESIGNED or feature.published_revision_id is None:
+        return False
     await db.flush()
-    return (
+    pending = (
         await db.execute(
             select(func.count())
             .select_from(TlIssue)
             .where(
-                TlIssue.feature_id == feature_id,
-                TlIssue.kind == kind,
+                TlIssue.feature_id == feature.id,
+                TlIssue.kind.in_(BLOCKING_KINDS),
                 TlIssue.status != TlIssueStatus.RESOLVED,
             )
         )
     ).scalar_one()
+    if pending:
+        return False
+    feature.status = TlFeatureStatus.IMPLEMENTED
+    detail: dict[str, Any] = {
+        "reason": reason,
+        "revision_id": str(feature.published_revision_id),
+    }
+    if issue_id is not None:
+        detail["issue_id"] = str(issue_id)
+    history.record_event(db, feature.id, "tl.feature.implemented", actor, detail)
+    return True
 
 
 async def _to_out(
@@ -252,33 +282,10 @@ async def update_issue(
                 "to": new_status.value,
             },
         )
-        if (
-            new_status == TlIssueStatus.RESOLVED
-            and issue.kind == TlIssueKind.STRUCTURAL_CHANGE
-            and feature.status == TlFeatureStatus.DESIGNED
-            and feature.published_revision_id is not None
-        ):
-            await db.flush()
-            pending = (
-                await db.execute(
-                    select(func.count())
-                    .select_from(TlIssue)
-                    .where(
-                        TlIssue.feature_id == feature.id,
-                        TlIssue.kind == TlIssueKind.STRUCTURAL_CHANGE,
-                        TlIssue.status != TlIssueStatus.RESOLVED,
-                    )
-                )
-            ).scalar_one()
-            if pending == 0:
-                feature.status = TlFeatureStatus.IMPLEMENTED
-                history.record_event(
-                    db,
-                    feature.id,
-                    "tl.feature.implemented",
-                    actor,
-                    {"reason": "structural_changes_resolved", "issue_id": str(issue.id)},
-                )
+        if new_status == TlIssueStatus.RESOLVED and issue.kind in BLOCKING_KINDS:
+            await maybe_promote_feature(
+                db, feature, actor, reason="issues_resolved", issue_id=issue.id
+            )
     await db.commit()
     return await _get_out(db, issue_id)
 

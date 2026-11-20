@@ -12,6 +12,7 @@ Chiamato dal sync (Task 8), che tiene il lock advisory globale `tl_git_sync`.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,9 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.test_lifecycle import (
     TlFeature,
     TlFeatureRevision,
-    TlFeatureStatus,
     TlIssueKind,
+    TlIssueStatus,
     TlRevisionStatus,
+    TlScenario,
     TlScope,
 )
 from app.services.test_lifecycle import features as features_svc
@@ -130,7 +132,23 @@ async def _open_structural(
     revision_id: uuid.UUID | None,
     changes: list[dict[str, Any]],
 ) -> None:
-    """Una sola anomalia strutturale aperta per feature e percorso: le modifiche si accumulano."""
+    """Una sola anomalia strutturale aperta per feature e percorso: le modifiche si accumulano.
+
+    Le modifiche già presenti in un'anomalia riconosciuta non la riaprono a ogni reimport.
+    """
+    acknowledged = await issues_svc.find_open_issue(
+        db,
+        kind=TlIssueKind.STRUCTURAL_CHANGE,
+        feature_id=feature.id,
+        path=fetched.path,
+        key=STRUCTURAL_KEY,
+        statuses=(TlIssueStatus.ACKNOWLEDGED,),
+    )
+    if acknowledged is not None:
+        known = (acknowledged.detail or {}).get("changes", [])
+        changes = [c for c in changes if c not in known]
+        if not changes:
+            return
     existing = await issues_svc.find_open_issue(
         db,
         kind=TlIssueKind.STRUCTURAL_CHANGE,
@@ -204,6 +222,13 @@ async def _import_locked(
             s.tag for s in render.scenarios
         ]
 
+    # identità già note (anche se assenti dalla pubblicata): non sono "nuovi scenari"
+    known_tags = set(
+        (
+            await db.execute(select(TlScenario.tag).where(TlScenario.feature_id == feature.id))
+        ).scalars()
+    )
+    new_scenarios = [sc for sc in diff.new_scenarios if sc.identity_tag not in known_tags]
     target = expected_rev
     version_id = None
     if changed:
@@ -222,7 +247,7 @@ async def _import_locked(
         version_id = version.id
 
     target_id = target.id if target is not None else None
-    for sc in diff.new_scenarios:
+    for sc in new_scenarios:
         await issues_svc.open_issue(
             db,
             kind=TlIssueKind.NEW_SCENARIO_FROM_GIT,
@@ -254,31 +279,16 @@ async def _import_locked(
                 "version_id": str(version_id) if version_id else None,
                 "textual": diff.textual,
                 "structural": [c.kind for c in diff.structural],
-                "new_scenarios": [sc.identity_tag for sc in diff.new_scenarios],
+                "new_scenarios": [sc.identity_tag for sc in new_scenarios],
             },
         )
 
 
-async def _finalize(db: AsyncSession, locked: _Locked, first_publication: bool) -> None:
-    """Passi 11-12: stato `implemented` alla prima pubblicazione e base superata."""
+async def _finalize(db: AsyncSession, locked: _Locked) -> None:
+    """Passi 11-12: `implemented` se pubblicata e nessuna anomalia bloccante (regola unica in
+    `issues.maybe_promote_feature`, rivalutata a ogni import), poi base superata."""
     feature = locked.feature
-    if (
-        first_publication
-        and feature.published_revision_id is not None
-        and feature.status == TlFeatureStatus.DESIGNED
-        and await issues_svc.count_unresolved(
-            db, kind=TlIssueKind.STRUCTURAL_CHANGE, feature_id=feature.id
-        )
-        == 0
-    ):
-        feature.status = TlFeatureStatus.IMPLEMENTED
-        history.record_event(
-            db,
-            feature.id,
-            "tl.feature.implemented",
-            None,
-            {"reason": "published_from_git", "revision_id": str(feature.published_revision_id)},
-        )
+    await issues_svc.maybe_promote_feature(db, feature, None, reason="published_from_git")
     working = locked.working
     if (
         working is not None
@@ -313,7 +323,18 @@ async def import_changed_file(
     client: TlGitClient,
     merged_revision: TlFeatureRevision | None = None,
 ) -> None:
-    """Importa il file `path` a `commit_sha` (passi 1-12 del brief). Un commit."""
+    """Importa il file `path` a `commit_sha` (passi 1-12 del brief). Un commit.
+
+    La sessione viene annullata (rollback) prima delle chiamate di rete: il chiamante non deve
+    avere modifiche pendenti. In caso di errore nulla è committato per questo file.
+
+    Precondizione (Task 8): le PR mergiate si registrano prima con `mark_revision_merged`.
+    Per difesa, se la revisione di lavoro ha una PR aperta che GitHub dà già mergiata, la si
+    registra qui prima dell'import (nessuna revisione `git` spuria, nessuna base superata).
+
+    `merged_revision` è interno: importa nel contenuto di quella revisione senza marcarla
+    mergiata (usarlo solo tramite `mark_revision_merged`).
+    """
     fetched = await _fetch(client, path, previous_path, commit_sha)
     if fetched is None:
         return  # non più presente a quel commit: ci pensa `handle_removed_file`
@@ -331,28 +352,56 @@ async def import_changed_file(
         return  # file non gestito (senza header): ignorato fino alla migrazione
     feature_id, code, git_path = found
     merged_id = merged_revision.id if merged_revision is not None else None
+    open_pr = None
+    if merged_revision is None:
+        open_pr = (
+            await db.execute(
+                select(TlFeatureRevision.id, TlFeatureRevision.pr_number)
+                .join(TlFeature, TlFeature.working_revision_id == TlFeatureRevision.id)
+                .where(
+                    TlFeature.id == feature_id,
+                    TlFeatureRevision.pr_state == "open",
+                    TlFeatureRevision.pr_number.is_not(None),
+                )
+            )
+        ).first()
     await db.rollback()  # nessuna transazione aperta durante la rete
+    if open_pr is not None:
+        pull = await client.get_pull(open_pr[1])
+        if pull.state == "merged" and pull.merge_commit_sha:
+            await _mark_merged(db, feature_id, open_pr[0], pull.merge_commit_sha, client)
     copy = await _is_copy(client, code, git_path, fetched)
     locked = await _lock_all(db, feature_id, merged_id)
     merged = locked.extra if merged_revision is not None else None
     if merged_revision is not None and merged is None:
         merged = locked.published  # la mergiata è già la pubblicata
-    first_publication = locked.feature.published_revision_id is None
     await _import_locked(db, locked, fetched, merged, copy)
-    await _finalize(db, locked, first_publication)
+    await _finalize(db, locked)
     await db.commit()
 
 
 async def mark_revision_merged(
     db: AsyncSession, rev: TlFeatureRevision, merge_commit_sha: str, client: TlGitClient
 ) -> None:
-    """La PR della revisione è mergiata: importa il file mergiato e la pubblica. Idempotente."""
-    feature_id, rev_id = rev.feature_id, rev.id
+    """La PR della revisione è mergiata: importa il file mergiato e la pubblica. Idempotente.
+
+    Un commit; la sessione viene annullata prima della lettura del file da GitHub.
+    """
+    await _mark_merged(db, rev.feature_id, rev.id, merge_commit_sha, client)
+
+
+async def _mark_merged(
+    db: AsyncSession,
+    feature_id: uuid.UUID,
+    rev_id: uuid.UUID,
+    merge_commit_sha: str,
+    client: TlGitClient,
+) -> None:
     git_path = (
         await db.execute(select(TlFeature.git_path).where(TlFeature.id == feature_id))
     ).scalar_one()
+    await db.rollback()  # nessuna transazione aperta durante la rete
     fetched = await _fetch(client, git_path, None, merge_commit_sha) if git_path else None
-    await db.rollback()  # nessuna transazione aperta durante la rete, si riparte da zero
 
     locked = await _lock_all(db, feature_id, rev_id)
     merged = locked.extra
@@ -360,9 +409,7 @@ async def mark_revision_merged(
         await db.rollback()  # già pubblicata
         return
     feature = locked.feature
-    first_publication = feature.published_revision_id is None
-    if fetched is not None:
-        await _import_locked(db, locked, fetched, merged, copy=False)
+    # stato di pubblicazione prima dell'import: lo snapshot `git` vede la revisione `merged`
     if locked.published is not None:
         locked.published.status = TlRevisionStatus.SUPERSEDED
     merged.status = TlRevisionStatus.MERGED
@@ -372,6 +419,19 @@ async def mark_revision_merged(
     feature.published_revision_id = merged.id
     if feature.working_revision_id == merged.id:
         feature.working_revision_id = None
+    if fetched is not None:
+        await _import_locked(db, locked, fetched, merged, copy=False)
+    elif git_path:
+        # il file non c'è al commit di merge: incoerente finché un import non lo ritrova
+        await issues_svc.open_issue(
+            db,
+            kind=TlIssueKind.FILE_DELETED,
+            feature_id=feature.id,
+            revision_id=merged.id,
+            path=git_path,
+            commit_sha=merge_commit_sha,
+            detail={"key": "file_deleted", "path": git_path},
+        )
     history.record_event(
         db,
         feature.id,
@@ -384,22 +444,40 @@ async def mark_revision_merged(
             "merged_commit_sha": merge_commit_sha,
         },
     )
-    await _finalize(db, locked, first_publication)
+    await _finalize(db, locked)
     await db.commit()
 
 
-async def handle_removed_file(db: AsyncSession, path: str, commit_sha: str) -> None:
+async def handle_removed_file(
+    db: AsyncSession,
+    path: str,
+    commit_sha: str,
+    client: TlGitClient | None = None,
+    present_paths: Iterable[str] = (),
+) -> None:
     """Un file gestito è stato cancellato: anomalia `file_deleted`. Un commit.
 
-    Spostamento (stesso header altrove): se il file nuovo è già stato importato `git_path`
-    punta al nuovo percorso e qui non succede nulla; se viene importato dopo, l'import risolve
-    l'anomalia `file_deleted` della feature. Il sync importa prima i file presenti.
+    Spostamento: `present_paths` sono i file aggiunti/modificati/rinominati dello stesso
+    compare. Se uno di questi a `commit_sha` ha lo stesso header della feature non si apre
+    nulla (l'import di quel file aggiorna `git_path`), in qualunque ordine li tratti il sync.
+    Se il file nuovo è già stato importato, `git_path` punta già altrove e qui non succede nulla.
     """
-    feature_id = (
-        await db.execute(select(TlFeature.id).where(TlFeature.git_path == path).limit(1))
-    ).scalar_one_or_none()
-    if feature_id is None:
+    row = (
+        await db.execute(
+            select(TlFeature.id, TlFeature.code).where(TlFeature.git_path == path).limit(1)
+        )
+    ).first()
+    await db.rollback()  # nessuna transazione aperta durante la rete
+    if row is None:
         return
+    feature_id, code = row
+    if client is not None:
+        for other in present_paths:
+            if other == path or not other.endswith(".feature"):
+                continue
+            file = await client.get_file(other, commit_sha)
+            if file is not None and parse_feature_file(file.text).code == code:
+                return  # spostato nello stesso compare
     feature = await features_svc._lock_feature(db, feature_id)
     if feature.git_path != path:
         await db.rollback()

@@ -253,3 +253,27 @@ async def test_parallel_resolve_last_two_structural(client, scope, actor):
         )
         assert actions.count("tl.feature.implemented") == 1
         assert actions.count("tl.issue.updated") == 2
+
+
+async def test_resolve_last_structural_with_parse_error_open_stays_designed(
+    client, scope, actor
+):
+    feat = await _new_feature(client, scope, actor)
+    fid = uuid.UUID(feat["id"])
+    async with TestSession() as s:
+        rev_id = uuid.UUID(feat["working_revision"]["id"])
+        await s.execute(
+            update(TlFeature)
+            .where(TlFeature.id == fid)
+            .values(status=TlFeatureStatus.DESIGNED, published_revision_id=rev_id)
+        )
+        await s.commit()
+    i1 = await _open(kind=TlIssueKind.STRUCTURAL_CHANGE, feature_id=fid, detail={"key": "a"})
+    i2 = await _open(kind=TlIssueKind.PARSE_ERROR, feature_id=fid, detail={"key": "p"})
+    body = {"status": "resolved", "actor_email": actor["email"]}
+    assert (await client.patch(f"{BASE}/issues/{i1}", json=body)).status_code == 200
+    async with TestSession() as s:
+        assert (await s.get(TlFeature, fid)).status == TlFeatureStatus.DESIGNED
+    assert (await client.patch(f"{BASE}/issues/{i2}", json=body)).status_code == 200
+    async with TestSession() as s:
+        assert (await s.get(TlFeature, fid)).status == TlFeatureStatus.IMPLEMENTED
