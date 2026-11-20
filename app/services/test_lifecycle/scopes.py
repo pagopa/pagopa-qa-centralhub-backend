@@ -80,7 +80,16 @@ async def create_scope(db: AsyncSession, data: TlScopeCreate) -> TlScope:
 
 
 async def update_scope(db: AsyncSession, scope_id: uuid.UUID, data: TlScopeUpdate) -> TlScope:
-    scope = await db.get(TlScope, scope_id)
+    # Lock della riga: create_feature blocca lo stesso ambito, quindi il controllo
+    # "nessuna feature" resta valido fino al commit.
+    scope = (
+        await db.execute(
+            select(TlScope)
+            .where(TlScope.id == scope_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
     if scope is None:
         raise ScopeNotFoundError(str(scope_id))
     changes = data.model_dump(exclude_unset=True)

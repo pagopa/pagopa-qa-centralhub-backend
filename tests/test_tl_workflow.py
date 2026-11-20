@@ -124,10 +124,20 @@ async def test_submit_blocked_reasons_listed(client, scope, actor):
 
 async def test_submit_blocked_when_reviewer_is_owner(client, scope, actor):
     feat = await _new_feature(client, scope, actor, design_owner_id=actor["id"])
-    await client.patch(
+    resp = await client.patch(
         f"{BASE}/features/{feat['id']}",
         json={"reviewer_id": actor["id"], "actor_email": actor["email"]},
     )
+    # R17: l'API rifiuta reviewer == owner; la guardia del submit resta come difesa.
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "reviewer_is_owner"
+    async with TestSession() as s:
+        await s.execute(
+            update(TlFeature)
+            .where(TlFeature.id == uuid.UUID(feat["id"]))
+            .values(reviewer_id=uuid.UUID(actor["id"]))
+        )
+        await s.commit()
     detail = await _get(client, feat["id"], actor["email"])
     reasons = _transition(detail, "submit")["reasons"]
     assert "Il reviewer coincide con l'owner di progettazione" in reasons

@@ -51,7 +51,16 @@ class ScenarioNotFoundError(Exception):
 
 
 class UnknownUserError(Exception):
-    """Un id utente (owner/reviewer) non esiste."""
+    """Un id utente (owner/reviewer/owner implementazione) non esiste o non è attivo."""
+
+
+class InvalidAssignmentError(Exception):
+    """Assegnazione di persone incoerente (es. reviewer uguale all'owner di progettazione)."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
 
 class StaleLockError(Exception):
@@ -70,7 +79,13 @@ async def _ensure_users(db: AsyncSession, ids: list[uuid.UUID | None]) -> None:
     wanted = {i for i in ids if i is not None}
     if not wanted:
         return
-    found = set((await db.execute(select(User.id).where(User.id.in_(wanted)))).scalars())
+    found = set(
+        (
+            await db.execute(
+                select(User.id).where(User.id.in_(wanted), User.is_active.is_(True))
+            )
+        ).scalars()
+    )
     if wanted - found:
         raise UnknownUserError(", ".join(str(i) for i in wanted - found))
 
@@ -235,15 +250,50 @@ async def create_feature(db: AsyncSession, data: TlFeatureCreate) -> uuid.UUID:
     return feature.id
 
 
+# Campi che sono guardie del submit: modificabili solo con la revisione di lavoro in bozza.
+_DRAFT_ONLY_FIELDS = ("design_owner_id", "jira_design_key")
+# Il reviewer può essere riassegnato anche durante la review (R17).
+_REVIEWER_STATUSES = (TlRevisionStatus.DRAFT, TlRevisionStatus.IN_REVIEW)
+
+
 async def update_feature(
     db: AsyncSession, feature_id: uuid.UUID, data: TlFeatureUpdate
 ) -> TlFeatureDetail:
     actor = await resolve_actor(db, data.actor_email)
     changes = data.model_dump(exclude_unset=True, exclude={"actor_email"})
+    feature = await _lock_feature(db, feature_id)
+    # Solo i cambi effettivi contano per i vincoli di stato (un PATCH idempotente non è bloccato).
+    changes = {k: v for k, v in changes.items() if getattr(feature, k) != v}
+    working_status: TlRevisionStatus | None = None
+    if feature.working_revision_id is not None:
+        working_status = (
+            await db.execute(
+                select(TlFeatureRevision.status)
+                .where(TlFeatureRevision.id == feature.working_revision_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+    if any(k in changes for k in _DRAFT_ONLY_FIELDS) and working_status != TlRevisionStatus.DRAFT:
+        raise RevisionLockedError(working_status or TlRevisionStatus.APPROVED)
+    if "reviewer_id" in changes:
+        if working_status not in _REVIEWER_STATUSES:
+            raise RevisionLockedError(working_status or TlRevisionStatus.APPROVED)
+        if changes["reviewer_id"] is None and working_status == TlRevisionStatus.IN_REVIEW:
+            raise InvalidAssignmentError(
+                "reviewer_required",
+                "Durante la review il reviewer non può essere rimosso, solo sostituito",
+            )
     await _ensure_users(
         db, [changes.get(k) for k in ("design_owner_id", "reviewer_id", "impl_owner_id")]
     )
-    feature = await _lock_feature(db, feature_id)
+    if "reviewer_id" in changes or "design_owner_id" in changes:
+        owner = changes.get("design_owner_id", feature.design_owner_id)
+        reviewer = changes.get("reviewer_id", feature.reviewer_id)
+        if owner is not None and owner == reviewer:
+            raise InvalidAssignmentError(
+                "reviewer_is_owner",
+                "Il reviewer non può coincidere con l'owner di progettazione",
+            )
     for key, value in changes.items():
         setattr(feature, key, value)
     if changes:

@@ -30,6 +30,9 @@ REOPEN_PHASE1_REASON = "Disponibile dopo il merge del feature file (fase Git)"
 REVIEWER_REQUIRED_REASON = "Accesso come reviewer richiesto"
 NOT_REVIEWER_REASON = "Solo il reviewer assegnato può eseguire questa azione"
 NOTE_REQUIRED_REASON = "Serve una nota per richiedere modifiche"
+REVIEWER_IS_OWNER_REASON = "Il reviewer coincide con l'owner di progettazione"
+# Motivi che identificano un attore non abilitato (403) invece di una guardia bloccante (409).
+_ACTOR_REASONS = (REVIEWER_REQUIRED_REASON, NOT_REVIEWER_REASON)
 
 
 @dataclass
@@ -60,7 +63,7 @@ def _submit_reasons(
     if feature.reviewer_id is None:
         reasons.append("Manca il reviewer")
     elif feature.reviewer_id == feature.design_owner_id:
-        reasons.append("Il reviewer coincide con l'owner di progettazione")
+        reasons.append(REVIEWER_IS_OWNER_REASON)
     if not feature.jira_design_key:
         reasons.append("Manca la chiave Jira di progettazione")
     if not revision.product_issue_key and not revision.reverse_engineering:
@@ -107,9 +110,13 @@ def available_transitions(
     else:
         submit = _submit_reasons(feature, revision, view)
         review = _review_reasons(feature, revision, actor)
+        approve = list(review)
+        if not approve and feature.reviewer_id == feature.design_owner_id:
+            # Difesa in profondità: l'owner non può approvare il proprio lavoro.
+            approve = [REVIEWER_IS_OWNER_REASON]
         checks = [
             TransitionCheck(TlTransitionAction.SUBMIT.value, not submit, submit),
-            TransitionCheck(TlTransitionAction.APPROVE.value, not review, list(review)),
+            TransitionCheck(TlTransitionAction.APPROVE.value, not approve, approve),
             TransitionCheck(TlTransitionAction.REQUEST_CHANGES.value, not review, list(review)),
         ]
     checks.append(TransitionCheck(TlTransitionAction.REOPEN.value, False, [REOPEN_PHASE1_REASON]))
@@ -143,6 +150,7 @@ async def apply_transition(
         if (
             action in (TlTransitionAction.APPROVE, TlTransitionAction.REQUEST_CHANGES)
             and rev.status == TlRevisionStatus.IN_REVIEW
+            and any(r in _ACTOR_REASONS for r in check.reasons)
         ):
             raise NotReviewerError(actor.email)
         raise TransitionNotAllowedError(check.reasons)

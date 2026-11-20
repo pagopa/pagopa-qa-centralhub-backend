@@ -106,7 +106,14 @@ def _translate(exc: Exception) -> HTTPException:
     if isinstance(exc, features_svc.UnknownUserError):
         return HTTPException(
             status_code=422,
-            detail={"code": "unknown_user", "message": "Utente indicato non esistente"},
+            detail={
+                "code": "unknown_user",
+                "message": "Utente indicato non esistente o non attivo",
+            },
+        )
+    if isinstance(exc, features_svc.InvalidAssignmentError):
+        return HTTPException(
+            status_code=422, detail={"code": exc.code, "message": exc.message}
         )
     if isinstance(exc, features_svc.StaleLockError):
         return HTTPException(
@@ -265,7 +272,8 @@ async def transition_revision(
     """Transizione di workflow. Bloccata -> 409 con `reasons`; non reviewer -> 403.
 
     `request_changes` senza nota è bloccata con 409 `transition_not_allowed` (nessuna
-    validazione di schema: la nota è obbligatoria solo per quell'azione).
+    validazione di schema: la nota è obbligatoria solo per quell'azione). Una nota oltre
+    5000 caratteri (come i commenti) è rifiutata con 422 dallo schema.
     """
     try:
         return await workflow_svc.apply_transition(

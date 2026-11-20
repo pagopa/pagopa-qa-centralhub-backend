@@ -83,6 +83,7 @@ PQ_KEY_PATTERN = re.compile(r"^PQ-\d+$")
 ISSUE_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9]+-\d+$")
 FEATURE_TITLE_MAX = 255  # limite della colonna tl_feature_revisions.title
 SCENARIO_TITLE_MAX = 500
+COMMENT_MAX_LEN = 5000  # corpo dei commenti e nota di "richiedi modifiche"
 
 _DESCRIPTION_FORBIDDEN_RE = re.compile(
     r"^(@|#|(Funzionalit[àa]|Contesto|Scenario|Schema dello scenario|Esempi|Esempio|Regola"
@@ -127,6 +128,26 @@ def _check_description(value: str | None) -> str | None:
                 "La descrizione non può contenere righe che iniziano con @, # "
                 "o con una parola chiave di sezione Gherkin"
             )
+    return value
+
+
+URL_MAX_LEN = 1024
+_URL_SCHEME_RE = re.compile(r"^https?://\S", re.IGNORECASE)
+
+
+def _check_url(value: str | None) -> str | None:
+    """Link su una sola riga, http(s); vuoto → null (finisce nel feature file generato)."""
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    if any(c in value for c in "\r\n\v\f\x85\u2028\u2029"):
+        raise ValueError("Il link deve stare su una sola riga")
+    if not _URL_SCHEME_RE.match(value):
+        raise ValueError("Il link deve iniziare con http:// o https://")
+    if len(value) > URL_MAX_LEN:
+        raise ValueError(f"Il link può avere al massimo {URL_MAX_LEN} caratteri")
     return value
 
 
@@ -204,6 +225,7 @@ class TlRevisionUpdate(BaseModel):
         return _feature_title(value)
 
     _v_description = field_validator("description")(_check_description)
+    _v_requirements_url = field_validator("requirements_url")(_check_url)
 
     @field_validator("product_issue_key")
     @classmethod
@@ -247,6 +269,7 @@ class TlScenarioUpdate(BaseModel):
         return _scenario_title(value)
 
     _v_tags = field_validator("extra_tags")(_check_extra_tags)
+    _v_detail_link = field_validator("detail_link")(_check_url)
 
     @field_validator("kind", "polarity", "steps", "position", "extra_tags")
     @classmethod
@@ -347,6 +370,14 @@ class TlTransitionRequest(BaseModel):
     actor_email: str
     note: str | None = None
 
+    @field_validator("note")
+    @classmethod
+    def _v_note(cls, value: str | None) -> str | None:
+        # Stesso limite del corpo dei commenti: la nota diventa un commento di review.
+        if value is not None and len(value.strip()) > COMMENT_MAX_LEN:
+            raise ValueError(f"La nota non può superare {COMMENT_MAX_LEN} caratteri")
+        return value
+
 
 class TlTransitionOut(BaseModel):
     action: TlTransitionAction
@@ -374,8 +405,6 @@ class TlVersionOut(BaseModel):
     created_at: datetime
 
 # ── Commenti di review, anteprima, validazione live ──────────────────────────
-
-COMMENT_MAX_LEN = 5000
 
 
 class TlCommentCreate(BaseModel):

@@ -163,6 +163,15 @@ async def set_resolved(
     if row is None:
         raise CommentNotFoundError(str(comment_id))
     comment, tag, feature_id = row
+    rev_status = (
+        await db.execute(
+            select(TlFeatureRevision.status).where(
+                TlFeatureRevision.id == comment.revision_id
+            )
+        )
+    ).scalar_one()
+    if rev_status not in COMMENTABLE_STATUSES:
+        raise RevisionNotCommentableError(rev_status)
     if comment.resolved != resolved:
         comment.resolved = resolved
         history.record_event(

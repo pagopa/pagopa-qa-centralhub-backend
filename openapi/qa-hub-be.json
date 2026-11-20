@@ -7317,7 +7317,7 @@
           "test-lifecycle"
         ],
         "summary": "Transition Revision",
-        "description": "Transizione di workflow. Bloccata -> 409 con `reasons`; non reviewer -> 403.\n\n`request_changes` senza nota è bloccata con 409 `transition_not_allowed` (nessuna\nvalidazione di schema: la nota è obbligatoria solo per quell'azione).",
+        "description": "Transizione di workflow. Bloccata -> 409 con `reasons`; non reviewer -> 403.\n\n`request_changes` senza nota è bloccata con 409 `transition_not_allowed` (nessuna\nvalidazione di schema: la nota è obbligatoria solo per quell'azione). Una nota oltre\n5000 caratteri (come i commenti) è rifiutata con 422 dallo schema.",
         "operationId": "transition_revision_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__transitions_post",
         "parameters": [
           {

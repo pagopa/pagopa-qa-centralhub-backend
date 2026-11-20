@@ -209,6 +209,13 @@ class RenderFeature:
     scenarios: list[RenderScenario] = field(default_factory=list)
 
 
+def _single_line(value: str | None) -> str:
+    """Prima riga non vuota, ripulita: un valore su più righe non deve iniettare Gherkin."""
+    if not value:
+        return ""
+    return next((ln.strip() for ln in value.splitlines() if ln.strip()), "")
+
+
 def _indent_block(text: str, indent: str) -> list[str]:
     return [
         (indent + line.strip()) if line.strip() else "" for line in text.strip("\n").split("\n")
@@ -232,8 +239,9 @@ def render_feature_file(feature: RenderFeature) -> str:
         tags = [f"@{t}" for t in sc.extra_tags] + [f"@{sc.polarity.value}"]
         out.append("  " + " ".join(tags))
         out.append(f"  {sc.tag}")
-        if sc.detail_link:
-            out.append(f"  #link:{sc.detail_link}")
+        link = _single_line(sc.detail_link)
+        if link:
+            out.append(f"  #link:{link}")
         is_outline = sc.kind == TlScenarioKind.OUTLINE
         out.append(f"  {'Schema dello scenario' if is_outline else 'Scenario'}: {sc.title}")
         out.extend(_indent_block(sc.steps, "    "))
