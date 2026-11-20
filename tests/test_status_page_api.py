@@ -91,7 +91,7 @@ def _app_body(**kw: Any) -> dict[str, Any]:
 @pytest.mark.anyio
 async def test_status_and_summary(client: AsyncClient) -> None:
     summary = SummaryOut(
-        total=1, aligned=1, drift=0, unreachable=0, untested=0, last_success_at=None
+        total=1, aligned=1, drift=0, unreachable=0, untested=0, under_qa=0, last_success_at=None
     )
     with (
         patch(

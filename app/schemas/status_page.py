@@ -21,7 +21,7 @@ RunKind = Literal["NRT", "QG", "TAS"]
 RunOutcome = Literal["PASSED", "FAILED", "NEUTRAL"]
 EnvTarget = Literal["DEV", "UAT", "PROD"]
 AnyTarget = Literal["REPO", "DEV", "UAT", "PROD"]
-AppFlag = Literal["ALIGNED", "DRIFT", "UNREACHABLE", "UNTESTED"]
+AppFlag = Literal["ALIGNED", "DRIFT", "UNREACHABLE", "UNTESTED", "UNDER_QA"]
 
 
 class SyncStatusOut(BaseModel):
@@ -136,6 +136,7 @@ class SummaryOut(BaseModel):
     drift: int
     unreachable: int
     untested: int
+    under_qa: int
     last_success_at: datetime | None
 
 
