@@ -53,25 +53,24 @@ def record_event(
     )
 
 
-async def snapshot(
-    db: AsyncSession,
-    feature: TlFeature,
-    revision: TlFeatureRevision,
-    actor: User,
-    origin: str = "hub",
-) -> TlFeatureVersion:
-    """Crea la versione: metadati della revisione, scenari (tag + contenuto) e file generato."""
+async def build_render(
+    db: AsyncSession, feature: TlFeature, revision: TlFeatureRevision
+) -> tuple[RenderFeature, list[tuple[TlScenario, TlScenarioContent]]]:
+    """Costruisce il modello di rendering della revisione (e le righe scenario/contenuto)."""
     scope_code = (
         await db.execute(select(TlScope.code).where(TlScope.id == feature.scope_id))
     ).scalar_one()
-    rows = (
-        await db.execute(
-            select(TlScenario, TlScenarioContent)
-            .join(TlScenarioContent, TlScenarioContent.scenario_id == TlScenario.id)
-            .where(TlScenarioContent.revision_id == revision.id)
-            .order_by(TlScenarioContent.position)
-        )
-    ).all()
+    rows = [
+        (s, c)
+        for s, c in (
+            await db.execute(
+                select(TlScenario, TlScenarioContent)
+                .join(TlScenarioContent, TlScenarioContent.scenario_id == TlScenario.id)
+                .where(TlScenarioContent.revision_id == revision.id)
+                .order_by(TlScenarioContent.position)
+            )
+        ).all()
+    ]
     render = RenderFeature(
         code=feature.code,
         feature_tag=feature_tag(scope_code, feature.number),
@@ -92,6 +91,18 @@ async def snapshot(
             for s, c in rows
         ],
     )
+    return render, rows
+
+
+async def snapshot(
+    db: AsyncSession,
+    feature: TlFeature,
+    revision: TlFeatureRevision,
+    actor: User,
+    origin: str = "hub",
+) -> TlFeatureVersion:
+    """Crea la versione: metadati della revisione, scenari (tag + contenuto) e file generato."""
+    render, rows = await build_render(db, feature, revision)
     data: dict[str, Any] = {
         "feature_code": feature.code,
         "revision": {

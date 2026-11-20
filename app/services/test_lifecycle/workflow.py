@@ -12,7 +12,6 @@ from app.models.test_lifecycle import (
     TlFeature,
     TlFeatureRevision,
     TlFeatureStatus,
-    TlReviewComment,
     TlRevisionStatus,
 )
 from app.models.user import User
@@ -24,6 +23,7 @@ from app.schemas.test_lifecycle import (
 )
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import history
+from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle.actors import resolve_actor
 
 REOPEN_PHASE1_REASON = "Disponibile dopo il merge del feature file (fase Git)"
@@ -163,11 +163,7 @@ async def apply_transition(
         rev.status = TlRevisionStatus.DRAFT
         if first_publication:
             feature.status = TlFeatureStatus.DRAFT
-        db.add(
-            TlReviewComment(
-                revision_id=rev.id, scenario_id=None, author=actor.email, body=text
-            )
-        )
+        reviews_svc.create_comment(db, feature.id, rev, actor, text, emit_event=False)
         history.record_event(
             db, feature.id, "tl.revision.changes_requested", actor,
             {"revision_id": str(rev.id), "revision_number": rev.number, "note": text},

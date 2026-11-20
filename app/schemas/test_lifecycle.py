@@ -373,4 +373,63 @@ class TlVersionOut(BaseModel):
     actor: str
     created_at: datetime
 
+# ── Commenti di review, anteprima, validazione live ──────────────────────────
+
+COMMENT_MAX_LEN = 5000
+
+
+class TlCommentCreate(BaseModel):
+    actor_email: str
+    body: str
+    scenario_id: uuid.UUID | None = None
+
+    @field_validator("body")
+    @classmethod
+    def _body(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Il commento non può essere vuoto")
+        if len(value) > COMMENT_MAX_LEN:
+            raise ValueError(f"Il commento non può superare {COMMENT_MAX_LEN} caratteri")
+        return value
+
+
+class TlCommentResolve(BaseModel):
+    actor_email: str
+    resolved: bool
+
+
+class TlCommentOut(BaseModel):
+    id: uuid.UUID
+    revision_id: uuid.UUID
+    scenario_id: uuid.UUID | None = None
+    scenario_tag: str | None = None
+    author: str
+    body: str
+    resolved: bool
+    created_at: datetime
+
+
+class TlPreviewError(BaseModel):
+    scenario_tag: str | None = None
+    line: int
+    message: str
+
+
+class TlPreviewOut(BaseModel):
+    file: str
+    errors: list[TlPreviewError] = []
+
+
+class TlGherkinValidateRequest(BaseModel):
+    steps: str
+    kind: TlScenarioKind = TlScenarioKind.SCENARIO
+    examples: TlExamples | None = None
+    background: bool = False
+
+
+class TlGherkinValidateOut(BaseModel):
+    errors: list[TlLineError] = []
+
+
 TlFeatureDetail.model_rebuild()

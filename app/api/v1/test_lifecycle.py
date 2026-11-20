@@ -7,11 +7,17 @@ from fastapi import APIRouter, HTTPException, status
 from app.deps import DbDep
 from app.models.test_lifecycle import TlFeatureStatus
 from app.schemas.test_lifecycle import (
+    TlCommentCreate,
+    TlCommentOut,
+    TlCommentResolve,
     TlFeatureCreate,
     TlFeatureDetail,
     TlFeatureListItem,
     TlFeatureUpdate,
+    TlGherkinValidateOut,
+    TlGherkinValidateRequest,
     TlHistoryItem,
+    TlPreviewOut,
     TlRevisionOut,
     TlRevisionUpdate,
     TlScenarioCreate,
@@ -25,6 +31,7 @@ from app.schemas.test_lifecycle import (
 )
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import history as history_svc
+from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle import scopes as scopes_svc
 from app.services.test_lifecycle import workflow as workflow_svc
 from app.services.test_lifecycle.actors import UnknownActorError
@@ -130,6 +137,19 @@ def _translate(exc: Exception) -> HTTPException:
             detail={
                 "code": "not_reviewer",
                 "message": "Solo il reviewer assegnato può approvare o richiedere modifiche",
+            },
+        )
+    if isinstance(exc, reviews_svc.CommentNotFoundError):
+        return HTTPException(status_code=404, detail="Commento non trovato")
+    if isinstance(exc, reviews_svc.RevisionNotCommentableError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "revision_not_commentable",
+                "message": (
+                    "La revisione non accetta commenti nello stato "
+                    f"{exc.status.value}: si commenta solo in bozza o in revisione"
+                ),
             },
         )
     raise exc
@@ -270,3 +290,60 @@ async def get_version(feature_id: uuid.UUID, version_id: uuid.UUID, db: DbDep) -
         return await history_svc.get_version(db, feature_id, version_id)
     except Exception as exc:
         raise _translate(exc) from exc
+
+
+# ── Commenti di review, anteprima, validazione live ──────────────────────────
+
+@router.get(
+    "/features/{feature_id}/revisions/{revision_id}/comments",
+    response_model=list[TlCommentOut],
+)
+async def list_comments(
+    feature_id: uuid.UUID, revision_id: uuid.UUID, db: DbDep
+) -> list[TlCommentOut]:
+    try:
+        return await reviews_svc.list_comments(db, feature_id, revision_id)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post(
+    "/features/{feature_id}/revisions/{revision_id}/comments",
+    response_model=TlCommentOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_comment(
+    feature_id: uuid.UUID, revision_id: uuid.UUID, body: TlCommentCreate, db: DbDep
+) -> TlCommentOut:
+    try:
+        return await reviews_svc.add_comment(db, feature_id, revision_id, body)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.patch("/comments/{comment_id}", response_model=TlCommentOut)
+async def resolve_comment(
+    comment_id: uuid.UUID, body: TlCommentResolve, db: DbDep
+) -> TlCommentOut:
+    try:
+        return await reviews_svc.set_resolved(db, comment_id, body.actor_email, body.resolved)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get(
+    "/features/{feature_id}/revisions/{revision_id}/preview", response_model=TlPreviewOut
+)
+async def preview_revision(
+    feature_id: uuid.UUID, revision_id: uuid.UUID, db: DbDep
+) -> TlPreviewOut:
+    try:
+        return await reviews_svc.preview(db, feature_id, revision_id)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/gherkin/validate", response_model=TlGherkinValidateOut)
+async def validate_gherkin(body: TlGherkinValidateRequest) -> TlGherkinValidateOut:
+    """Validazione live di un blocco di step: pura, nessuna dipendenza dal DB."""
+    return TlGherkinValidateOut(errors=reviews_svc.validate_block(body))
