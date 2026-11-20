@@ -89,6 +89,7 @@ microservice-chart:
     REDIS_URL: "qa-centralhub-redis-url"
     ENCRYPTION_KEY: "qa-centralhub-encryption-key"
     GITHUB_TOKEN: "qa-centralhub-github-token"
+    TAS_GITHUB_TOKEN: "pagopa-platform-tas-github-bot-pat"
     JIRA_API_TOKEN: "qa-centralhub-jira-api-token"
 
   keyvault:

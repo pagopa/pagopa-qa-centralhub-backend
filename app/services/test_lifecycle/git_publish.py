@@ -9,7 +9,6 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -25,6 +24,7 @@ from app.schemas.test_lifecycle import TlFeatureDetail
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import history
 from app.services.test_lifecycle import issues as issues_svc
+from app.services.test_lifecycle.advisory_lock import try_advisory_lock
 from app.services.test_lifecycle.gherkin import render_feature_file
 from app.services.test_lifecycle.git_client import TlGitClient, TlGitError
 
@@ -95,24 +95,11 @@ async def record_not_configured(db: AsyncSession, revision_id: uuid.UUID) -> Non
 
 @asynccontextmanager
 async def _pr_advisory_lock(db: AsyncSession, revision_id: uuid.UUID) -> AsyncIterator[None]:
-    """Lock advisory di sessione non bloccante su una connessione dedicata.
-
-    Una connessione propria perché la sessione ORM rilascia la sua a ogni commit, e il lock di
-    sessione appartiene alla connessione. Chiudere la connessione lo rilascia comunque.
-    """
-    engine = db.bind
-    assert engine is not None  # noqa: S101
-    async with engine.connect() as conn:
-        key = f"tl_pr:{revision_id}"
-        got = (
-            await conn.execute(text("SELECT pg_try_advisory_lock(hashtext(:k))"), {"k": key})
-        ).scalar_one()
+    """Lock advisory per revisione (non bloccante): `PublishInProgressError` se occupato."""
+    async with try_advisory_lock(db, f"tl_pr:{revision_id}") as got:
         if not got:
             raise PublishInProgressError(str(revision_id))
-        try:
-            yield
-        finally:
-            await conn.execute(text("SELECT pg_advisory_unlock(hashtext(:k))"), {"k": key})
+        yield
 
 
 async def _record_failure(

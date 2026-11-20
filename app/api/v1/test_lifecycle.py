@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import asdict
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -8,6 +9,7 @@ from sqlalchemy import case, select
 
 from app.deps import DbDep
 from app.models.test_lifecycle import (
+    TlGitSyncState,
     TlFeatureStatus,
     TlIssueKind,
     TlIssueStatus,
@@ -27,6 +29,8 @@ from app.schemas.test_lifecycle import (
     TlIssueOut,
     TlIssueUpdate,
     TlPreviewOut,
+    TlGitStatusOut,
+    TlGitSyncSummaryOut,
     TlPrRequest,
     TlRevisionOut,
     TlRevisionUpdate,
@@ -43,6 +47,7 @@ from app.schemas.test_lifecycle import (
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_client as git_client_mod
 from app.services.test_lifecycle import git_publish as git_publish_svc
+from app.services.test_lifecycle import git_sync as git_sync_svc
 from app.services.test_lifecycle import history as history_svc
 from app.services.test_lifecycle import issues as issues_svc
 from app.services.test_lifecycle import reviews as reviews_svc
@@ -209,6 +214,14 @@ def _translate(exc: Exception) -> HTTPException:
             status_code=409,
             detail={"code": "pr_in_progress", "message": "Creazione della PR già in corso"},
         )
+    if isinstance(exc, git_sync_svc.SyncInProgress):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "sync_in_progress",
+                "message": "Sincronizzazione con Git già in corso",
+            },
+        )
     if isinstance(exc, git_publish_svc.RepoFolderMissingError):
         return HTTPException(
             status_code=409,
@@ -356,6 +369,38 @@ async def publish_revision_pr(
         return await git_publish_svc.publish_revision(db, feature_id, revision_id, actor, client)
     except Exception as exc:
         raise _translate(exc) from exc
+
+
+@router.post("/git/sync", response_model=TlGitSyncSummaryOut)
+async def git_sync(body: TlPrRequest, db: DbDep) -> TlGitSyncSummaryOut:
+    """Sincronizza ora (permesso UI manage:tl_git). 409 se già in corso, 503 senza token,
+    502 per errori GitHub (salvato anche in `last_error`)."""
+    try:
+        await resolve_actor(db, body.actor_email)
+        client = git_client_mod.get_git_client()
+        summary = await git_sync_svc.run_sync(db, client)
+        return TlGitSyncSummaryOut(**asdict(summary))
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/git/status", response_model=TlGitStatusOut)
+async def git_status(db: DbDep) -> TlGitStatusOut:
+    try:
+        git_client_mod.get_git_client()
+        configured = True
+    except TlGitNotConfigured:
+        configured = False
+    state = await db.get(TlGitSyncState, 1)
+    if state is None:
+        return TlGitStatusOut(configured=configured)
+    return TlGitStatusOut(
+        configured=configured,
+        last_main_sha=state.last_main_sha,
+        last_run_at=state.last_run_at,
+        last_error=state.last_error,
+        last_summary=state.last_summary,
+    )
 
 
 @router.get("/features/{feature_id}/history", response_model=list[TlHistoryItem])

@@ -14,6 +14,7 @@ from app.tasks import (
     sync_psp_fee,  # noqa: F401  (registers the task with celery_app)
     sync_sanp_health,  # noqa: F401  (registers the task with celery_app)
     sync_status_page,  # noqa: F401  (registers the task with celery_app)
+    sync_test_lifecycle,  # noqa: F401  (registers the task with celery_app)
 )
 
 ROME = ZoneInfo("Europe/Rome")
@@ -41,6 +42,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.sync_status_page.sync_status_page",
         "schedule": settings.status_page_sync_interval_s,  # every 15 minutes
         "options": {"expires": settings.status_page_sync_interval_s},
+    },
+    "sync-test-lifecycle-git": {
+        "task": "app.tasks.sync_test_lifecycle.sync_test_lifecycle_git",
+        "schedule": settings.tl_sync_interval_s,
+        "options": {"expires": settings.tl_sync_interval_s},
     },
     "sync-ea-map-weekly": {
         "task": "app.tasks.sync_ea.sync_ea",

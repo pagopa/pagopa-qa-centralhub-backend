@@ -394,6 +394,23 @@ class TlPrRequest(BaseModel):
     actor_email: str
 
 
+class TlGitSyncSummaryOut(BaseModel):
+    prs_merged: int
+    prs_closed: int
+    files_imported: int
+    issues_opened: int
+    steps_indexed: bool
+    head_sha: str
+
+
+class TlGitStatusOut(BaseModel):
+    configured: bool
+    last_main_sha: str | None = None
+    last_run_at: datetime | None = None
+    last_error: str | None = None
+    last_summary: dict[str, Any] | None = None
+
+
 class TlTransitionOut(BaseModel):
     action: TlTransitionAction
     allowed: bool
