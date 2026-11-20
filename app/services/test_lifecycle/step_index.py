@@ -146,8 +146,11 @@ def _compile(pattern: str, regex: bool) -> re.Pattern[str] | None:
             for part in _PLACEHOLDER_SPLIT.split(pattern)
             if part
         )
+    # behave's parse matcher is case-insensitive; regex mode stays case-sensitive. Regex mode
+    # uses a full match on purpose (per the brief), although behave itself uses re.match.
+    flags = re.DOTALL if regex else re.DOTALL | re.IGNORECASE
     try:
-        return re.compile(src, re.DOTALL)
+        return re.compile(src, flags)
     except re.error:
         return None
 
@@ -163,6 +166,8 @@ async def _fetch(client: _TreeClient, paths: list[str], ref: str) -> dict[str, s
 
     async def one(path: str) -> tuple[str, str | None]:
         async with sem:
+            # Deliberate: only TlGitError skips a file; any other error (network, etc.) aborts
+            # the whole rebuild so the existing index is never replaced by partial data.
             try:
                 f = await client.get_file(path, ref)
             except TlGitError as exc:

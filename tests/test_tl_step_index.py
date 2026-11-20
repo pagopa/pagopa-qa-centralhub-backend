@@ -98,6 +98,8 @@ def test_pattern_matches_parse_placeholders():
     assert not pattern_matches("pago", "pago molto")  # match completo
     assert pattern_matches("costo (EUR) {x}", "costo (EUR) 5")  # metacaratteri letterali
     assert pattern_matches("graffe {{x}}", "graffe {x}")
+    assert pattern_matches("Un utente {name}", "un UTENTE x")  # parse: case-insensitive
+    assert not pattern_matches("Ok", "ok", regex=True)  # regex: case-sensitive
     assert pattern_matches("^ok$", "ok", regex=True)
     assert not pattern_matches("ok", "ok davvero", regex=True)
 
