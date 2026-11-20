@@ -27,6 +27,7 @@ from app.api.v1 import (
     runs,
     sanp_health,
     suites,
+    test_lifecycle,
     test_metrics,
     tm,
     users,
@@ -61,3 +62,4 @@ router.include_router(suites.router, prefix="/suites", tags=["suites"])
 router.include_router(quality_gate.router, prefix="/quality-gate", tags=["quality-gate"])
 router.include_router(flaky.router, prefix="/flaky", tags=["flaky"])
 router.include_router(meta.router, prefix="/meta", tags=["meta"])
+router.include_router(test_lifecycle.router, prefix="/test-lifecycle", tags=["test-lifecycle"])
