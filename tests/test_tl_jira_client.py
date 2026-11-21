@@ -10,6 +10,7 @@ import pytest
 from app.config import settings
 from app.services.test_lifecycle import jira_client
 from app.services.test_lifecycle.jira_client import TlJiraClient, TlJiraError
+from app.services.test_lifecycle.jira_client import get_jira_client as real_get_jira_client
 
 BASE = "https://example.atlassian.net"
 
@@ -174,6 +175,8 @@ async def test_network_error_is_502():
 
 
 def test_not_configured_raises(monkeypatch):
+    # il conftest sostituisce get_jira_client: qui si prova quella reale
+    monkeypatch.setattr(jira_client, "get_jira_client", real_get_jira_client)
     monkeypatch.setattr(settings, "jira_base_url", "")
     with pytest.raises(jira_client.TlJiraNotConfigured):
         jira_client.get_jira_client()

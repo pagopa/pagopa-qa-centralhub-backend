@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.test_lifecycle import TlFeature, TlFeatureStatus, TlScope
 from app.schemas.test_lifecycle import TlScopeCreate, TlScopeOut, TlScopeUpdate
+from app.services.test_lifecycle import jira_tasks
 
 
 class ScopeNotFoundError(Exception):
@@ -66,6 +67,8 @@ async def _code_taken(db: AsyncSession, code: str, exclude_id: uuid.UUID | None 
 
 
 async def create_scope(db: AsyncSession, data: TlScopeCreate) -> TlScope:
+    # Epic QA verificata su Jira prima di aprire la transazione
+    await jira_tasks.verify_keys({"epic": data.jira_qa_epic_key}, epics={"epic"})
     if await _code_taken(db, data.code):
         raise ScopeCodeConflictError(data.code)
     scope = TlScope(**data.model_dump())
@@ -80,6 +83,8 @@ async def create_scope(db: AsyncSession, data: TlScopeCreate) -> TlScope:
 
 
 async def update_scope(db: AsyncSession, scope_id: uuid.UUID, data: TlScopeUpdate) -> TlScope:
+    if data.jira_qa_epic_key:
+        await jira_tasks.verify_keys({"epic": data.jira_qa_epic_key}, epics={"epic"})
     # Lock della riga: create_feature blocca lo stesso ambito, quindi il controllo
     # "nessuna feature" resta valido fino al commit.
     scope = (

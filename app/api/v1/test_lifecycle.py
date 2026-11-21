@@ -7,6 +7,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import case, select
 
+from app.config import settings
 from app.deps import DbDep
 from app.models.test_lifecycle import (
     TlFeatureStatus,
@@ -30,6 +31,7 @@ from app.schemas.test_lifecycle import (
     TlHistoryItem,
     TlIssueOut,
     TlIssueUpdate,
+    TlJiraActorRequest,
     TlPreviewOut,
     TlPrRequest,
     TlRebaseApply,
@@ -52,6 +54,8 @@ from app.services.test_lifecycle import git_publish as git_publish_svc
 from app.services.test_lifecycle import git_sync as git_sync_svc
 from app.services.test_lifecycle import history as history_svc
 from app.services.test_lifecycle import issues as issues_svc
+from app.services.test_lifecycle import jira_client as jira_client_mod
+from app.services.test_lifecycle import jira_tasks as jira_tasks_svc
 from app.services.test_lifecycle import rebase as rebase_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle import scopes as scopes_svc
@@ -81,6 +85,8 @@ async def create_scope(body: TlScopeCreate, db: DbDep) -> TlScopeOut:
                 "message": "Esiste già un ambito con questo codice",
             },
         ) from exc
+    except (jira_tasks_svc.JiraIssueNotFound, jira_tasks_svc.JiraNotAnEpic) as exc:
+        raise _translate(exc) from exc
     return await scopes_svc.get_scope_out(db, scope)
 
 
@@ -106,6 +112,8 @@ async def update_scope(scope_id: uuid.UUID, body: TlScopeUpdate, db: DbDep) -> T
                 "message": "Esiste già un ambito con questo codice",
             },
         ) from exc
+    except (jira_tasks_svc.JiraIssueNotFound, jira_tasks_svc.JiraNotAnEpic) as exc:
+        raise _translate(exc) from exc
     return await scopes_svc.get_scope_out(db, scope)
 
 
@@ -163,6 +171,31 @@ def _translate(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, history_svc.VersionNotFoundError):
         return HTTPException(status_code=404, detail="Versione non trovata")
+    if isinstance(exc, jira_tasks_svc.JiraIssueNotFound):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "jira_issue_not_found",
+                "message": f"L'issue Jira {exc.key} non esiste",
+                "key": exc.key,
+            },
+        )
+    if isinstance(exc, jira_tasks_svc.JiraNotAnEpic):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "jira_not_an_epic",
+                "message": f"{exc.key} non è un'Epic del progetto {settings.tl_jira_project}",
+                "key": exc.key,
+            },
+        )
+    if isinstance(exc, jira_client_mod.TlJiraNotConfigured):
+        return HTTPException(
+            status_code=503,
+            detail={"code": "jira_not_configured", "message": "Jira non è configurato"},
+        )
+    if isinstance(exc, jira_client_mod.TlJiraError):
+        return HTTPException(status_code=502, detail={"code": "jira_error", "message": exc.message})
     if isinstance(exc, rebase_svc.RebaseRequiredError):
         return HTTPException(
             status_code=409,
@@ -370,6 +403,20 @@ async def transition_revision(
         return await workflow_svc.apply_transition(
             db, feature_id, revision_id, body.action, body.actor_email, body.note
         )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/features/{feature_id}/jira/refresh", response_model=TlFeatureDetail)
+async def refresh_jira(
+    feature_id: uuid.UUID, body: TlJiraActorRequest, db: DbDep
+) -> TlFeatureDetail:
+    """Rilegge da Jira lo stato dei task collegati (Jira non configurato -> 503)."""
+    try:
+        await resolve_actor(db, body.actor_email)  # 403 prima di chiamare Jira
+        client = jira_client_mod.get_jira_client()
+        await jira_tasks_svc.refresh_feature(db, feature_id, body.actor_email, client)
+        return await features_svc.get_feature_detail(db, feature_id, body.actor_email)
     except Exception as exc:
         raise _translate(exc) from exc
 

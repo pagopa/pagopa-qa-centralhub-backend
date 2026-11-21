@@ -380,6 +380,16 @@ class TlFeatureListItem(BaseModel):
     updated_at: datetime
 
 
+class TlJiraLink(BaseModel):
+    role: Literal["design", "impl", "qa_epic", "product"]
+    key: str
+    summary: str | None = None
+    status: str | None = None
+    category: Literal["new", "indeterminate", "done"] | None = None
+    url: str | None = None
+    verified: bool = False
+
+
 class TlFeatureDetail(BaseModel):
     id: uuid.UUID
     code: str
@@ -400,6 +410,11 @@ class TlFeatureDetail(BaseModel):
     transitions: list[TlTransitionOut] = []
     git_path: str | None = None
     open_issues: int = 0
+    jira: list[TlJiraLink] = []
+    jira_error: str | None = None
+    jira_qa_epic_key: str | None = None
+    jira_qa_epic_effective: str | None = None
+    jira_warning: str | None = None
 
 
 # ── Workflow e storico ────────────────────────────────────────────────────────
@@ -529,8 +544,6 @@ class TlGherkinValidateOut(BaseModel):
     errors: list[TlLineError] = []
 
 
-TlFeatureDetail.model_rebuild()
-
 
 # ── Anomalie ─────────────────────────────────────────────────────────────────
 
@@ -614,3 +627,11 @@ class TlRebaseApply(BaseModel):
     lock_version: int
     actor_email: str
     choices: dict[str, RebaseSide] = {}
+
+
+# ── Jira (fase 3) ──────────────────────────────────────────────────────────────
+
+
+class TlJiraActorRequest(BaseModel):
+    actor_email: str
+

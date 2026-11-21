@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +31,7 @@ from app.schemas.test_lifecycle import (
     TlScenarioOut,
     TlScenarioUpdate,
 )
-from app.services.test_lifecycle import history
+from app.services.test_lifecycle import history, jira_tasks
 from app.services.test_lifecycle.actors import UnknownActorError, resolve_actor
 from app.services.test_lifecycle.gherkin import (
     feature_code,
@@ -217,6 +218,17 @@ async def _compact_positions(db: AsyncSession, revision_id: uuid.UUID) -> None:
 # ── feature ───────────────────────────────────────────────────────────────────
 
 async def create_feature(db: AsyncSession, data: TlFeatureCreate) -> uuid.UUID:
+    # Epic QA dell'ambito: stato letto da Jira prima della transazione, per il dettaglio
+    scope_epic = (
+        await db.execute(select(TlScope.jira_qa_epic_key).where(TlScope.id == data.scope_id))
+    ).scalar_one_or_none()
+    await db.rollback()
+    epic_entries: dict[str, Any] = {}
+    if scope_epic:
+        try:
+            epic_entries = await jira_tasks.verify_keys({"epic": scope_epic}, epics={"epic"})
+        except (jira_tasks.JiraIssueNotFound, jira_tasks.JiraNotAnEpic):
+            epic_entries = {}  # l'ambito resta con la sua Epic: la feature nasce comunque
     actor = await resolve_actor(db, data.actor_email)
     await _ensure_users(db, [data.design_owner_id])
     scope = (
@@ -238,6 +250,7 @@ async def create_feature(db: AsyncSession, data: TlFeatureCreate) -> uuid.UUID:
         status=TlFeatureStatus.DRAFT,
         design_owner_id=data.design_owner_id,
         created_by=actor.email,
+        jira_cache=epic_entries,
     )
     db.add(feature)
     await db.flush()
@@ -268,8 +281,13 @@ _REVIEWER_STATUSES = (TlRevisionStatus.DRAFT, TlRevisionStatus.IN_REVIEW)
 async def update_feature(
     db: AsyncSession, feature_id: uuid.UUID, data: TlFeatureUpdate
 ) -> TlFeatureDetail:
-    actor = await resolve_actor(db, data.actor_email)
     changes = data.model_dump(exclude_unset=True, exclude={"actor_email"})
+    # verifica su Jira prima di aprire la transazione (nessuna rete con lock tenuti)
+    jira_entries = await jira_tasks.verify_keys(
+        {k: changes.get(k) for k in ("jira_design_key", "jira_impl_key", "jira_qa_epic_key")},
+        epics={"jira_qa_epic_key"},
+    )
+    actor = await resolve_actor(db, data.actor_email)
     feature = await _lock_feature(db, feature_id)
     # Solo i cambi effettivi contano per i vincoli di stato (un PATCH idempotente non è bloccato).
     changes = {k: v for k, v in changes.items() if getattr(feature, k) != v}
@@ -305,6 +323,7 @@ async def update_feature(
             )
     for key, value in changes.items():
         setattr(feature, key, value)
+    jira_tasks.merge_cache(feature, jira_entries)
     if changes:
         history.record_event(
             db, feature.id, "tl.feature.updated", actor,
@@ -352,6 +371,8 @@ async def get_feature_detail(
             actor = await resolve_actor(db, actor_email)
         except UnknownActorError:
             actor = None
+    current = working or published
+    product_key = current.product_issue_key if current else None
     return TlFeatureDetail(
         id=feature.id,
         code=feature.code,
@@ -374,6 +395,10 @@ async def get_feature_detail(
         ),
         git_path=feature.git_path,
         open_issues=open_issues,
+        jira=jira_tasks.jira_links(feature, scope, product_key),
+        jira_error=feature.jira_error,
+        jira_qa_epic_key=feature.jira_qa_epic_key,
+        jira_qa_epic_effective=jira_tasks.effective_epic(feature, scope),
     )
 
 
@@ -455,11 +480,16 @@ async def list_features(
 async def update_revision(
     db: AsyncSession, feature_id: uuid.UUID, revision_id: uuid.UUID, data: TlRevisionUpdate
 ) -> TlRevisionOut:
+    changes = data.model_dump(exclude_unset=True, exclude={"actor_email", "lock_version"})
+    jira_entries = await jira_tasks.verify_keys({"product": changes.get("product_issue_key")})
     await resolve_actor(db, data.actor_email)
+    if jira_entries:
+        # ordine dei lock: feature -> revisione
+        feature = await _lock_feature(db, feature_id)
+        jira_tasks.merge_cache(feature, jira_entries)
     rev = await _lock_revision(db, feature_id, revision_id)
     _require_draft(rev)
     _require_lock(rev, data.lock_version)
-    changes = data.model_dump(exclude_unset=True, exclude={"actor_email", "lock_version"})
     for key, value in changes.items():
         setattr(rev, key, value)
     rev.lock_version += 1
