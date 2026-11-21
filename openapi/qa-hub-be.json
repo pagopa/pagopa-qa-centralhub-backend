@@ -7041,6 +7041,98 @@
         }
       }
     },
+    "/api/v1/test-lifecycle/features/{feature_id}/nrt": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Get Feature Nrt",
+        "description": "Esiti NRT per scenario: ultimo per ambiente, pass rate, flaky.",
+        "operationId": "get_feature_nrt_api_v1_test_lifecycle_features__feature_id__nrt_get",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlFeatureNrt"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/nrt/runs/{run_id}/links": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Get Run Links",
+        "description": "Esecuzioni di una run NRT collegate a feature dell'hub.",
+        "operationId": "get_run_links_api_v1_test_lifecycle_nrt_runs__run_id__links_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TlNrtRunLink"
+                  },
+                  "title": "Response Get Run Links Api V1 Test Lifecycle Nrt Runs  Run Id  Links Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/test-lifecycle/features/{feature_id}/revisions/{revision_id}": {
       "patch": {
         "tags": [
@@ -16203,6 +16295,39 @@
         ],
         "title": "TlFeatureListItem"
       },
+      "TlFeatureNrt": {
+        "properties": {
+          "feature_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Feature Id"
+          },
+          "last_run_at": {
+            "title": "Last Run At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "pass_rate": {
+            "title": "Pass Rate",
+            "type": "number",
+            "nullable": true
+          },
+          "scenarios": {
+            "items": {
+              "$ref": "#/components/schemas/TlScenarioNrt"
+            },
+            "type": "array",
+            "title": "Scenarios",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "feature_id"
+        ],
+        "title": "TlFeatureNrt"
+      },
       "TlFeatureStatus": {
         "type": "string",
         "enum": [
@@ -16629,6 +16754,76 @@
           "message"
         ],
         "title": "TlLineError"
+      },
+      "TlNrtEnvResult": {
+        "properties": {
+          "env": {
+            "type": "string",
+            "title": "Env"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "run_at": {
+            "title": "Run At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "allure_url": {
+            "title": "Allure Url",
+            "type": "string",
+            "nullable": true
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "env",
+          "status",
+          "run_id"
+        ],
+        "title": "TlNrtEnvResult"
+      },
+      "TlNrtRunLink": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Execution Id"
+          },
+          "feature_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Feature Id"
+          },
+          "feature_code": {
+            "type": "string",
+            "title": "Feature Code"
+          },
+          "scenario_tag": {
+            "type": "string",
+            "title": "Scenario Tag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id",
+          "feature_id",
+          "feature_code",
+          "scenario_tag"
+        ],
+        "title": "TlNrtRunLink"
       },
       "TlPolarity": {
         "type": "string",
@@ -17176,6 +17371,64 @@
         ],
         "title": "TlScenarioKind"
       },
+      "TlScenarioNrt": {
+        "properties": {
+          "scenario_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Scenario Id"
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "tag": {
+            "type": "string",
+            "title": "Tag"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "envs": {
+            "items": {
+              "$ref": "#/components/schemas/TlNrtEnvResult"
+            },
+            "type": "array",
+            "title": "Envs",
+            "default": []
+          },
+          "pass_rate": {
+            "title": "Pass Rate",
+            "type": "number",
+            "nullable": true
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs",
+            "default": 0
+          },
+          "flaky": {
+            "type": "boolean",
+            "title": "Flaky",
+            "default": false
+          },
+          "last_run_at": {
+            "title": "Last Run At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario_id",
+          "number",
+          "tag",
+          "title"
+        ],
+        "title": "TlScenarioNrt"
+      },
       "TlScenarioOut": {
         "properties": {
           "id": {
@@ -17419,6 +17672,11 @@
             "type": "object",
             "title": "Status Counts",
             "default": {}
+          },
+          "nrt_pass_rate": {
+            "title": "Nrt Pass Rate",
+            "type": "number",
+            "nullable": true
           }
         },
         "type": "object",

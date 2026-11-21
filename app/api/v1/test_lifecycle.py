@@ -24,6 +24,7 @@ from app.schemas.test_lifecycle import (
     TlFeatureCreate,
     TlFeatureDetail,
     TlFeatureListItem,
+    TlFeatureNrt,
     TlFeatureUpdate,
     TlGherkinValidateOut,
     TlGherkinValidateRequest,
@@ -34,6 +35,7 @@ from app.schemas.test_lifecycle import (
     TlIssueUpdate,
     TlJiraActorRequest,
     TlJiraLink,
+    TlNrtRunLink,
     TlPreviewOut,
     TlPrRequest,
     TlRebaseApply,
@@ -58,6 +60,7 @@ from app.services.test_lifecycle import history as history_svc
 from app.services.test_lifecycle import issues as issues_svc
 from app.services.test_lifecycle import jira_client as jira_client_mod
 from app.services.test_lifecycle import jira_tasks as jira_tasks_svc
+from app.services.test_lifecycle import nrt as nrt_svc
 from app.services.test_lifecycle import rebase as rebase_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle import scopes as scopes_svc
@@ -333,6 +336,21 @@ async def get_feature(
         return await features_svc.get_feature_detail(db, feature_id, actor_email)
     except Exception as exc:
         raise _translate(exc) from exc
+
+
+@router.get("/features/{feature_id}/nrt", response_model=TlFeatureNrt)
+async def get_feature_nrt(feature_id: uuid.UUID, db: DbDep) -> TlFeatureNrt:
+    """Esiti NRT per scenario: ultimo per ambiente, pass rate, flaky."""
+    try:
+        return await nrt_svc.feature_nrt(db, feature_id)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/nrt/runs/{run_id}/links", response_model=list[TlNrtRunLink])
+async def get_run_links(run_id: uuid.UUID, db: DbDep) -> list[TlNrtRunLink]:
+    """Esecuzioni di una run NRT collegate a feature dell'hub."""
+    return await nrt_svc.run_feature_links(db, run_id)
 
 
 @router.patch("/features/{feature_id}", response_model=TlFeatureDetail)

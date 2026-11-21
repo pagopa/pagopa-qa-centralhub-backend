@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.test_lifecycle import TlFeature, TlFeatureStatus, TlScope
 from app.schemas.test_lifecycle import TlScopeCreate, TlScopeOut, TlScopeUpdate
-from app.services.test_lifecycle import jira_tasks
+from app.services.test_lifecycle import jira_tasks, nrt
 
 
 class ScopeNotFoundError(Exception):
@@ -52,7 +52,11 @@ def to_out(scope: TlScope, counts: dict[str, int] | None = None) -> TlScopeOut:
 async def list_scopes(db: AsyncSession) -> list[TlScopeOut]:
     scopes = list((await db.execute(select(TlScope).order_by(func.lower(TlScope.code)))).scalars())
     counts = await _counts(db)
-    return [to_out(s, counts.get(s.id)) for s in scopes]
+    rates = await nrt.scope_pass_rates(db)
+    outs = [to_out(s, counts.get(s.id)) for s in scopes]
+    for out in outs:
+        out.nrt_pass_rate = rates.get(out.id)
+    return outs
 
 
 async def get_scope_out(db: AsyncSession, scope: TlScope) -> TlScopeOut:

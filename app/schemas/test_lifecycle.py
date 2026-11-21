@@ -109,6 +109,7 @@ class TlScopeOut(BaseModel):
     updated_at: datetime
     feature_count: int = 0
     status_counts: dict[str, int] = {}
+    nrt_pass_rate: float | None = None
 
 
 # ── Feature, revisioni, scenari ───────────────────────────────────────────────
