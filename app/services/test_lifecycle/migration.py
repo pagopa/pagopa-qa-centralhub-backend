@@ -44,7 +44,9 @@ from app.services.test_lifecycle.feature_parser import ParsedFeature, parse_feat
 LOCK_KEY = "tl_migration"
 _CODE = re.compile(r"FEAT_(\d{3})_([A-Za-z][A-Za-z0-9]*)")
 _TITLE_PREFIX = re.compile(r"^\s*FEAT_\d{3}_[A-Za-z][A-Za-z0-9]*\s*[-–—_:]?\s*")
-_HUB_IDENTITY = re.compile(r"^[A-Za-z0-9]+_\d{2,3}$|^[A-Za-z0-9_]*_\d{3}_\d{2}$")
+_HUB_IDENTITY = re.compile(
+    r"^[A-Za-z0-9]+_\d{2,3}$|^[A-Za-z0-9_]*_\d{3}_\d{2}$|^[A-Za-z][A-Za-z0-9]*_\d{3}(_.*)?$"
+)
 _POLARITY = {"positivo", "negativo"}
 TITLE_THRESHOLD = 0.6
 OVERRIDABLE = ("scope_code", "number", "title", "status", "owner_id", "reviewer_id", "file_path")
@@ -675,20 +677,26 @@ class _Work:
 
 
 def _scenarios_from_file(
-    parsed: ParsedFeature, feature_tags: list[str], keep: set[str], scope_code: str, number: int
+    parsed: ParsedFeature,
+    feature_tags: list[str],
+    keep: set[str],
+    scope_code: str,
+    number: int,
+    start: int = 1,
 ) -> list[dict[str, Any]]:
     from app.models.test_lifecycle import TlPolarity
     from app.services.test_lifecycle.gherkin import scenario_tag
 
     pushed = [t.lstrip("@") for t in feature_tags if not is_identity_tag(t)]
     out = []
-    for i, sc in enumerate(parsed.scenarios, start=1):
+    for i, sc in enumerate(parsed.scenarios, start=start):
         names = pushed + [t.lstrip("@") for t in sc.all_tags if not is_identity_tag(t)]
         extra = [n for n in dict.fromkeys(names) if n in keep and n.lower() not in _POLARITY]
         old = next((t.lstrip("@") for t in sc.all_tags if is_identity_tag(t)), None)
         out.append(
             {
                 "tag": scenario_tag(scope_code, number, i),
+                "number": i,
                 "old": old,
                 "title": sc.title,
                 "kind": sc.kind,

@@ -421,6 +421,7 @@ class TlFeatureDetail(BaseModel):
     migration_note: str | None = None
     migrated_from: dict[str, Any] | None = None
     alignment_pending: bool = False
+    import_source: dict[str, Any] | None = None
 
 
 # ── Workflow e storico ────────────────────────────────────────────────────────
@@ -738,3 +739,18 @@ class TlMigrationSummary(BaseModel):
     confluence_write: bool = False
     scopes: list[TlMigrationScopeOut] = []
     tags: list[TlMigrationTagOut] = []
+
+
+# ── Importa da Git ─────────────────────────────────────────────────────────────
+
+
+class TlImportGitRequest(BaseModel):
+    actor_email: str
+    lock_version: int
+    url: str = Field(max_length=2000)
+
+
+class TlImportGitResult(BaseModel):
+    feature: TlFeatureDetail
+    ignored_tags: list[str] = []
+    replaced: int = 0

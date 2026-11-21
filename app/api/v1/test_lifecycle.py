@@ -31,6 +31,8 @@ from app.schemas.test_lifecycle import (
     TlGitStatusOut,
     TlGitSyncSummaryOut,
     TlHistoryItem,
+    TlImportGitRequest,
+    TlImportGitResult,
     TlIssueOut,
     TlIssueUpdate,
     TlJiraActorRequest,
@@ -54,6 +56,7 @@ from app.schemas.test_lifecycle import (
 )
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_client as git_client_mod
+from app.services.test_lifecycle import git_import_file
 from app.services.test_lifecycle import git_publish as git_publish_svc
 from app.services.test_lifecycle import git_sync as git_sync_svc
 from app.services.test_lifecycle import history as history_svc
@@ -139,6 +142,24 @@ def _translate(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, issues_svc.IssueNotFoundError):
         return HTTPException(status_code=404, detail="Anomalia non trovata")
+    if isinstance(exc, git_import_file.ImportUrlInvalid):
+        return HTTPException(
+            status_code=422, detail={"code": "import_url_invalid", "message": exc.message}
+        )
+    if isinstance(exc, git_import_file.ImportFileNotFound):
+        return HTTPException(
+            status_code=404,
+            detail={"code": "import_file_not_found", "message": f"File non trovato: {exc}"},
+        )
+    if isinstance(exc, git_import_file.ImportParseError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "import_parse_error",
+                "message": "Il feature file non è leggibile",
+                "reasons": exc.reasons,
+            },
+        )
     if isinstance(exc, UnknownExtraTagError):
         return HTTPException(
             status_code=422,
@@ -344,6 +365,23 @@ async def get_feature(
 ) -> TlFeatureDetail:
     try:
         return await features_svc.get_feature_detail(db, feature_id, actor_email)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post(
+    "/features/{feature_id}/revisions/{revision_id}/import-git",
+    response_model=TlImportGitResult,
+)
+async def import_git(
+    feature_id: uuid.UUID, revision_id: uuid.UUID, body: TlImportGitRequest, db: DbDep
+) -> TlImportGitResult:
+    """Sostituisce gli scenari della bozza con quelli di un feature file su Git (ogni branch)."""
+    try:
+        client = git_client_mod.get_git_client()
+        return await git_import_file.import_from_git(
+            db, feature_id, revision_id, body.url, body.lock_version, body.actor_email, client
+        )
     except Exception as exc:
         raise _translate(exc) from exc
 

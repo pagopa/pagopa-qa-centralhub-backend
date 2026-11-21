@@ -403,6 +403,7 @@ async def get_feature_detail(
         migration_note=feature.migration_note,
         migrated_from=feature.migrated_from,
         alignment_pending=feature.alignment_pending,
+        import_source=feature.import_source,
     )
 
 
