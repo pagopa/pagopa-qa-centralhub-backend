@@ -32,3 +32,35 @@ Code: `app/services/status_page*.py`, `app/tasks/{sync,enrich}_status_page.py`,
   `uv run --extra dev python -m scripts.generate_openapi --apim-compatible` (APIM re-import).
 - **Tests** for the service layer hit the local Postgres (`tests/_db.py`); `get_status` has a
   query-count bound in `test_status_page_service.py` — update it deliberately.
+
+## Flaky Scenarios
+
+Code: `app/services/flaky{,_scoring}.py`, `app/models/flaky.py`, `app/api/v1/flaky.py`,
+`app/tasks/recompute_flaky_scores.py`, `flaky_*` tables. Details in `README.md` ("Scenari flaky")
+and `docs/superpowers/specs/2026-11-14-flaky-scenarios-management-design.md`.
+
+- **Scenario key** is `test_object` + `test_type` + `scenario_name`, never `suite_id` or a
+  version: a flag carries over to every new version until a reviewer removes it.
+- **Registry vs scores.** `flaky_registry` holds reviewers' decisions and is never touched by
+  the recompute; `flaky_scores` (one row per scenario and env) is derived and fully rewritten at
+  each recompute. They are joined on the scenario key with no FK on purpose (different
+  cardinality and lifecycle); the only FK is `last_suite_id` → `test_suites` (`SET NULL`).
+- **Legacy `flaky_scenarios`** is no longer written: the old `test_metrics` flag endpoints are
+  kept for compatibility and write the registry through `apply_flag`, which is a no-op when the
+  flag is unchanged (the run panels re-post every flag; author and audit must not change).
+- **Eligible runs**: triggers `CRON`, `CI_PIPELINE`, `TAS`; `MANUAL` and origin `QG` excluded.
+  Quality Gate is identified by `test_origin = 'QG'` (ingestion sends only `NRT`/`TAS`/`QG`;
+  `QA_GATE` is never sent as trigger), here and in the pending-runs counter.
+- **Score** measures instability, not failures: `max(flip_rate, retry_pass_rate)` with recency
+  weighting; a scenario failing every recent run is `BROKEN` (a bug), even with score 0. All
+  parameters are `FLAKY_*` settings; if they change, update the "Come funziona" copy in the
+  frontend and the Grafana panel descriptions.
+- **Recompute** runs daily at 12:00 Europe/Rome (beat `nowfun`, Celery timezone unchanged) and on
+  demand, under advisory lock 670 (status page uses 671/672). A new task module must be imported
+  in `app/tasks/__init__.py` or the worker never registers it.
+- **Permissions** `view:flaky` (all roles) and `manage:flaky` (all but guest) are enforced only in
+  the frontend; the backend takes the acting user's email from the request body.
+- **ADX mirror.** The `flaky_*` tables are fully replaced at every ADX sync
+  (`pagopa-platform-integration-test`, `.github/scripts/qa_hub_adx_sync.py`). A column change
+  needs the sync `TableSpec`, the ADX schema in `pagopa-infra`
+  (`create_adx_nrt_tables.dexp`) and the Grafana "QA - NRT metrics" queries updated together.
