@@ -153,6 +153,7 @@ class TlFeature(Base):
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
     jira_error: Mapped[str | None] = mapped_column(Text)
+    running_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     working_revision_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey(
             f"{SCHEMA}.tl_feature_revisions.id",
@@ -243,6 +244,23 @@ class TlScenario(Base):
     )
     number: Mapped[int] = mapped_column(Integer, nullable=False)
     tag: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class TlScenarioAlias(Base):
+    """Tag storico (senza @) che identifica ancora uno scenario nelle esecuzioni NRT."""
+
+    __tablename__ = "tl_scenario_aliases"
+    __table_args__ = (
+        Index("ix_tl_scenario_aliases_scenario", "scenario_id"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    scenario_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.tl_scenarios.id", ondelete="CASCADE"), nullable=False
+    )
+    alias: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     created_at: Mapped[datetime] = _created_at()
 
 
