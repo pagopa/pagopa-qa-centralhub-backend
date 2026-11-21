@@ -162,3 +162,58 @@ async def open_alignment_pr(db: AsyncSession, scope_code: str, git: Any) -> TlMi
     scope_row.updated_at = datetime.now(UTC)
     await db.commit()
     return await scope_out(db, scope_code)
+
+
+async def sync_alignment_prs(db: AsyncSession, git: Any) -> None:
+    """Dal sync: PR di allineamento mergiate (feature non più in attesa) o chiuse (errore)."""
+    rows = list(
+        (
+            await db.execute(
+                select(TlMigrationScope.scope_code, TlMigrationScope.pr_number).where(
+                    TlMigrationScope.pr_state == "open", TlMigrationScope.pr_number.is_not(None)
+                )
+            )
+        ).all()
+    )
+    await db.rollback()
+    for scope_code, number in rows:
+        try:
+            pull = await git.get_pull(number)
+        except TlGitError as exc:
+            logger.warning("PR di allineamento %s non leggibile: %s", number, exc.message)
+            continue
+        if pull.state == "open":
+            continue
+        row = await _get_scope_row(db, scope_code)
+        if pull.state == "merged":
+            row.pr_state, row.pr_error = "merged", None
+            features = (
+                await db.execute(
+                    select(TlFeature)
+                    .join(TlMigrationItem, TlMigrationItem.feature_id == TlFeature.id)
+                    .where(TlFeature.alignment_pending.is_(True))
+                    .with_for_update(of=TlFeature)
+                )
+            ).scalars()
+            for feature in features:
+                item_scope = (
+                    await db.execute(
+                        select(TlMigrationItem.scope_code, TlMigrationItem.overrides).where(
+                            TlMigrationItem.feature_id == feature.id
+                        )
+                    )
+                ).first()
+                code = (item_scope[1] or {}).get("scope_code") or item_scope[0]
+                if str(code).lower() != scope_code.lower():
+                    continue
+                feature.alignment_pending = False
+                history.record_event(
+                    db,
+                    feature.id,
+                    "tl.feature.aligned",
+                    None,
+                    {"pr_number": number, "merge_commit_sha": pull.merge_commit_sha},
+                )
+        else:
+            row.pr_state, row.pr_error = "closed", "PR chiusa senza merge"
+        await db.commit()

@@ -366,6 +366,12 @@ async def import_changed_file(
             await db.commit()
         return  # file non gestito (senza header): ignorato fino alla migrazione
     feature_id, code, git_path = found
+    pending = (
+        await db.execute(select(TlFeature.alignment_pending).where(TlFeature.id == feature_id))
+    ).scalar_one()
+    if pending and fetched.parsed.code is None:
+        await db.rollback()
+        return  # file migrato non ancora allineato (PR di allineamento aperta): nessuna anomalia
     merged_id = merged_revision.id if merged_revision is not None else None
     open_pr = None
     if merged_revision is None:

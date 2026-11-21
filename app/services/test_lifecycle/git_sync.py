@@ -31,7 +31,7 @@ from app.models.test_lifecycle import (
     TlIssueKind,
 )
 from app.services.test_lifecycle import features as features_svc
-from app.services.test_lifecycle import git_import, history
+from app.services.test_lifecycle import git_import, history, migration_align
 from app.services.test_lifecycle import issues as issues_svc
 from app.services.test_lifecycle.advisory_lock import try_advisory_lock
 from app.services.test_lifecycle.git_client import TlGitClient, TlGitError
@@ -265,6 +265,7 @@ async def _run_locked(db: AsyncSession, client: TlGitClient) -> SyncSummary:
                 [c.path for c in changes]
                 + [c.previous_path for c in changes if c.previous_path]
             )
+    await migration_align.sync_alignment_prs(db, client)
     if steps_indexed:
         await rebuild_step_index(db, client, head)
 
