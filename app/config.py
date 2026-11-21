@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     tl_sync_interval_s: float = 300.0
     # Public URL of the portal, used in PR body links.
     tl_hub_base_url: str = ""
+    # Solo sviluppo: "local" usa un clone su disco al posto di GitHub (vedi local_git.py).
+    tl_git_mode: str = "github"
+    tl_local_repo_path: str = ""
 
     # Flaky scenarios scoring (design: docs/superpowers/specs/2026-11-14-flaky-*-design.md)
     flaky_window_days: int = 30

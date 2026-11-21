@@ -242,6 +242,12 @@ class TlGitClient:
 
 
 def get_git_client() -> TlGitClient:
+    if settings.tl_git_mode == "local":
+        if not settings.tl_local_repo_path:
+            raise TlGitNotConfigured("Modalità Git locale senza tl_local_repo_path")
+        from app.services.test_lifecycle.local_git import LocalGitClient
+
+        return LocalGitClient(settings.tl_local_repo_path)  # type: ignore[return-value]
     token = settings.tl_github_token or settings.tas_github_token
     if not token:
         raise TlGitNotConfigured("Nessun token GitHub configurato")
