@@ -10,13 +10,14 @@ from sqlalchemy import select, update
 from app.config import settings
 from app.models.audit_log import AuditLog
 from app.models.test_lifecycle import (
+    TlFeature,
     TlFeatureRevision,
     TlIssue,
     TlIssueKind,
     TlIssueStatus,
     TlScope,
 )
-from app.services.test_lifecycle.git_publish import slugify
+from app.services.test_lifecycle.git_publish import pr_title, slugify
 from tests._db import TestSession
 from tests.test_tl_features import (  # noqa: F401  (fixture riusate)
     BASE,
@@ -66,6 +67,14 @@ async def _issues(feature_id, kind=TlIssueKind.PR_CREATION_FAILED):
         ).scalars().all()
 
 
+def test_pr_title_with_and_without_design_key():
+    feature = TlFeature(code="FEAT_007_Cup", jira_design_key="PQ-34")
+    rev = TlFeatureRevision(title="Pagamento", number=2)
+    assert pr_title(feature, rev) == "PQ-34 [FEAT_007_Cup] Pagamento (r2)"
+    feature.jira_design_key = None  # es. feature migrata senza task di progettazione
+    assert pr_title(feature, rev) == "[FEAT_007_Cup] Pagamento (r2)"
+
+
 def test_slugify():
     assert slugify("Creazione di un flusso è OK!") == "Creazione_di_un_flusso_e_OK"
     assert slugify("  --Già  fatto__ ") == "Gia_fatto"
@@ -96,7 +105,8 @@ async def test_approve_creates_branch_file_and_pr(client, scope, actor, reviewer
     assert fake.put_messages == [f"test({scope['code']}): {code} r1"]
     meta = fake.pull_meta[101]
     assert meta["base"] == "main"
-    assert meta["title"] == f"[{code}] Pagamento (r1)"
+    # chiave del task di progettazione in testa: Jira collega la PR e la chiude al merge
+    assert meta["title"] == f"PQ-12 [{code}] Pagamento (r1)"
     tag = rev["scenarios"][0]["tag"]
     assert meta["body"] == (
         f"Hub: {HUB}/test-lifecycle/{done['id']}\n"

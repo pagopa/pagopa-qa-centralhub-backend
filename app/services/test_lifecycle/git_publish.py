@@ -65,7 +65,13 @@ def branch_name(feature: TlFeature, revision: TlFeatureRevision) -> str:
 
 
 def pr_title(feature: TlFeature, revision: TlFeatureRevision) -> str:
-    return f"[{feature.code}] {revision.title} (r{revision.number})"
+    """Titolo della PR, con in testa la chiave del task Jira di progettazione.
+
+    Con la chiave nel titolo Jira collega la PR al task e, con l'automazione di default,
+    lo porta in Done al merge.
+    """
+    title = f"[{feature.code}] {revision.title} (r{revision.number})"
+    return f"{feature.jira_design_key} {title}" if feature.jira_design_key else title
 
 
 def commit_message(scope: TlScope, feature: TlFeature, revision: TlFeatureRevision) -> str:
