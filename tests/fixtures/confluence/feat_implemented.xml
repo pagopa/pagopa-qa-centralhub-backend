@@ -1,0 +1,18 @@
+<table><tbody>
+<tr><td><p><strong>ID documento</strong></p></td><td><p>FEAT_009_Checkout</p></td></tr>
+<tr><td><p><strong>Nome documento</strong></p></td><td><p>FEAT_009_Checkout - Autorizzazione</p></td></tr>
+<tr><td><p><strong>Ambito</strong></p></td><td><p>Checkout</p></td></tr>
+<tr><td><p><strong>Stato del documento</strong></p></td><td><p>  <span data-type="status">TEST SUITE IMPLEMENTED</span> </p></td></tr>
+<tr><td><p><strong>Owner</strong></p></td><td><p><span data-type="mention" data-user-id="acc-9">@Mario</span></p></td></tr>
+<tr><td><p><strong>Reviewer</strong></p></td><td><p><span data-type="mention" data-user-id="acc-8">@Luca</span></p></td></tr>
+</tbody></table>
+<h1>Dettagli</h1>
+<p>Checkout eCommerce — Autorizzazione</p>
+<table><tbody>
+<tr><td><p><strong>Link Requisiti (SRS / BRD / DR)</strong></p></td><td><p><a href="https://docs.example.test/srs">SRS</a></p></td></tr>
+<tr><td><p><strong>Jira Progettazione (QA)</strong></p></td><td><p><ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">PQ-120</ac:parameter></ac:structured-macro></p></td></tr>
+<tr><td><p><strong>Epic / Story Jira (Product)</strong></p></td><td><p>CHK-77</p></td></tr>
+<tr><td><p><strong>Feature File</strong></p></td><td><p><a href="https://github.com/pagopa/pagopa-platform-integration-test/blob/main/src/api/checkout-npg/features/checkout_npg_authorization.feature">file</a></p></td></tr>
+<tr><td><p><strong>Jira Implementazione Suite (QA)</strong></p></td><td><p><a href="https://example.atlassian.net/browse/PQ-121">PQ-121</a></p></td></tr>
+<tr><td><p><strong>Estimate</strong></p></td><td><p><strong>Test Automatici</strong></p></td><td><p>2,5 G/U</p></td></tr>
+</tbody></table>

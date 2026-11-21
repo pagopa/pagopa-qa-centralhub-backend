@@ -1,0 +1,10 @@
+<ac:layout><ac:layout-section ac:type="single"><ac:layout-cell>
+<table><tbody>
+<tr><td><p>ID documento</p></td><td><p>FEAT_002_CUP</p></td></tr>
+<tr><td><p>Stato del documento</p></td><td><p>Approvato</p><p>Andrea</p></td></tr>
+</tbody></table>
+<h2>Scenario 01: Senza tabella</h2>
+<p>Testo libero che descrive lo scenario.</p>
+<h2>Scenario 02 - Tabella vuota</h2>
+<table><tbody><tr><th><p>Given</p></th><th><p>When</p></th><th><p>Then</p></th></tr><tr><td /><td><p>Quando succede</p></td><td /></tr></tbody></table>
+</ac:layout-cell></ac:layout-section></ac:layout>

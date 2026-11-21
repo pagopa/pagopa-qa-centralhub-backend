@@ -1,0 +1,34 @@
+<h1>Informazioni generali</h1>
+<table><tbody>
+<tr><td><p><strong>ID documento</strong></p></td><td><p>FEAT_007_FdR3</p></td></tr>
+<tr><td><p><strong>Nome documento</strong></p></td><td><p>FEAT_007_FdR3_Conversione flussi</p></td></tr>
+<tr><td><p><strong>Ambito</strong></p></td><td><p>FdR</p></td></tr>
+<tr><td><p><strong>Stato del documento</strong></p></td><td><p><ac:structured-macro ac:name="status" ac:schema-version="1"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">WIP</ac:parameter></ac:structured-macro></p></td></tr>
+<tr><td><p><strong>Owner</strong></p></td><td><p><ac:link><ri:user ri:account-id="acc-owner" /></ac:link></p></td></tr>
+<tr><td><p><strong>Reviewer</strong></p></td><td><p><a href="https://example.atlassian.net/people/team/t-1">qa_team</a> (<ac:link><ri:user ri:account-id="acc-owner" /></ac:link> <ac:link><ri:user ri:account-id="acc-2" /></ac:link>)</p></td></tr>
+</tbody></table>
+<hr />
+<h1>Dettagli</h1>
+<h1>Conversione da JSON a XML di un flusso</h1>
+<table><tbody>
+<tr><th><p><strong>Tipologia Test</strong></p></th><th colspan="2"><p>automatico</p></th></tr>
+<tr><td><p><strong>Link Requisiti (SRS / BRD / DR)</strong></p></td><td colspan="2"><p /></td></tr>
+<tr><td><p><strong>Jira Progettazione (QA)</strong></p></td><td colspan="2"><p><a href="https://example.atlassian.net/browse/PQ-566">https://example.atlassian.net/browse/PQ-566</a></p></td></tr>
+<tr><td><p><strong>Epic / Story Jira (Product)</strong></p></td><td colspan="2"><p><a href="https://example.atlassian.net/browse/PQ-495">https://example.atlassian.net/browse/PQ-495</a></p></td></tr>
+<tr><td><p><strong>Feature File</strong></p></td><td colspan="2"><p>&lt;Inserire il link al file presente sul repository <a href="https://github.com/pagopa/pagopa-platform-integration-test">repo</a>&gt;</p></td></tr>
+<tr><td><p><strong>Jira Implementazione Suite (QA)</strong></p></td><td colspan="2"><p>TBD</p></td></tr>
+<tr><td rowspan="2"><p><strong>Estimate</strong></p></td><td><p><strong>Test Automatici</strong></p></td><td><p>TBD G/U</p></td></tr>
+<tr><td><p><strong>Test Manuali</strong></p></td><td><p>Inserire la stima</p></td></tr>
+</tbody></table>
+<h2>Contesto:</h2>
+<ul><li><p>Dati i sistemi sono operativi</p></li></ul>
+<h2><strong>Scenario 01: Conversione da Json a XML</strong></h2>
+<table><tbody>
+<tr><th><p><strong>Precondizioni</strong></p><p><em>(Given)</em></p></th><th><p><strong>Step</strong></p><p>(Action/When)</p></th><th><p><em><strong>Esito atteso</strong></em></p><p><em>(Then)</em></p></th></tr>
+<tr><td><ul><li><p>Dato il PSP "PSPDEMO" censito</p></li><li><p>E che il flusso "F1" è PUBLISHED</p></li></ul></td><td><ul><li><p>Quando viene attivato il convertitore</p></li></ul></td><td><ul><li><p>Allora su Fdr1 è presente il flusso "F1"</p></li></ul></td></tr>
+</tbody></table>
+<h2><strong>Scenario 02: Recovery manuale</strong></h2>
+<table><tbody>
+<tr><th><p>Precondizioni (Given)</p></th><th><p>Step (When)</p></th><th><p>Esito atteso (Then)</p></th></tr>
+<tr><td><ul><li><p>il flusso "F1" è in errore</p></li><li><p>il PSP è censito</p></li></ul></td><td><p>viene chiamato il retry singolo</p></td><td><ul><li><p>- il flusso è presente</p></li></ul></td></tr>
+</tbody></table>
