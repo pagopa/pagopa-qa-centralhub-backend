@@ -81,6 +81,15 @@ def pr_body(feature: TlFeature, revision: TlFeatureRevision, scenario_tags: list
     lines.append(f"Approvato da: {revision.approved_by or '-'}")
     lines.append("Scenari:")
     lines.extend(f"- {tag}" for tag in scenario_tags)
+    source = feature.import_source or {}
+    if source.get("branch"):
+        lines.append("")
+        lines.append(f"Importata da `{source['branch']}`: `{source['path']}`.")
+        if source["branch"] != settings.tl_base_branch:
+            lines.append(
+                "Una PR di pulizia toglie il file dal branch di partenza: non unire quel file "
+                "a main da lì."
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -177,7 +186,8 @@ async def publish_revision(
             message = "L'ambito non ha una cartella del repository configurata"
             await _record_failure(db, feature_id, revision_id, message, branch)
             raise RepoFolderMissingError(str(scope.id))
-        path = feature.git_path or feature_path(scope, feature, rev.title)
+        imported = (feature.import_source or {}).get("path")
+        path = feature.git_path or imported or feature_path(scope, feature, rev.title)
         render, rows = await history.build_render(db, feature, rev)
         text_ = render_feature_file(render)
         message_ = commit_message(scope, feature, rev)

@@ -234,6 +234,7 @@ async def apply_transition(
     actor_email = actor.email  # gli step successivi fanno rollback: l'oggetto scade
     if action == TlTransitionAction.APPROVE:
         await _publish_best_effort(db, feature_id, revision_id, actor)
+        await _import_cleanup_best_effort(db, feature_id)
         await _jira_impl_best_effort(db, feature_id, actor_email)
     return await features_svc.get_feature_detail(db, feature_id, actor_email)
 
@@ -260,6 +261,20 @@ async def _publish_best_effort(
         # l'approvazione è già committata: mai trasformarla in un 500
         logger.exception("Creazione PR fallita per la revisione %s", revision_id)
         await git_publish.record_unexpected_error(db, revision_id)
+
+
+async def _import_cleanup_best_effort(db: AsyncSession, feature_id: uuid.UUID) -> None:
+    """Feature importata da un branch: PR di pulizia dopo la PR dell'hub. Mai propagato."""
+    from app.services.test_lifecycle import git_import_file
+
+    try:
+        client = git_client_mod.get_git_client()
+        await git_import_file.open_cleanup_pr(db, feature_id, client)
+    except TlGitNotConfigured:
+        return
+    except Exception:
+        logger.exception("PR di pulizia non creata per la feature %s", feature_id)
+        await db.rollback()
 
 
 async def _jira_impl_best_effort(db: AsyncSession, feature_id: uuid.UUID, actor_email: str) -> None:

@@ -386,6 +386,21 @@ async def import_git(
         raise _translate(exc) from exc
 
 
+@router.post("/features/{feature_id}/import-cleanup", response_model=TlFeatureDetail)
+async def retry_import_cleanup(
+    feature_id: uuid.UUID, body: TlJiraActorRequest, db: DbDep
+) -> TlFeatureDetail:
+    """Riprova la PR che toglie il file importato dal branch di partenza."""
+    try:
+        await resolve_actor(db, body.actor_email)
+        client = git_client_mod.get_git_client()
+        await git_import_file.open_cleanup_pr(db, feature_id, client, force=True)
+        db.expunge_all()
+        return await features_svc.get_feature_detail(db, feature_id, body.actor_email)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
 @router.get("/category-tags", response_model=list[str])
 async def list_category_tags(db: DbDep) -> list[str]:
     """Tag di categoria ammessi sugli scenari."""
