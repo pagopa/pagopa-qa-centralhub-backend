@@ -7375,6 +7375,249 @@
         }
       }
     },
+    "/api/v1/test-lifecycle/features/{feature_id}/revisions/{revision_id}/rebase": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Get Rebase",
+        "description": "Confronto a tre vie (base / Git / bozza) per metadati e scenari.",
+        "operationId": "get_rebase_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__rebase_get",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlRebaseView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Apply Rebase",
+        "description": "Riallinea la bozza alla versione pubblicata. Conflitti senza scelta -> 409\n`rebase_required` con l'elenco; bozza non superata -> 409 `rebase_not_needed`.",
+        "operationId": "apply_rebase_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__rebase_post",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlRebaseApply"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlFeatureDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}/revisions/{revision_id}/pr": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Publish Revision Pr",
+        "description": "(Ri)prova la creazione di branch, feature file e PR (permesso UI manage:tl_git o\nedit:tl_feature). Senza token 503; errore GitHub 502 (salvato anche in `pr_error`).",
+        "operationId": "publish_revision_pr_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__pr_post",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlPrRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlFeatureDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/git/sync": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Git Sync",
+        "description": "Sincronizza ora (permesso UI manage:tl_git). 409 se già in corso, 503 senza token,\n502 per errori GitHub (salvato anche in `last_error`).",
+        "operationId": "git_sync_api_v1_test_lifecycle_git_sync_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlPrRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlGitSyncSummaryOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/git/status": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Git Status",
+        "operationId": "git_status_api_v1_test_lifecycle_git_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlGitStatusOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/test-lifecycle/features/{feature_id}/history": {
       "get": {
         "tags": [
@@ -7724,6 +7967,202 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TlGherkinValidateOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/issues": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "List Issues",
+        "operationId": "list_issues_api_v1_test_lifecycle_issues_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Status",
+              "$ref": "#/components/schemas/TlIssueStatus",
+              "nullable": true
+            }
+          },
+          {
+            "name": "feature_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Kind",
+              "$ref": "#/components/schemas/TlIssueKind",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TlIssueOut"
+                  },
+                  "title": "Response List Issues Api V1 Test Lifecycle Issues Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/issues/{issue_id}": {
+      "patch": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Update Issue",
+        "operationId": "update_issue_api_v1_test_lifecycle_issues__issue_id__patch",
+        "parameters": [
+          {
+            "name": "issue_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Issue Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlIssueUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlIssueOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/steps": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Search Steps",
+        "description": "Autocompletamento step: prefisso, poi sottostringa; a parità implementati e più usati.",
+        "operationId": "search_steps_api_v1_test_lifecycle_steps_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Keyword",
+              "enum": [
+                "given",
+                "when",
+                "then"
+              ],
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 10,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TlStepPhraseOut"
+                  },
+                  "title": "Response Search Steps Api V1 Test Lifecycle Steps Get"
                 }
               }
             }
@@ -15373,6 +15812,16 @@
             "type": "array",
             "title": "Transitions",
             "default": []
+          },
+          "git_path": {
+            "title": "Git Path",
+            "type": "string",
+            "nullable": true
+          },
+          "open_issues": {
+            "type": "integer",
+            "title": "Open Issues",
+            "default": 0
           }
         },
         "type": "object",
@@ -15554,6 +16003,84 @@
         ],
         "title": "TlGherkinValidateRequest"
       },
+      "TlGitStatusOut": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "last_main_sha": {
+            "title": "Last Main Sha",
+            "type": "string",
+            "nullable": true
+          },
+          "last_run_at": {
+            "title": "Last Run At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "last_error": {
+            "title": "Last Error",
+            "type": "string",
+            "nullable": true
+          },
+          "last_summary": {
+            "title": "Last Summary",
+            "additionalProperties": true,
+            "type": "object",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured"
+        ],
+        "title": "TlGitStatusOut"
+      },
+      "TlGitSyncSummaryOut": {
+        "properties": {
+          "prs_merged": {
+            "type": "integer",
+            "title": "Prs Merged"
+          },
+          "prs_closed": {
+            "type": "integer",
+            "title": "Prs Closed"
+          },
+          "files_imported": {
+            "type": "integer",
+            "title": "Files Imported"
+          },
+          "issues_opened": {
+            "type": "integer",
+            "title": "Issues Opened"
+          },
+          "steps_indexed": {
+            "type": "boolean",
+            "title": "Steps Indexed"
+          },
+          "head_sha": {
+            "type": "string",
+            "title": "Head Sha"
+          },
+          "full_resync": {
+            "type": "boolean",
+            "title": "Full Resync",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "prs_merged",
+          "prs_closed",
+          "files_imported",
+          "issues_opened",
+          "steps_indexed",
+          "head_sha"
+        ],
+        "title": "TlGitSyncSummaryOut"
+      },
       "TlHistoryItem": {
         "properties": {
           "kind": {
@@ -15599,6 +16126,127 @@
         ],
         "title": "TlHistoryItem"
       },
+      "TlIssueKind": {
+        "type": "string",
+        "enum": [
+          "structural_change",
+          "new_scenario_from_git",
+          "file_deleted",
+          "unknown_feature_code",
+          "parse_error",
+          "pr_closed_unmerged",
+          "pr_creation_failed"
+        ],
+        "title": "TlIssueKind"
+      },
+      "TlIssueOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "revision_id": {
+            "title": "Revision Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TlIssueKind"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TlIssueStatus"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string",
+            "nullable": true
+          },
+          "commit_sha": {
+            "title": "Commit Sha",
+            "type": "string",
+            "nullable": true
+          },
+          "detail": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Detail",
+            "default": {}
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_by": {
+            "title": "Updated By",
+            "type": "string",
+            "nullable": true
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "feature_code": {
+            "title": "Feature Code",
+            "type": "string",
+            "nullable": true
+          },
+          "feature_title": {
+            "title": "Feature Title",
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "TlIssueOut"
+      },
+      "TlIssueStatus": {
+        "type": "string",
+        "enum": [
+          "open",
+          "acknowledged",
+          "resolved"
+        ],
+        "title": "TlIssueStatus"
+      },
+      "TlIssueUpdate": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "acknowledged",
+              "resolved"
+            ],
+            "title": "Status"
+          },
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "actor_email"
+        ],
+        "title": "TlIssueUpdate"
+      },
       "TlLineError": {
         "properties": {
           "line": {
@@ -15624,6 +16272,19 @@
           "negativo"
         ],
         "title": "TlPolarity"
+      },
+      "TlPrRequest": {
+        "properties": {
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "actor_email"
+        ],
+        "title": "TlPrRequest"
       },
       "TlPreviewError": {
         "properties": {
@@ -15668,6 +16329,157 @@
           "file"
         ],
         "title": "TlPreviewOut"
+      },
+      "TlRebaseApply": {
+        "properties": {
+          "lock_version": {
+            "type": "integer",
+            "title": "Lock Version"
+          },
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          },
+          "choices": {
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "git",
+                "draft"
+              ]
+            },
+            "type": "object",
+            "title": "Choices",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "required": [
+          "lock_version",
+          "actor_email"
+        ],
+        "title": "TlRebaseApply"
+      },
+      "TlRebaseField": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "enum": [
+              "title",
+              "description",
+              "background"
+            ],
+            "title": "Field"
+          },
+          "base": {
+            "title": "Base",
+            "type": "string",
+            "nullable": true
+          },
+          "git": {
+            "title": "Git",
+            "type": "string",
+            "nullable": true
+          },
+          "draft": {
+            "title": "Draft",
+            "type": "string",
+            "nullable": true
+          },
+          "conflict": {
+            "type": "boolean",
+            "title": "Conflict",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "field"
+        ],
+        "title": "TlRebaseField"
+      },
+      "TlRebaseScenario": {
+        "properties": {
+          "scenario_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Scenario Id"
+          },
+          "tag": {
+            "type": "string",
+            "title": "Tag"
+          },
+          "base": {
+            "$ref": "#/components/schemas/TlScenarioContentOut",
+            "nullable": true
+          },
+          "git": {
+            "$ref": "#/components/schemas/TlScenarioContentOut",
+            "nullable": true
+          },
+          "draft": {
+            "$ref": "#/components/schemas/TlScenarioContentOut",
+            "nullable": true
+          },
+          "conflict": {
+            "type": "boolean",
+            "title": "Conflict",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario_id",
+          "tag"
+        ],
+        "title": "TlRebaseScenario"
+      },
+      "TlRebaseView": {
+        "properties": {
+          "revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Revision Id"
+          },
+          "base_revision_id": {
+            "title": "Base Revision Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "published_revision_id": {
+            "title": "Published Revision Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "lock_version": {
+            "type": "integer",
+            "title": "Lock Version"
+          },
+          "metadata": {
+            "items": {
+              "$ref": "#/components/schemas/TlRebaseField"
+            },
+            "type": "array",
+            "title": "Metadata",
+            "default": []
+          },
+          "scenarios": {
+            "items": {
+              "$ref": "#/components/schemas/TlRebaseScenario"
+            },
+            "type": "array",
+            "title": "Scenarios",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision_id",
+          "lock_version"
+        ],
+        "title": "TlRebaseView"
       },
       "TlRevisionOut": {
         "properties": {
@@ -15741,6 +16553,46 @@
             "title": "Approved At",
             "type": "string",
             "format": "date-time",
+            "nullable": true
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin",
+            "default": "hub"
+          },
+          "pr_number": {
+            "title": "Pr Number",
+            "type": "integer",
+            "nullable": true
+          },
+          "pr_url": {
+            "title": "Pr Url",
+            "type": "string",
+            "nullable": true
+          },
+          "pr_state": {
+            "title": "Pr State",
+            "type": "string",
+            "enum": [
+              "open",
+              "merged",
+              "closed"
+            ],
+            "nullable": true
+          },
+          "pr_error": {
+            "title": "Pr Error",
+            "type": "string",
+            "nullable": true
+          },
+          "base_stale": {
+            "type": "boolean",
+            "title": "Base Stale",
+            "default": false
+          },
+          "merged_commit_sha": {
+            "title": "Merged Commit Sha",
+            "type": "string",
             "nullable": true
           },
           "created_at": {
@@ -15874,6 +16726,56 @@
           "actor_email"
         ],
         "title": "TlRevisionUpdate"
+      },
+      "TlScenarioContentOut": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TlScenarioKind"
+          },
+          "polarity": {
+            "$ref": "#/components/schemas/TlPolarity"
+          },
+          "extra_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Extra Tags",
+            "default": []
+          },
+          "steps": {
+            "type": "string",
+            "title": "Steps"
+          },
+          "examples": {
+            "title": "Examples",
+            "additionalProperties": true,
+            "type": "object",
+            "nullable": true
+          },
+          "detail_link": {
+            "title": "Detail Link",
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "position",
+          "title",
+          "kind",
+          "polarity",
+          "steps"
+        ],
+        "title": "TlScenarioContentOut"
       },
       "TlScenarioCreate": {
         "properties": {
@@ -16175,6 +17077,39 @@
         },
         "type": "object",
         "title": "TlScopeUpdate"
+      },
+      "TlStepPhraseOut": {
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "enum": [
+              "given",
+              "when",
+              "then"
+            ],
+            "title": "Keyword"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "occurrences": {
+            "type": "integer",
+            "title": "Occurrences"
+          },
+          "implemented": {
+            "type": "boolean",
+            "title": "Implemented"
+          }
+        },
+        "type": "object",
+        "required": [
+          "keyword",
+          "text",
+          "occurrences",
+          "implemented"
+        ],
+        "title": "TlStepPhraseOut"
       },
       "TlTransitionAction": {
         "type": "string",
