@@ -1,9 +1,16 @@
-"""Prepara il Test Lifecycle per una demo (solo sviluppo, solo modalità Git locale).
+"""Prepara il Test Lifecycle per una demo (solo sviluppo).
 
-Svuota i dati del Test Lifecycle, riporta il clone locale allo stato di partenza e crea
-l'ambito "Demo" con una feature per ogni momento del ciclo di vita, più una decina di run
-NRT finte. Nulla viene scritto su GitHub, Jira o Confluence: le feature già avanzate usano
-come storico le chiavi Jira indicate qui sotto (devono esistere, vengono solo lette).
+Svuota i dati del Test Lifecycle, riporta Git allo stato di partenza e crea l'ambito "Demo"
+con una feature per ogni momento del ciclo di vita, più una decina di run NRT finte.
+
+Git, secondo TL_GIT_MODE:
+- `local`: clone indicato da TL_LOCAL_REPO_PATH; PR simulate, nulla va su GitHub;
+- `github`: solo un repository di prova (mai dell'organizzazione `pagopa`) che abbia i tag
+  `demo-base` (stato iniziale di main) e `demo-pq827-base` (branch da importare). Le PR sono
+  vere e la preparazione ne fa il merge via API.
+
+Nulla viene scritto su Jira o Confluence: le feature già avanzate usano come storico le chiavi
+Jira indicate qui sotto (devono esistere, vengono solo lette).
 
 Uso:
     uv run python -m scripts.tl_demo prepare     # svuota e ricrea i dati della demo
@@ -41,6 +48,7 @@ from app.schemas.test_lifecycle import (
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_client as git_client_mod
 from app.services.test_lifecycle import git_sync, nrt, reviews, scopes, workflow
+from app.services.test_lifecycle.git_client import TlGitClient
 from app.services.test_lifecycle.local_git import _ok, _run, local_merge, local_reset, local_write
 
 PRESENTER = "cristiano.sticca@pagopa.it"  # chi fa la demo: reviewer e owner implementazione
@@ -50,6 +58,11 @@ DESIGN_KEY = "PQ-849"  # task Jira già esistenti, usati solo come storico
 IMPL_KEY = "PQ-850"
 SUITE_OBJECT = "qa-hub-demo"  # suite NRT finta, cancellata a ogni preparazione
 IMPORT_BRANCH = "PQ-827-fdr-e2e-test-design"
+IMPORT_PATH = (
+    "src/integration/fdr3/feature/FEAT_011_FdR3_Recupero_FdR_Pubblicati_Organizzazione.feature"
+)
+BASE_TAG = "demo-base"  # repository GitHub di prova: stato iniziale di main
+IMPORT_TAG = "demo-pq827-base"  # e del branch da importare
 
 SCOPE = TlScopeCreate(
     code="Demo",
@@ -132,19 +145,105 @@ FEATURES: dict[str, dict[str, Any]] = {
 }
 
 
-def _guard() -> str:
-    """Mai fuori dallo sviluppo locale: Git locale e database su localhost."""
-    if settings.tl_git_mode != "local" or not settings.tl_local_repo_path:
-        sys.exit("Interrotto: serve TL_GIT_MODE=local con TL_LOCAL_REPO_PATH (mai il repo vero).")
+class _LocalGit:
+    """Clone locale: PR simulate (`local_git`)."""
+
+    def __init__(self, repo: str) -> None:
+        self.repo = repo
+        self.base = settings.tl_base_branch or "main"
+
+    async def reset(self) -> None:
+        local_reset(self.repo, self.base)
+        if _ok(self.repo, "rev-parse", "--verify", f"origin/{IMPORT_BRANCH}"):
+            _run(self.repo, "branch", "-f", IMPORT_BRANCH, f"origin/{IMPORT_BRANCH}")
+
+    async def merge(self, number: int) -> None:
+        local_merge(self.repo, number)
+
+    async def read(self, path: str) -> str:
+        return _run(self.repo, "show", f"{self.base}:{path}")
+
+    async def write(self, path: str, text: str, message: str) -> None:
+        local_write(self.repo, self.base, path, text, message)
+
+
+class _GitHubGit:
+    """Repository GitHub di prova: PR vere, merge e modifiche dirette via API."""
+
+    def __init__(self, client: TlGitClient) -> None:
+        self.c = client
+        self.base = settings.tl_base_branch or "main"
+
+    async def _tag_sha(self, tag: str) -> str:
+        resp = await self.c._request("GET", f"git/ref/tags/{tag}", ok_statuses=(404,))
+        if resp.status_code == 404:
+            sys.exit(f"Interrotto: {self.c.repo} senza il tag {tag}: non è un repository di demo.")
+        return resp.json()["object"]["sha"]
+
+    async def _set_branch(self, branch: str, sha: str) -> None:
+        if await self.c.branch_exists(branch):
+            await self.c.reset_branch(branch, sha)
+        else:
+            await self.c.create_branch(branch, sha)
+
+    async def reset(self) -> None:
+        base_sha, import_sha = await self._tag_sha(BASE_TAG), await self._tag_sha(IMPORT_TAG)
+        pulls = await self.c._request("GET", "pulls", params={"state": "open", "per_page": "100"})
+        for pr in pulls.json():
+            await self.c._request("PATCH", f"pulls/{pr['number']}", json={"state": "closed"})
+        refs = await self.c._request("GET", "git/matching-refs/heads/qa-hub/")
+        for ref in refs.json():
+            await self.c._request("DELETE", f"git/{ref['ref']}")
+        await self._set_branch(self.base, base_sha)
+        await self._set_branch(IMPORT_BRANCH, import_sha)
+
+    async def merge(self, number: int) -> None:
+        # subito dopo l'apertura GitHub può non aver ancora calcolato la mergeabilità
+        for _ in range(15):
+            resp = await self.c._request(
+                "PUT", f"pulls/{number}/merge", json={"merge_method": "merge"},
+                ok_statuses=(405, 409),
+            )
+            if resp.status_code == 200:
+                return
+            await asyncio.sleep(2)
+        sys.exit(f"Merge della PR #{number} non riuscito: {resp.text[:200]}")
+
+    async def read(self, path: str) -> str:
+        found = await self.c.get_file(path, self.base)
+        if found is None:
+            sys.exit(f"{path} non trovato su {self.base}")
+        return found.text
+
+    async def write(self, path: str, text: str, message: str) -> None:
+        found = await self.c.get_file(path, self.base)
+        await self.c.put_file(path, text, self.base, message, found.blob_sha if found else None)
+
+
+Git = _LocalGit | _GitHubGit
+
+
+def _guard() -> Git:
+    """Mai fuori dallo sviluppo locale, mai sul repository vero dei test."""
     host = urlparse(settings.database_url.replace("+asyncpg", "")).hostname
     if host not in ("localhost", "127.0.0.1", "::1", "db", "postgres"):
         sys.exit(f"Interrotto: il database non è locale ({host}).")
-    return settings.tl_local_repo_path
+    if settings.tl_git_mode == "local":
+        if not settings.tl_local_repo_path:
+            sys.exit("Interrotto: TL_GIT_MODE=local senza TL_LOCAL_REPO_PATH.")
+        return _LocalGit(settings.tl_local_repo_path)
+    if settings.tl_repo.split("/", 1)[0].lower() == "pagopa":
+        sys.exit(f"Interrotto: {settings.tl_repo} è di pagopa: usa un repository di prova.")
+    client = git_client_mod.get_git_client()
+    if not isinstance(client, TlGitClient):
+        sys.exit("Interrotto: client GitHub non disponibile.")
+    return _GitHubGit(client)
 
 
 # ── pulizia ──────────────────────────────────────────────────────────────────
 
-async def clean(repo: str) -> None:
+async def clean(git: Git) -> None:
+    await git.reset()  # per primo: se il repository non è di demo si ferma qui
     async with async_session() as db:
         tables = (
             await db.execute(
@@ -170,10 +269,10 @@ async def clean(repo: str) -> None:
             text("DELETE FROM qachub.test_suites WHERE test_object=:o"), {"o": SUITE_OBJECT}
         )
         await db.commit()
-    local_reset(repo, settings.tl_base_branch or "main")
-    if _ok(repo, "rev-parse", "--verify", f"origin/{IMPORT_BRANCH}"):
-        _run(repo, "branch", "-f", IMPORT_BRANCH, f"origin/{IMPORT_BRANCH}")
-    print("Pulizia fatta: dati del Test Lifecycle, suite NRT della demo, clone locale.")
+    print(
+        "Pulizia fatta: dati del Test Lifecycle, suite NRT della demo, "
+        f"Git ({settings.tl_git_mode})."
+    )
 
 
 # ── preparazione ─────────────────────────────────────────────────────────────
@@ -256,10 +355,10 @@ async def _create(db: Any, scope_id: uuid.UUID, spec: dict[str, Any], owner_id: 
     return fid
 
 
-async def _approve_and_merge(db: Any, repo: str, fid: uuid.UUID) -> None:
+async def _approve_and_merge(db: Any, git: Git, fid: uuid.UUID) -> None:
     await _transition(db, fid, TlTransitionAction.SUBMIT, OWNER)
     await _transition(db, fid, TlTransitionAction.APPROVE, PRESENTER)
-    local_merge(repo, await _pr_number(db, fid))
+    await git.merge(await _pr_number(db, fid))
     await _sync(db)
 
 
@@ -305,8 +404,8 @@ async def _nrt_runs(db: Any, feature_id: uuid.UUID) -> int:
     return await nrt.promote_running(db)
 
 
-async def prepare(repo: str) -> None:
-    await clean(repo)
+async def prepare(git: Git) -> None:
+    await clean(git)
 
     async def _no_jira(*_: Any, **__: Any) -> None:  # nessun task Jira creato dalla preparazione
         return None
@@ -325,28 +424,28 @@ async def prepare(repo: str) -> None:
         ids["running"] = await _create(
             db, scope_id, FEATURES["running"], owner_id, presenter_id, IMPL_KEY
         )
-        await _approve_and_merge(db, repo, ids["running"])
+        await _approve_and_merge(db, git, ids["running"])
 
         # 2. Implementata con due versioni
         fid = ids["versions"] = await _create(
             db, scope_id, FEATURES["versions"], owner_id, presenter_id, IMPL_KEY
         )
-        await _approve_and_merge(db, repo, fid)
+        await _approve_and_merge(db, git, fid)
         await _transition(db, fid, TlTransitionAction.REOPEN, OWNER)
         await _fill(db, fid, FEATURES["versions"]["second_revision"])
-        await _approve_and_merge(db, repo, fid)
+        await _approve_and_merge(db, git, fid)
 
         # 3. Implementata, poi modificata direttamente su Git: versione da Git + anomalia
         fid = ids["drift"] = await _create(
             db, scope_id, FEATURES["drift"], owner_id, presenter_id, IMPL_KEY
         )
-        await _approve_and_merge(db, repo, fid)
+        await _approve_and_merge(db, git, fid)
         feature = await db.get(TlFeature, fid, populate_existing=True)
-        path, base = feature.git_path, settings.tl_base_branch or "main"
+        path = feature.git_path
         await db.commit()
-        content = _run(repo, "show", f"{base}:{path}")
+        content = await git.read(path)
         content = content.replace("Allora riceve un file PDF", "Allora riceve un file PDF firmato")
-        local_write(repo, base, path, content, "Ricevuta firmata (modifica diretta su main)")
+        await git.write(path, content, "Ricevuta firmata (modifica diretta su main)")
         await _sync(db)
         content += (
             "\n  Scenario: Ricevuta in inglese\n"
@@ -354,9 +453,7 @@ async def prepare(repo: str) -> None:
             "    Quando il cittadino scarica la ricevuta in inglese\n"
             "    Allora riceve un file PDF in inglese\n"
         )
-        local_write(
-            repo, base, path, content, "Nuovo scenario senza tag (modifica diretta su main)"
-        )
+        await git.write(path, content, "Nuovo scenario senza tag (modifica diretta su main)")
         await _sync(db)
 
         # 4. Progettata: approvata, PR aperta
@@ -394,14 +491,16 @@ async def prepare(repo: str) -> None:
     print(f"Ambito {SCOPE.code} pronto ({promoted} feature in esecuzione):")
     for code, status, fid in rows:
         print(f"  {code:<18} {status.value:<12} /test-lifecycle/{fid}")
+    print("Link per Importa da Git:")
+    print(f"  https://github.com/{settings.tl_repo}/blob/{IMPORT_BRANCH}/{IMPORT_PATH}")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tl_demo", description=__doc__.splitlines()[0])
     parser.add_argument("cmd", choices=["prepare", "clean"])
     args = parser.parse_args(argv)
-    repo = _guard()
-    asyncio.run(prepare(repo) if args.cmd == "prepare" else clean(repo))
+    git = _guard()
+    asyncio.run(prepare(git) if args.cmd == "prepare" else clean(git))
     return 0
 
 
