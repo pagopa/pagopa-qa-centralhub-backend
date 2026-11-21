@@ -284,6 +284,18 @@ async def test_transient_file_error_aborts_and_keeps_sha(client, fake):
         assert (await s.execute(select(TlIssue).where(TlIssue.path == "src/a.feature"))).all() == []
 
 
+@pytest.mark.parametrize("status", [401, 403])
+async def test_auth_error_on_file_aborts_and_keeps_sha(client, fake, status):
+    first = await _sync(fake)
+    fake.seed_file("src/a.feature", "# qa-hub: AAA\nFunzionalità: a\n")
+    fake.fail_once("get_file", status, "Bad credentials")
+    with pytest.raises(Exception, match="Bad credentials"):
+        await _sync(fake)
+    assert (await _state()).last_main_sha == first.head_sha
+    async with TestSession() as s:
+        assert (await s.execute(select(TlIssue).where(TlIssue.path == "src/a.feature"))).all() == []
+
+
 async def test_concurrent_sync_second_gets_409(client, actor, fake):
     await _sync(fake)
     started, release = fake.block("head_sha")

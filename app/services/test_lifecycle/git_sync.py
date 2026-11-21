@@ -160,7 +160,8 @@ async def _sync_pull_requests(db: AsyncSession, client: TlGitClient) -> tuple[in
 
 def _is_transient(exc: BaseException) -> bool:
     if isinstance(exc, TlGitError):
-        return exc.status >= 500 or exc.status == 429
+        # 401/403: token scaduto o senza permessi -> non è colpa del file, il giro si ferma
+        return exc.status >= 500 or exc.status in (401, 403, 429)
     return isinstance(exc, httpx.HTTPError | SQLAlchemyError)
 
 
