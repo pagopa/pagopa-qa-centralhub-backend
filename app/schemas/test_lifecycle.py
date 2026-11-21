@@ -675,3 +675,62 @@ class TlNrtRunLink(BaseModel):
     feature_id: uuid.UUID
     feature_code: str
     scenario_tag: str
+
+
+# ── Migrazione (fase 5) ────────────────────────────────────────────────────────
+
+
+class TlMigrationProblem(BaseModel):
+    code: str
+    message: str
+
+
+class TlMigrationItemOut(BaseModel):
+    id: uuid.UUID
+    page_id: str | None = None
+    page_title: str | None = None
+    page_url: str | None = None
+    file_path: str | None = None
+    scope_code: str
+    number: int | None = None
+    title: str
+    status: TlFeatureStatus
+    decision: str
+    problems: list[TlMigrationProblem] = []
+    proposal: dict[str, Any] = {}
+    overrides: dict[str, Any] = {}
+    effective: dict[str, Any] = {}
+    feature_id: uuid.UUID | None = None
+    executed_at: datetime | None = None
+
+
+class TlMigrationScopeOut(BaseModel):
+    scope_code: str
+    items: int = 0
+    pending: int = 0
+    confirmed: int = 0
+    excluded: int = 0
+    executed: int = 0
+    with_problems: int = 0
+    executed_at: datetime | None = None
+    pr_number: int | None = None
+    pr_url: str | None = None
+    pr_state: str | None = None
+    pr_error: str | None = None
+    confluence_errors: list[dict[str, Any]] = []
+
+
+class TlMigrationTagOut(BaseModel):
+    name: str
+    occurrences: int
+    decision: str
+    category: bool = False  # già tra i tag di categoria
+
+
+class TlMigrationSummary(BaseModel):
+    status: str
+    analyzed_at: datetime | None = None
+    error: str | None = None
+    confluence_write: bool = False
+    scopes: list[TlMigrationScopeOut] = []
+    tags: list[TlMigrationTagOut] = []

@@ -311,3 +311,75 @@ def uninstall_confluence(monkeypatch: Any) -> None:
         raise confluence_client.TlConfluenceNotConfigured("test")
 
     monkeypatch.setattr(confluence_client, "get_confluence_client", _raise)
+
+
+class FakeConfluenceClient:
+    """Confluence in memoria: pagine (id → titolo, versione, storage), utenti, scritture."""
+
+    def __init__(self) -> None:
+        from app.services.test_lifecycle import confluence_client as cc
+
+        self._cc = cc
+        self.pages: dict[str, dict[str, Any]] = {}
+        self.users: dict[str, Any] = {}
+        self.writes: list[tuple[str, str]] = []
+        self.calls: list[tuple[Any, ...]] = []
+        self._failures: dict[str, Exception] = {}
+
+    def add_page(self, page_id: str, title: str, storage: str, version: int = 1) -> None:
+        self.pages[page_id] = {"title": title, "storage": storage, "version": version}
+
+    def add_user(self, account_id: str, name: str, email: str | None = None) -> None:
+        self.users[account_id] = self._cc.AtlassianUser(account_id, name, email)
+
+    def fail_once(self, method: str, status: int = 500, message: str = "boom") -> None:
+        self._failures[method] = self._cc.TlConfluenceError(status, message)
+
+    def _enter(self, method: str, *args: Any) -> None:
+        self.calls.append((method, *args))
+        err = self._failures.pop(method, None)
+        if err is not None:
+            raise err
+
+    async def list_feat_pages(self, root_id: str) -> list[Any]:
+        self._enter("list_feat_pages", root_id)
+        return [
+            self._cc.PageRef(pid, p["title"], p["version"])
+            for pid, p in sorted(self.pages.items())
+            if p["title"].startswith("FEAT_")
+        ]
+
+    async def get_page(self, page_id: str) -> Any:
+        self._enter("get_page", page_id)
+        p = self.pages[page_id]
+        return self._cc.PageContent(
+            page_id, p["title"], p["version"], p["storage"], f"https://wiki.test/pages/{page_id}"
+        )
+
+    async def get_user(self, account_id: str) -> Any:
+        self._enter("get_user", account_id)
+        return self.users.get(account_id) or self._cc.AtlassianUser(account_id, "", None)
+
+    async def prepend_panel(self, page: Any, panel_html: str) -> int:
+        from app.config import settings
+
+        self._enter("prepend_panel", page.id)
+        if not settings.tl_migration_confluence_write:
+            raise self._cc.TlConfluenceError(403, "Scrittura su Confluence disattivata")
+        p = self.pages[page.id]
+        if self._cc.MIGRATED_MARKER in p["storage"]:
+            return p["version"]
+        p["storage"] = panel_html + p["storage"]
+        p["version"] += 1
+        self.writes.append((page.id, panel_html))
+        return p["version"]
+
+
+def install_fake_confluence(
+    monkeypatch: Any, fake: FakeConfluenceClient | None = None
+) -> FakeConfluenceClient:
+    from app.services.test_lifecycle import confluence_client
+
+    fake = fake or FakeConfluenceClient()
+    monkeypatch.setattr(confluence_client, "get_confluence_client", lambda: fake)
+    return fake
