@@ -15,6 +15,7 @@ from app.tasks import (
     sync_sanp_health,  # noqa: F401  (registers the task with celery_app)
     sync_status_page,  # noqa: F401  (registers the task with celery_app)
     sync_test_lifecycle,  # noqa: F401  (registers the task with celery_app)
+    sync_test_lifecycle_jira,  # noqa: F401
 )
 
 ROME = ZoneInfo("Europe/Rome")
@@ -47,6 +48,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.sync_test_lifecycle.sync_test_lifecycle_git",
         "schedule": settings.tl_sync_interval_s,
         "options": {"expires": settings.tl_sync_interval_s},
+    },
+    "refresh-test-lifecycle-jira": {
+        "task": "app.tasks.sync_test_lifecycle_jira.refresh_jira",
+        "schedule": settings.tl_jira_refresh_interval_s,
+        "options": {"expires": settings.tl_jira_refresh_interval_s},
     },
     "sync-ea-map-weekly": {
         "task": "app.tasks.sync_ea.sync_ea",

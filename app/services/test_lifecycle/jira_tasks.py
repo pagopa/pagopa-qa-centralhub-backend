@@ -207,6 +207,75 @@ async def refresh_feature(
     return bool(changed)
 
 
+REFRESH_LOCK_KEY = "tl_jira_refresh"
+
+
+class RefreshInProgress(Exception):  # noqa: N818
+    """Un altro aggiornamento periodico Jira è in corso."""
+
+
+def _fresh_entry(issue: JiraIssue | None) -> dict[str, Any]:
+    if issue is None:
+        return {"verified": False, "missing": True, "checked_at": datetime.now(UTC).isoformat()}
+    return _entry(issue)
+
+
+async def refresh_all(
+    db: AsyncSession,
+    client: Any,
+    limit: int = 200,
+    feature_ids: list[uuid.UUID] | None = None,
+) -> int:
+    """Aggiorna la cache Jira delle feature con almeno una chiave collegata.
+
+    Una richiesta per chiave distinta (le chiavi condivise, come l'Epic dell'ambito, si leggono
+    una volta). Errori sulla singola chiave: la voce resta com'è. Restituisce quante feature
+    sono cambiate. `feature_ids` restringe il giro (test, ricarichi mirati).
+    """
+    from app.services.test_lifecycle import features as features_svc
+
+    stmt = select(TlFeature.id).order_by(TlFeature.updated_at.desc()).limit(limit)
+    if feature_ids is not None:
+        stmt = stmt.where(TlFeature.id.in_(feature_ids))
+    ids = list((await db.execute(stmt)).scalars())
+    per_feature: dict[uuid.UUID, list[str]] = {}
+    for fid in ids:
+        feature = await db.get(TlFeature, fid)
+        if feature is None:
+            continue
+        keys = await linked_keys(db, feature)
+        if keys:
+            per_feature[fid] = keys
+    await db.rollback()  # nessuna transazione aperta durante le chiamate a Jira
+
+    fresh: dict[str, dict[str, Any]] = {}
+    for key in dict.fromkeys(k for keys in per_feature.values() for k in keys):
+        try:
+            fresh[key] = _fresh_entry(await client.get_issue(key))
+        except TlJiraError as exc:
+            logger.info("Aggiornamento Jira di %s fallito: %s", key, exc)
+
+    updated = 0
+    for fid, keys in per_feature.items():
+        entries = {k: fresh[k] for k in keys if k in fresh}
+        if not entries:
+            continue
+        try:
+            feature = await features_svc._lock_feature(db, fid)
+        except features_svc.FeatureNotFoundError:
+            await db.rollback()
+            continue
+        cache = dict(feature.jira_cache or {})
+        changed = [k for k, v in entries.items() if _comparable(cache.get(k)) != _comparable(v)]
+        cache.update(entries)
+        feature.jira_cache = cache
+        if changed:
+            history.record_event(db, feature.id, "tl.jira.refreshed", None, {"keys": changed})
+            updated += 1
+        await db.commit()
+    return updated
+
+
 # ── creazione di task ed Epic QA ──────────────────────────────────────────────
 
 
