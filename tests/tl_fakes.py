@@ -302,3 +302,12 @@ def uninstall_jira(monkeypatch: Any) -> None:
         raise jira_client.TlJiraNotConfigured("test")
 
     monkeypatch.setattr(jira_client, "get_jira_client", _raise)
+
+
+def uninstall_confluence(monkeypatch: Any) -> None:
+    from app.services.test_lifecycle import confluence_client
+
+    def _raise() -> None:
+        raise confluence_client.TlConfluenceNotConfigured("test")
+
+    monkeypatch.setattr(confluence_client, "get_confluence_client", _raise)

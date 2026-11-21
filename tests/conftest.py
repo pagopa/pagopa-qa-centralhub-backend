@@ -18,9 +18,11 @@ def _no_real_jira(monkeypatch):
     il client Jira del Test Lifecycle risulta non configurato, salvo test che installano
     il finto con tests.tl_fakes.install_fake_jira."""
     from app.config import settings
-    from tests.tl_fakes import uninstall_jira
+    from tests.tl_fakes import uninstall_confluence, uninstall_jira
 
     uninstall_jira(monkeypatch)
+    uninstall_confluence(monkeypatch)
+    monkeypatch.setattr(settings, "tl_migration_confluence_write", False)
     # Il .env di sviluppo può attivare la modalità Git locale: i test partono sempre da GitHub.
     monkeypatch.setattr(settings, "tl_git_mode", "github")
     monkeypatch.setattr(settings, "tl_local_repo_path", "")
