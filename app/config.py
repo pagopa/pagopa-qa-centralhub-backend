@@ -106,6 +106,14 @@ class Settings(BaseSettings):
     jira_base_url: str = ""
     jira_email: str = ""
     jira_api_token: str = ""
+    # Test Lifecycle — task e Epic QA creati dall'hub (fase 3)
+    tl_jira_project: str = "PQ"
+    tl_jira_design_issue_type: str = "Progettazione Scenari e casi di test"
+    tl_jira_impl_issue_type: str = "Implementazione suite di TA"
+    tl_jira_epic_issue_type: str = "Epic"
+    tl_jira_label: str = "testing"
+    tl_jira_link_type: str = "Relates"
+    tl_jira_refresh_interval_s: float = 900.0
 
     # PSP Fee catalog (Data Hub)
     psp_fee_json_url: str = (

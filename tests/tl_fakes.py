@@ -203,3 +203,102 @@ def uninstall_git(monkeypatch: Any) -> None:
         raise git_client_mod.TlGitNotConfigured("Nessun token GitHub configurato")
 
     monkeypatch.setattr(git_client_mod, "get_git_client", _raise)
+
+
+class FakeJiraClient:
+    """Jira in memoria per i test: issue, link, utenti; registra le chiamate."""
+
+    def __init__(self, base: str = "https://jira.test") -> None:
+        from app.services.test_lifecycle.jira_client import JiraIssue
+
+        self._Issue = JiraIssue
+        self.base = base
+        self.issues: dict[str, Any] = {}
+        self.links: list[tuple[str, str, str]] = []
+        self.created: list[dict[str, Any]] = []
+        self.users: dict[str, str] = {}
+        self.calls: list[tuple[Any, ...]] = []
+        self._failures: dict[str, Exception] = {}
+        self._gates: dict[str, tuple[asyncio.Event, asyncio.Event]] = {}
+        self._next = 9001
+
+    def issue_url(self, key: str) -> str:
+        return f"{self.base}/browse/{key}"
+
+    def add_issue(self, key: str, summary: str = "S", issue_type: str = "Story",
+                  status: str = "Backlog", category: str = "new") -> None:
+        self.issues[key] = self._Issue(key, summary, status, category, issue_type,
+                                       key.split("-")[0], self.issue_url(key))
+
+    def fail_once(self, method: str, status: int = 500, message: str = "boom") -> None:
+        from app.services.test_lifecycle.jira_client import TlJiraError
+
+        self._failures[method] = TlJiraError(status, message)
+
+    def block(self, method: str) -> tuple[asyncio.Event, asyncio.Event]:
+        gate = (asyncio.Event(), asyncio.Event())
+        self._gates[method] = gate
+        return gate
+
+    def calls_of(self, method: str) -> list[tuple[Any, ...]]:
+        return [c for c in self.calls if c[0] == method]
+
+    async def _enter(self, method: str, *args: Any) -> None:
+        self.calls.append((method, *args))
+        gate = self._gates.get(method)
+        if gate is not None:
+            gate[0].set()
+            await gate[1].wait()
+        err = self._failures.pop(method, None)
+        if err is not None:
+            raise err
+
+    async def get_issue(self, key: str) -> Any:
+        await self._enter("get_issue", key)
+        return self.issues.get(key)
+
+    async def find_account_id(self, email: str) -> str | None:
+        await self._enter("find_account_id", email)
+        return self.users.get(email.lower())
+
+    async def search_summary(self, project: str, prefix: str) -> Any:
+        await self._enter("search_summary", project, prefix)
+        for issue in self.issues.values():
+            if issue.project == project and issue.summary.startswith(prefix):
+                return issue
+        return None
+
+    async def search_epics(self, project: str, text: str, limit: int = 20) -> list[Any]:
+        await self._enter("search_epics", project, text)
+        return [i for i in self.issues.values()
+                if i.project == project and i.issue_type == "Epic"
+                and text.lower() in i.summary.lower()][:limit]
+
+    async def create_issue(self, **fields: Any) -> Any:
+        await self._enter("create_issue", fields)
+        key = f"{fields['project']}-{self._next}"
+        self._next += 1
+        self.created.append({"key": key, **fields})
+        self.add_issue(key, fields["summary"], fields["issue_type"])
+        return self.issues[key]
+
+    async def create_link(self, link_type: str, inward_key: str, outward_key: str) -> None:
+        await self._enter("create_link", link_type, inward_key, outward_key)
+        self.links.append((link_type, inward_key, outward_key))
+
+
+def install_fake_jira(monkeypatch: Any, fake: FakeJiraClient | None = None) -> FakeJiraClient:
+    from app.services.test_lifecycle import jira_client
+
+    fake = fake or FakeJiraClient()
+    monkeypatch.setattr(jira_client, "get_jira_client", lambda: fake)
+    return fake
+
+
+def uninstall_jira(monkeypatch: Any) -> None:
+    from app.services.test_lifecycle import jira_client
+
+    def _raise() -> None:
+        raise jira_client.TlJiraNotConfigured("test")
+
+    monkeypatch.setattr(jira_client, "get_jira_client", _raise)
