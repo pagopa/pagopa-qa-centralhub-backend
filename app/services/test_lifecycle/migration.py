@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.test_lifecycle import (
+    TlCategoryTag,
     TlFeature,
     TlFeatureStatus,
     TlMigrationItem,
@@ -635,3 +636,386 @@ async def summary(db: AsyncSession) -> TlMigrationSummary:
 async def wipe_unexecuted(db: AsyncSession) -> None:
     """Solo per strumenti di test/manutenzione: rimuove le righe non eseguite."""
     await db.execute(delete(TlMigrationItem).where(TlMigrationItem.executed_at.is_(None)))
+
+
+# ── esecuzione per ambito ─────────────────────────────────────────────────────
+
+
+class MigrationBlocked(Exception):  # noqa: N818
+    def __init__(self, reasons: list[str]) -> None:
+        super().__init__("; ".join(reasons))
+        self.reasons = reasons
+
+
+def panel_html(feature_url: str) -> str:
+    from app.services.test_lifecycle.confluence_client import MIGRATED_MARKER
+
+    return (
+        '<ac:structured-macro ac:name="info"><ac:parameter ac:name="title">'
+        f"{MIGRATED_MARKER}</ac:parameter><ac:rich-text-body><p>Questa pagina non è più "
+        f'aggiornata: la feature vive su <a href="{feature_url}">QA Hub</a>.</p>'
+        "</ac:rich-text-body></ac:structured-macro>"
+    )
+
+
+@dataclass
+class _Work:
+    item_id: uuid.UUID
+    page_id: str | None
+    page_version: int | None
+    file_path: str | None
+    blob_sha: str | None
+    eff: dict[str, Any]
+    proposal: dict[str, Any]
+    file_text: str | None = None
+    page_url: str | None = None
+    jira_entries: dict[str, Any] = field(default_factory=dict)
+
+
+def _scenarios_from_file(
+    parsed: ParsedFeature, feature_tags: list[str], keep: set[str], scope_code: str, number: int
+) -> list[dict[str, Any]]:
+    from app.models.test_lifecycle import TlPolarity
+    from app.services.test_lifecycle.gherkin import scenario_tag
+
+    pushed = [t.lstrip("@") for t in feature_tags if not is_identity_tag(t)]
+    out = []
+    for i, sc in enumerate(parsed.scenarios, start=1):
+        names = pushed + [t.lstrip("@") for t in sc.all_tags if not is_identity_tag(t)]
+        extra = [n for n in dict.fromkeys(names) if n in keep and n.lower() not in _POLARITY]
+        old = next((t.lstrip("@") for t in sc.all_tags if is_identity_tag(t)), None)
+        out.append(
+            {
+                "tag": scenario_tag(scope_code, number, i),
+                "old": old,
+                "title": sc.title,
+                "kind": sc.kind,
+                "polarity": sc.polarity or TlPolarity.POSITIVO,
+                "extra_tags": sorted(extra),
+                "steps": sc.steps,
+                "examples": sc.examples,
+                "detail_link": sc.detail_link,
+            }
+        )
+    return out
+
+
+async def _blockers(db: AsyncSession, work: list[_Work], scope_code: str) -> list[str]:
+    reasons: list[str] = []
+    seen: dict[int, int] = {}
+    for w in work:
+        if not w.eff["scope_code"] or w.eff["number"] is None:
+            reasons.append(f"«{w.eff['title']}»: ambito o numero mancanti")
+            continue
+        n = int(w.eff["number"])
+        seen[n] = seen.get(n, 0) + 1
+    reasons += [f"Numero {n:03d} usato da più righe" for n, c in seen.items() if c > 1]
+    taken = await _hub_numbers(db)
+    reasons += [
+        f"Numero {n:03d} già usato nell'hub per {scope_code}"
+        for n in seen
+        if (scope_code.lower(), n) in taken
+    ]
+    return reasons
+
+
+async def execute_scope(
+    db: AsyncSession, scope_code: str, actor_email: str, *, git: Any, confluence: Any
+) -> TlMigrationScopeOut:
+    from app.services.test_lifecycle import jira_tasks, migration_align
+    from app.services.test_lifecycle.actors import resolve_actor
+
+    async with try_advisory_lock(db, LOCK_KEY) as got:
+        if not got:
+            raise MigrationInProgress()
+        actor = await resolve_actor(db, actor_email)
+        actor_id = actor.id
+        items = [
+            it
+            for it in (await db.execute(select(TlMigrationItem))).scalars()
+            if it.decision == "confirmed"
+            and it.executed_at is None
+            and str(effective(it)["scope_code"]).lower() == scope_code.lower()
+        ]
+        work = [
+            _Work(
+                it.id,
+                it.page_id,
+                it.page_version,
+                effective(it)["file_path"],
+                it.file_blob_sha,
+                effective(it),
+                dict(it.proposal),
+            )
+            for it in items
+        ]
+        reasons = await _blockers(db, work, scope_code)
+        if reasons:
+            await db.rollback()
+            raise MigrationBlocked(reasons)
+        tag_rows = list((await db.execute(select(TlMigrationTag))).scalars())
+        keep = {t.name for t in tag_rows if t.decision == "keep"} | set(await category_tags(db))
+        await db.rollback()
+
+        # rete: pagine e file riletti, chiavi Jira verificate
+        changed: list[uuid.UUID] = []
+        jira_missing: dict[uuid.UUID, str] = {}
+        head = await git.head_sha(settings.tl_base_branch)
+        for w in work:
+            if w.page_id:
+                pg = await confluence.get_page(w.page_id)
+                w.page_url = pg.url
+                if w.page_version is not None and pg.version != w.page_version:
+                    changed.append(w.item_id)
+                    continue
+            if w.file_path:
+                f = await git.get_file(w.file_path, head)
+                if f is None or (w.blob_sha and f.blob_sha != w.blob_sha):
+                    changed.append(w.item_id)
+                    continue
+                w.file_text, w.blob_sha = f.text, f.blob_sha
+            try:
+                w.jira_entries = await jira_tasks.verify_keys(
+                    {
+                        k: w.proposal.get(k)
+                        for k in ("jira_design_key", "jira_impl_key", "product_issue_key")
+                    }
+                )
+            except jira_tasks.JiraIssueNotFound as exc:
+                jira_missing[w.item_id] = exc.key
+
+        for item_id in changed + list(jira_missing):
+            row = await db.get(TlMigrationItem, item_id)
+            code = "changed_since_analysis" if item_id in changed else "jira_key_not_found"
+            row.decision = "pending"
+            row.problems = [*row.problems, _problem(code, jira_missing.get(item_id))]
+        await db.commit()
+
+        executed = [w for w in work if w.item_id not in changed and w.item_id not in jira_missing]
+        used_tags: set[str] = set()
+        for w in executed:
+            used_tags |= await _create_feature(db, w, scope_code, actor_id, actor_email, keep, head)
+        for name in used_tags:
+            if await db.get(TlCategoryTag, name) is None:
+                db.add(TlCategoryTag(name=name))
+        scope_row = await migration_align._get_scope_row(db, scope_code)
+        scope_row.executed_at = datetime.now(UTC)
+        await db.commit()
+
+        await write_confluence_panels(db, scope_code, confluence)
+        return await migration_align.open_alignment_pr(db, scope_code, git)
+
+
+async def _create_feature(
+    db: AsyncSession,
+    w: _Work,
+    scope_code: str,
+    actor_id: uuid.UUID,
+    actor_email: str,
+    keep: set[str],
+    head: str,
+) -> set[str]:
+    """Crea ambito (se manca), feature, revisione, scenari, alias, versione ed evento. Un commit."""
+    from decimal import Decimal
+
+    from app.models.test_lifecycle import (
+        TlFeatureRevision,
+        TlPolarity,
+        TlRevisionStatus,
+        TlScenario,
+        TlScenarioAlias,
+        TlScenarioContent,
+        TlScenarioKind,
+    )
+    from app.services.test_lifecycle import history
+    from app.services.test_lifecycle.gherkin import feature_code, scenario_tag
+
+    eff, prop = w.eff, w.proposal
+    number = int(eff["number"])
+    scope = (
+        await db.execute(
+            select(TlScope).where(func.lower(TlScope.code) == scope_code.lower()).with_for_update()
+        )
+    ).scalar_one_or_none()
+    if scope is None:
+        scope = TlScope(
+            code=scope_code,
+            name=scope_code,
+            area=prop.get("area"),
+            repo_folder=prop.get("repo_folder"),
+            next_feature_number=1,
+        )
+        db.add(scope)
+        await db.flush()
+    elif not scope.repo_folder and prop.get("repo_folder"):
+        scope.repo_folder = prop["repo_folder"]
+    scope.next_feature_number = max(scope.next_feature_number, number + 1)
+
+    parsed = parse_feature_file(w.file_text, allowed_extra=()) if w.file_text else None
+    if parsed is not None and parsed.errors:
+        parsed = None
+    status = TlFeatureStatus(eff["status"])
+    published = parsed is not None and status in (
+        TlFeatureStatus.IMPLEMENTED,
+        TlFeatureStatus.DESIGNED,
+    )
+    note_parts = [prop.get("note") or ""]
+    if parsed is None and status != TlFeatureStatus.DRAFT:
+        note_parts.append(f"Stato su Confluence: {status.value} (nessun feature file importato).")
+    if parsed is None and w.file_text:
+        note_parts.append("Feature file non leggibile: scenari da riscrivere.")
+
+    owner = uuid.UUID(eff["owner_id"]) if eff.get("owner_id") else None
+    reviewer = uuid.UUID(eff["reviewer_id"]) if eff.get("reviewer_id") else None
+    if reviewer == owner:
+        reviewer = None
+    feature = TlFeature(
+        scope_id=scope.id,
+        number=number,
+        code=feature_code(scope.code, number),
+        status=status if published else TlFeatureStatus.DRAFT,
+        design_owner_id=owner,
+        reviewer_id=reviewer,
+        jira_design_key=prop.get("jira_design_key"),
+        jira_impl_key=prop.get("jira_impl_key"),
+        jira_cache=w.jira_entries,
+        created_by=actor_email,
+        migration_note="\n\n".join(p for p in note_parts if p) or None,
+        migrated_from={
+            "page_id": w.page_id,
+            "page_url": w.page_url,
+            "file_path": w.file_path,
+            "commit_sha": head if w.file_text else None,
+        },
+        alignment_pending=published,
+        git_path=w.file_path if published else None,
+        git_blob_sha=w.blob_sha if published else None,
+    )
+    db.add(feature)
+    await db.flush()
+    estimate = prop.get("impl_estimate_days")
+    rev = TlFeatureRevision(
+        feature_id=feature.id,
+        number=1,
+        status=TlRevisionStatus.MERGED if published else TlRevisionStatus.DRAFT,
+        title=(eff.get("title") or (parsed.title if parsed else "") or feature.code)[:255],
+        description=prop.get("description") or (parsed.description if parsed else None),
+        background_steps=(parsed.background_steps if parsed else None)
+        or prop.get("background_steps"),
+        requirements_url=prop.get("requirements_url"),
+        product_issue_key=prop.get("product_issue_key"),
+        impl_estimate_days=Decimal(str(estimate)) if estimate is not None else None,
+        created_by=actor_email,
+        origin="git" if parsed is not None else "hub",
+        merged_commit_sha=head if published else None,
+    )
+    db.add(rev)
+    await db.flush()
+
+    used: set[str] = set()
+    if parsed is not None:
+        specs = _scenarios_from_file(
+            parsed, prop.get("feature_tags") or [], keep, scope.code, number
+        )
+    else:
+        specs = [
+            {
+                "tag": scenario_tag(scope.code, number, i),
+                "old": None,
+                "title": s["title"][:500],
+                "kind": TlScenarioKind.SCENARIO,
+                "polarity": TlPolarity.POSITIVO,
+                "extra_tags": [],
+                "steps": s["steps"],
+                "examples": None,
+                "detail_link": None,
+            }
+            for i, s in enumerate(prop.get("scenarios") or [], start=1)
+        ]
+    existing_aliases = set((await db.execute(select(TlScenarioAlias.alias))).scalars())
+    for i, spec in enumerate(specs, start=1):
+        scenario = TlScenario(feature_id=feature.id, number=i, tag=spec["tag"])
+        db.add(scenario)
+        await db.flush()
+        db.add(
+            TlScenarioContent(
+                revision_id=rev.id,
+                scenario_id=scenario.id,
+                position=i,
+                title=spec["title"][:500],
+                kind=spec["kind"],
+                polarity=spec["polarity"],
+                extra_tags=spec["extra_tags"],
+                steps=spec["steps"],
+                examples=spec["examples"],
+                detail_link=spec["detail_link"],
+            )
+        )
+        used |= set(spec["extra_tags"])
+        old = spec["old"]
+        if old and old not in existing_aliases and old != spec["tag"].lstrip("@"):
+            db.add(TlScenarioAlias(scenario_id=scenario.id, alias=old))
+            existing_aliases.add(old)
+    feature.next_scenario_number = len(specs) + 1
+    if published:
+        feature.published_revision_id = rev.id
+    else:
+        feature.working_revision_id = rev.id
+    await db.flush()
+    actor = await db.get(User, actor_id)
+    if published:
+        await history.snapshot(db, feature, rev, actor, origin="migration", commit_sha=head)
+    history.record_event(
+        db,
+        feature.id,
+        "tl.feature.migrated",
+        actor,
+        {
+            "page_id": w.page_id,
+            "file_path": w.file_path,
+            "code": feature.code,
+        },
+    )
+    item = await db.get(TlMigrationItem, w.item_id)
+    item.feature_id = feature.id
+    item.executed_at = datetime.now(UTC)
+    item.proposal = {**item.proposal, "old_scenario_tags": [s["old"] for s in specs]}
+    await db.commit()
+    return used
+
+
+async def write_confluence_panels(db: AsyncSession, scope_code: str, confluence: Any) -> None:
+    """Pannello "Migrata su QA Hub" sulle pagine eseguite dell'ambito; errori sull'ambito."""
+    from app.services.test_lifecycle import migration_align
+    from app.services.test_lifecycle.confluence_client import TlConfluenceError
+
+    rows = [
+        (it.page_id, it.feature_id)
+        for it in (await db.execute(select(TlMigrationItem))).scalars()
+        if it.executed_at
+        and it.page_id
+        and it.feature_id
+        and str(effective(it)["scope_code"]).lower() == scope_code.lower()
+    ]
+    await db.rollback()
+    errors: list[dict[str, Any]] = []
+    if not settings.tl_migration_confluence_write:
+        errors.append(
+            {
+                "page_id": None,
+                "message": "Scrittura su Confluence disattivata: pagine non aggiornate",
+            }
+        )
+    else:
+        base = settings.tl_hub_base_url.rstrip("/")
+        for page_id, feature_id in rows:
+            try:
+                pg = await confluence.get_page(page_id)
+                await confluence.prepend_panel(
+                    pg, panel_html(f"{base}/test-lifecycle/{feature_id}")
+                )
+            except TlConfluenceError as exc:
+                errors.append({"page_id": page_id, "message": exc.message[:500]})
+    scope_row = await migration_align._get_scope_row(db, scope_code)
+    scope_row.confluence_errors = errors
+    await db.commit()
