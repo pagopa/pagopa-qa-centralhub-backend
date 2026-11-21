@@ -213,3 +213,195 @@ async def cleanup_scopes():
         for sid in ids:
             await s.execute(delete(TlScope).where(TlScope.id == uuid.UUID(sid)))
         await s.commit()
+
+
+# ── Task 4: task Progettazione ed Epic QA ─────────────────────────────────────
+
+
+async def _jira_scope(client, scope_, jira, epic="PQ-495", component="FDR"):
+    resp = await client.patch(
+        f"{BASE}/scopes/{scope_['id']}",
+        json={"jira_qa_epic_key": epic, "jira_component": component},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+async def _design(client, feat, actor):
+    return await client.post(
+        f"{BASE}/features/{feat['id']}/jira/design-task", json={"actor_email": actor["email"]}
+    )
+
+
+async def test_create_design_task_payload(client, scope, actor, jira, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "tl_hub_base_url", "https://hub.test")
+    await _jira_scope(client, scope, jira)
+    jira.users[actor["email"].lower()] = "acc-owner"
+    feat = await _new_feature(client, scope, actor, title="Pagamento", design_owner_id=actor["id"])
+    rev = feat["working_revision"]
+    await client.patch(
+        f"{BASE}/features/{feat['id']}/revisions/{rev['id']}",
+        json={"lock_version": rev["lock_version"], "product_issue_key": "CHK-7",
+              "actor_email": actor["email"]},
+    )
+    resp = await _design(client, feat, actor)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    [created] = jira.created
+    assert created["project"] == "PQ"
+    assert created["issue_type"] == "Progettazione Scenari e casi di test"
+    assert created["summary"] == f"[{feat['code']}] Progettazione — Pagamento"
+    assert created["labels"] == ["testing"]
+    assert created["parent_key"] == "PQ-495"
+    assert created["component"] == "FDR"
+    assert created["assignee_id"] == "acc-owner"
+    assert f"https://hub.test/test-lifecycle/{feat['id']}" in str(created["description_adf"])
+    assert jira.links == [("Relates", created["key"], "CHK-7")]
+    assert body["jira_design_key"] == created["key"]
+    assert _link(body, "design")["verified"] is True
+    assert body["jira_warning"] is None
+
+
+async def test_feature_epic_overrides_scope(client, scope, actor, jira):
+    jira.add_issue("PQ-777", "[QA Epic] Altro", issue_type="Epic")
+    await _jira_scope(client, scope, jira)
+    feat = await _new_feature(client, scope, actor)
+    await _patch_feature(client, feat, actor, jira_qa_epic_key="PQ-777")
+    assert (await _design(client, feat, actor)).status_code == 200
+    assert jira.created[0]["parent_key"] == "PQ-777"
+
+
+async def test_create_reuses_existing_task_found_by_jql(client, scope, actor, jira):
+    feat = await _new_feature(client, scope, actor, title="Pagamento")
+    jira.add_issue("PQ-555", f"[{feat['code']}] Progettazione — Pagamento",
+                   issue_type="Progettazione Scenari e casi di test")
+    resp = await _design(client, feat, actor)
+    assert resp.status_code == 200, resp.text
+    assert jira.created == []
+    assert resp.json()["jira_design_key"] == "PQ-555"
+
+
+async def test_unknown_assignee_creates_unassigned_with_warning(client, scope, actor, jira):
+    feat = await _new_feature(client, scope, actor, design_owner_id=actor["id"])
+    resp = await _design(client, feat, actor)
+    assert resp.status_code == 200, resp.text
+    assert jira.created[0]["assignee_id"] is None
+    assert "non trovato su Jira" in resp.json()["jira_warning"]
+
+
+async def test_jira_400_surfaces_message_and_keeps_feature_unchanged(client, scope, actor, jira):
+    feat = await _new_feature(client, scope, actor)
+    jira.fail_once("create_issue", 400, "parent: Issue PQ-495 is not an epic")
+    resp = await _design(client, feat, actor)
+    assert resp.status_code == 502
+    assert resp.json()["detail"]["code"] == "jira_error"
+    assert "not an epic" in resp.json()["detail"]["message"]
+    row = await _feature_row(feat["id"])
+    assert row.jira_design_key is None
+    assert "not an epic" in row.jira_error
+
+
+async def test_concurrent_create_second_gets_409(client, scope, actor, jira):
+    import asyncio
+
+    feat = await _new_feature(client, scope, actor)
+    started, release = jira.block("create_issue")
+    first = asyncio.create_task(_design(client, feat, actor))
+    await asyncio.wait_for(started.wait(), 10)
+    try:
+        second = await asyncio.wait_for(_design(client, feat, actor), 10)
+    finally:
+        release.set()
+    assert second.status_code == 409
+    assert second.json()["detail"]["code"] == "jira_in_progress"
+    assert (await first).status_code == 200
+    assert len(jira.created) == 1
+
+
+async def test_design_task_not_allowed_outside_draft(client, scope, actor, jira):
+    from sqlalchemy import update
+
+    from app.models.test_lifecycle import TlFeatureRevision, TlRevisionStatus
+
+    feat = await _new_feature(client, scope, actor)
+    async with TestSession() as s:
+        await s.execute(
+            update(TlFeatureRevision)
+            .where(TlFeatureRevision.id == uuid.UUID(feat["working_revision"]["id"]))
+            .values(status=TlRevisionStatus.IN_REVIEW)
+        )
+        await s.commit()
+    resp = await _design(client, feat, actor)
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "jira_task_not_allowed"
+
+
+async def test_design_task_exists_409(client, scope, actor, jira):
+    feat = await _new_feature(client, scope, actor)
+    await _patch_feature(client, feat, actor, jira_design_key="PQ-12")
+    resp = await _design(client, feat, actor)
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "jira_task_exists"
+
+
+async def test_without_jira_config_503(client, scope, actor):
+    feat = await _new_feature(client, scope, actor)
+    resp = await _design(client, feat, actor)
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["code"] == "jira_not_configured"
+
+
+async def _epic(client, scope_, actor):
+    return await client.post(
+        f"{BASE}/scopes/{scope_['id']}/jira/epic", json={"actor_email": actor["email"]}
+    )
+
+
+async def test_create_scope_epic_payload_and_saves_key(client, scope, actor, jira):
+    await client.patch(f"{BASE}/scopes/{scope['id']}", json={"jira_component": "FDR"})
+    resp = await _epic(client, scope, actor)
+    assert resp.status_code == 200, resp.text
+    [created] = jira.created
+    assert created["issue_type"] == "Epic"
+    assert created["summary"] == f"[QA Epic] {scope['name']}"
+    assert created["parent_key"] is None and created["assignee_id"] is None
+    assert created["component"] == "FDR" and created["labels"] == ["testing"]
+    assert resp.json()["jira_qa_epic_key"] == created["key"]
+
+
+async def test_scope_epic_reuses_existing_by_summary(client, scope, actor, jira):
+    jira.add_issue("PQ-600", f"[QA Epic] {scope['name']}", issue_type="Epic")
+    resp = await _epic(client, scope, actor)
+    assert resp.status_code == 200, resp.text
+    assert jira.created == [] and resp.json()["jira_qa_epic_key"] == "PQ-600"
+
+
+async def test_scope_epic_exists_409(client, scope, actor, jira):
+    await _jira_scope(client, scope, jira)
+    resp = await _epic(client, scope, actor)
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "jira_task_exists"
+
+
+async def test_concurrent_epic_create_second_gets_409(client, scope, actor, jira):
+    import asyncio
+
+    started, release = jira.block("create_issue")
+    first = asyncio.create_task(_epic(client, scope, actor))
+    await asyncio.wait_for(started.wait(), 10)
+    try:
+        second = await asyncio.wait_for(_epic(client, scope, actor), 10)
+    finally:
+        release.set()
+    assert second.status_code == 409
+    assert (await first).status_code == 200
+    assert len(jira.created) == 1
+
+
+async def test_epics_search_endpoint(client, jira):
+    resp = await client.get(f"{BASE}/jira/epics", params={"q": "fdr"})
+    assert resp.status_code == 200, resp.text
+    assert [e["key"] for e in resp.json()] == ["PQ-495"]
+    assert resp.json()[0]["summary"] == "[QA Epic] FdR"

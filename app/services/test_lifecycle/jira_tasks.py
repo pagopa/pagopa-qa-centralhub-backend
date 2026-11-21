@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.test_lifecycle import TlFeature, TlFeatureRevision, TlScope
+from app.models.user import User
 from app.schemas.test_lifecycle import TlJiraLink
 from app.services.test_lifecycle import history
 from app.services.test_lifecycle import jira_client as jira_mod
@@ -204,3 +205,208 @@ async def refresh_feature(
         history.record_event(db, feature.id, "tl.jira.refreshed", actor, {"keys": changed})
     await db.commit()
     return bool(changed)
+
+
+# ── creazione di task ed Epic QA ──────────────────────────────────────────────
+
+
+class JiraInProgress(Exception):  # noqa: N818
+    """Un'altra richiesta sta già creando lo stesso elemento Jira."""
+
+
+class JiraTaskExists(Exception):  # noqa: N818
+    def __init__(self, key: str) -> None:
+        super().__init__(key)
+        self.key = key
+
+
+class JiraTaskNotAllowed(Exception):  # noqa: N818
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+_KIND_LABEL = {"design": "Progettazione", "impl": "Implementazione suite"}
+
+
+def _issue_type(kind: str) -> str:
+    return (
+        settings.tl_jira_design_issue_type if kind == "design" else settings.tl_jira_impl_issue_type
+    )
+
+
+def task_summary(code: str, kind: str, title: str) -> str:
+    return f"[{code}] {_KIND_LABEL[kind]} — {title}"[:255]
+
+
+def _description(feature_id: uuid.UUID, tags: list[str]) -> dict[str, Any]:
+    paragraphs: list[dict[str, Any]] = []
+    if settings.tl_hub_base_url:
+        url = f"{settings.tl_hub_base_url.rstrip('/')}/test-lifecycle/{feature_id}"
+        paragraphs.append(
+            {
+                "type": "paragraph",
+                "content": [
+                    {"type": "text", "text": "Feature progettata su QA Hub: "},
+                    {
+                        "type": "text",
+                        "text": url,
+                        "marks": [{"type": "link", "attrs": {"href": url}}],
+                    },
+                ],
+            }
+        )
+    if tags:
+        paragraphs.append(
+            {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": "Scenari: " + " ".join(tags)}],
+            }
+        )
+    return {"type": "doc", "version": 1, "content": paragraphs}
+
+
+async def _feature_lock(db: AsyncSession, feature_id: uuid.UUID) -> Any:
+    # import locale: evita il ciclo con advisory_lock/features
+    from app.services.test_lifecycle.advisory_lock import try_advisory_lock
+
+    return try_advisory_lock(db, f"tl_jira:{feature_id}")
+
+
+async def create_task(
+    db: AsyncSession, feature_id: uuid.UUID, kind: str, actor_email: str, client: Any
+) -> str | None:
+    """Crea (o ritrova) il task Jira `kind` ("design"|"impl") e lo collega alla feature.
+
+    Restituisce l'eventuale avviso da mostrare (assegnatario non trovato, link non creato).
+    Nessuna rete con lock di riga: advisory lock per feature, lettura breve, rete, rilock.
+    """
+    from app.services.test_lifecycle import features as features_svc
+
+    field = "jira_design_key" if kind == "design" else "jira_impl_key"
+    async with await _feature_lock(db, feature_id) as got:
+        if not got:
+            raise JiraInProgress(str(feature_id))
+        # lettura sotto lock di riga
+        feature = await features_svc._lock_feature(db, feature_id)
+        if getattr(feature, field):
+            raise JiraTaskExists(getattr(feature, field))
+        rev_id = feature.working_revision_id or feature.published_revision_id
+        rev = await db.get(TlFeatureRevision, rev_id) if rev_id else None
+        if kind == "design":
+            if rev is None or feature.working_revision_id is None or rev.status.value != "draft":
+                raise JiraTaskNotAllowed(
+                    "Il task di progettazione si crea con la revisione in bozza"
+                )
+            owner_id = feature.design_owner_id
+        else:
+            if feature.status.value not in ("designed", "implemented", "running"):
+                raise JiraTaskNotAllowed("Il task di implementazione si crea dopo l'approvazione")
+            owner_id = feature.impl_owner_id
+        scope = await db.get(TlScope, feature.scope_id)
+        owner = await db.get(User, owner_id) if owner_id else None
+        tags = (
+            [sc.tag for sc, _ in (await history.build_render(db, feature, rev))[1]] if rev else []
+        )
+        params = {
+            "code": feature.code,
+            "title": rev.title if rev else feature.code,
+            "epic": effective_epic(feature, scope) if scope else feature.jira_qa_epic_key,
+            "component": scope.jira_component if scope else None,
+            "product": rev.product_issue_key if rev else None,
+            "owner_email": owner.email if owner else None,
+        }
+        await db.commit()  # rilascia i lock di riga prima della rete
+
+        warnings: list[str] = []
+        summary = task_summary(params["code"], kind, params["title"])
+        try:
+            issue = await client.search_summary(settings.tl_jira_project, summary)
+            reused = issue is not None
+            if issue is None:
+                assignee = None
+                if params["owner_email"]:
+                    assignee = await client.find_account_id(params["owner_email"])
+                    if assignee is None:
+                        email = params["owner_email"]
+                        warnings.append(f"Utente {email} non trovato su Jira: task non assegnato")
+                issue = await client.create_issue(
+                    project=settings.tl_jira_project,
+                    issue_type=_issue_type(kind),
+                    summary=summary,
+                    description_adf=_description(feature_id, tags),
+                    labels=[settings.tl_jira_label],
+                    parent_key=params["epic"],
+                    component=params["component"],
+                    assignee_id=assignee,
+                )
+            if params["product"] and not reused:
+                try:
+                    await client.create_link(
+                        settings.tl_jira_link_type, issue.key, params["product"]
+                    )
+                except TlJiraError as exc:
+                    warnings.append(f"Link a {params['product']} non creato: {exc.message}")
+        except TlJiraError as exc:
+            feature = await features_svc._lock_feature(db, feature_id)
+            feature.jira_error = exc.message
+            await db.commit()
+            raise
+
+        # esito, riga rilockata
+        actor = await resolve_actor(db, actor_email)
+        feature = await features_svc._lock_feature(db, feature_id)
+        if getattr(feature, field) is None:
+            setattr(feature, field, issue.key)
+        merge_cache(feature, {issue.key: _entry(issue)})
+        feature.jira_error = None
+        history.record_event(
+            db,
+            feature.id,
+            "tl.jira.task_linked" if reused else "tl.jira.task_created",
+            actor,
+            {"kind": kind, "key": issue.key, "summary": issue.summary},
+        )
+        await db.commit()
+    return "; ".join(warnings) or None
+
+
+def epic_summary(scope_name: str) -> str:
+    return f"[QA Epic] {scope_name}"[:255]
+
+
+async def create_scope_epic(db: AsyncSession, scope_id: uuid.UUID, client: Any) -> str:
+    """Crea (o ritrova per titolo) l'Epic QA dell'ambito e ne salva la chiave."""
+    from app.services.test_lifecycle.advisory_lock import try_advisory_lock
+    from app.services.test_lifecycle.scopes import ScopeNotFoundError
+
+    async with try_advisory_lock(db, f"tl_jira_scope:{scope_id}") as got:
+        if not got:
+            raise JiraInProgress(str(scope_id))
+        scope = await db.get(TlScope, scope_id, with_for_update=True, populate_existing=True)
+        if scope is None:
+            raise ScopeNotFoundError(str(scope_id))
+        if scope.jira_qa_epic_key:
+            raise JiraTaskExists(scope.jira_qa_epic_key)
+        summary = epic_summary(scope.name)
+        component = scope.jira_component
+        await db.commit()
+
+        issue = await client.search_summary(settings.tl_jira_project, summary)
+        if issue is None or issue.issue_type != settings.tl_jira_epic_issue_type:
+            issue = await client.create_issue(
+                project=settings.tl_jira_project,
+                issue_type=settings.tl_jira_epic_issue_type,
+                summary=summary,
+                description_adf=None,
+                labels=[settings.tl_jira_label],
+                parent_key=None,
+                component=component,
+                assignee_id=None,
+            )
+        scope = await db.get(TlScope, scope_id, with_for_update=True, populate_existing=True)
+        if scope is not None and not scope.jira_qa_epic_key:
+            scope.jira_qa_epic_key = issue.key
+        await db.commit()
+        logger.info("Epic QA %s collegata all'ambito %s", issue.key, scope_id)
+    return issue.key

@@ -14,6 +14,7 @@ from app.models.test_lifecycle import (
     TlGitSyncState,
     TlIssueKind,
     TlIssueStatus,
+    TlScope,
     TlStepPhrase,
 )
 from app.schemas.test_lifecycle import (
@@ -32,6 +33,7 @@ from app.schemas.test_lifecycle import (
     TlIssueOut,
     TlIssueUpdate,
     TlJiraActorRequest,
+    TlJiraLink,
     TlPreviewOut,
     TlPrRequest,
     TlRebaseApply,
@@ -188,6 +190,24 @@ def _translate(exc: Exception) -> HTTPException:
                 "message": f"{exc.key} non è un'Epic del progetto {settings.tl_jira_project}",
                 "key": exc.key,
             },
+        )
+    if isinstance(exc, jira_tasks_svc.JiraInProgress):
+        return HTTPException(
+            status_code=409,
+            detail={"code": "jira_in_progress", "message": "Creazione su Jira già in corso"},
+        )
+    if isinstance(exc, jira_tasks_svc.JiraTaskExists):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "jira_task_exists",
+                "message": f"Già collegato a {exc.key}",
+                "key": exc.key,
+            },
+        )
+    if isinstance(exc, jira_tasks_svc.JiraTaskNotAllowed):
+        return HTTPException(
+            status_code=409, detail={"code": "jira_task_not_allowed", "message": exc.reason}
         )
     if isinstance(exc, jira_client_mod.TlJiraNotConfigured):
         return HTTPException(
@@ -405,6 +425,71 @@ async def transition_revision(
         )
     except Exception as exc:
         raise _translate(exc) from exc
+
+
+async def _jira_task(
+    db: DbDep, feature_id: uuid.UUID, kind: str, actor_email: str
+) -> TlFeatureDetail:
+    await resolve_actor(db, actor_email)  # 403 prima di chiamare Jira
+    client = jira_client_mod.get_jira_client()
+    warning = await jira_tasks_svc.create_task(db, feature_id, kind, actor_email, client)
+    detail = await features_svc.get_feature_detail(db, feature_id, actor_email)
+    detail.jira_warning = warning
+    return detail
+
+
+@router.post("/features/{feature_id}/jira/design-task", response_model=TlFeatureDetail)
+async def create_jira_design_task(
+    feature_id: uuid.UUID, body: TlJiraActorRequest, db: DbDep
+) -> TlFeatureDetail:
+    """Crea (o ritrova) il task Jira di progettazione: revisione in bozza, chiave vuota."""
+    try:
+        return await _jira_task(db, feature_id, "design", body.actor_email)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/features/{feature_id}/jira/impl-task", response_model=TlFeatureDetail)
+async def create_jira_impl_task(
+    feature_id: uuid.UUID, body: TlJiraActorRequest, db: DbDep
+) -> TlFeatureDetail:
+    """Crea (o ritrova) il task Jira di implementazione: feature approvata, chiave vuota."""
+    try:
+        return await _jira_task(db, feature_id, "impl", body.actor_email)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/scopes/{scope_id}/jira/epic", response_model=TlScopeOut)
+async def create_scope_jira_epic(
+    scope_id: uuid.UUID, body: TlJiraActorRequest, db: DbDep
+) -> TlScopeOut:
+    """Crea (o ritrova per titolo) l'Epic QA dell'ambito su Jira e la collega."""
+    try:
+        await resolve_actor(db, body.actor_email)
+        client = jira_client_mod.get_jira_client()
+        await jira_tasks_svc.create_scope_epic(db, scope_id, client)
+        scope = await db.get(TlScope, scope_id)
+        return await scopes_svc.get_scope_out(db, scope)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/jira/epics", response_model=list[TlJiraLink])
+async def search_jira_epics(q: str = "") -> list[TlJiraLink]:
+    """Epic del progetto QA per il selettore dell'ambito (testo vuoto: le più recenti)."""
+    try:
+        client = jira_client_mod.get_jira_client()
+        epics = await client.search_epics(settings.tl_jira_project, q)
+    except Exception as exc:
+        raise _translate(exc) from exc
+    return [
+        TlJiraLink(
+            role="qa_epic", key=e.key, summary=e.summary, status=e.status,
+            category=e.status_category, url=e.url, verified=True,
+        )
+        for e in epics
+    ]
 
 
 @router.post("/features/{feature_id}/jira/refresh", response_model=TlFeatureDetail)
