@@ -18,7 +18,7 @@
 - **Link al prodotto**: i task PQ creati sono collegati all'Epic/Story di prodotto con link Jira **"Relates"**. Risposta dell'utente.
 - **Tipi di issue** (verificati su PQ-834/PQ-835): Progettazione → `Progettazione Scenari e casi di test`; Implementazione → `Implementazione suite di TA`. Label `testing`.
 - **Lo stato Jira non guida lo stato della Feature** (spec §8): è solo mostrato.
-- **Epic QA creabile dall'Ambito** (richiesta dell'utente): pulsante "Crea Epic QA" nella gestione Ambiti, come i task dentro la feature. L'Epic creata diventa la `jira_qa_epic_key` dell'Ambito.
+- **Epic QA dell'Ambito: esistente o nuova** (richiesta dell'utente). Nella gestione Ambiti si può (a) **scegliere un'Epic QA già esistente** su Jira, cercandola per nome tra le Epic di PQ o inserendo la chiave, oppure (b) **crearne una nuova** con il pulsante "Crea Epic QA". In entrambi i casi la chiave diventa la `jira_qa_epic_key` dell'Ambito. Una chiave inserita a mano viene verificata: deve esistere, essere del progetto PQ ed essere di tipo Epic.
 - **Nessuna modalità Jira locale** (richiesta dell'utente): anche in locale si usa il progetto Jira **PQ** reale; le issue create durante le prove le cancella l'utente. Questo è l'unico permesso di scrittura su Jira dato per le prove: solo progetto PQ.
 - Credenziali: si riusano `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` già presenti.
 
@@ -30,7 +30,7 @@
 - Descrizione (ADF): una riga "Feature progettata su QA Hub: <link>" con `{tl_hub_base_url}/test-lifecycle/<id>` se configurato, più l'elenco dei tag degli scenari.
 - Assegnatario: accountId Jira trovato cercando l'email dell'owner della fase (`/rest/api/3/user/search?query=<email>`, primo utente attivo con email uguale). Non trovato → task non assegnato e avviso nella risposta (`jira_warning`), mai un errore.
 - Formati chiave: Epic QA `^PQ-\d+$` (progetto `tl_jira_project`), Epic/Story prodotto `^[A-Z][A-Z0-9]+-\d+$` (come fase 1), componente testo libero ≤100 caratteri.
-- Errori HTTP nuovi (`detail: {code, message}`): `jira_not_configured` (503), `jira_error` (502, messaggio di Jira), `jira_issue_not_found` (422, con la chiave), `jira_task_exists` (409), `jira_task_not_allowed` (409), `jira_in_progress` (409).
+- Errori HTTP nuovi (`detail: {code, message}`): `jira_not_an_epic` (422), `jira_not_configured` (503), `jira_error` (502, messaggio di Jira), `jira_issue_not_found` (422, con la chiave), `jira_task_exists` (409), `jira_task_not_allowed` (409), `jira_in_progress` (409).
 - Tipo di anomalia nuovo `jira_creation_failed` (aggiunto a `tl_issue_kind` nella migrazione 0038), usato quando la creazione automatica del task Implementazione fallisce.
 - Eventi nuovi: `tl.jira.task_created`, `tl.jira.task_linked`, `tl.jira.refreshed` (solo se cambia qualcosa). La creazione dell'Epic QA di un Ambito si registra nei log applicativi (gli Ambiti non hanno storico).
 - Nessuna chiamata Jira con lock di riga tenuti: stesso schema della fase 2 (lock advisory per feature `hashtext('tl_jira:'||feature_id)`, lock di riga brevi prima e dopo la rete).
@@ -60,10 +60,11 @@
   - `@dataclass(frozen=True) JiraIssue(key, summary, status, status_category: "new"|"indeterminate"|"done", issue_type, url)`
   - `class TlJiraClient(base_url, email, token, transport=None)` con metodi async: `get_issue(key) -> JiraIssue | None` (404 → None), `find_account_id(email) -> str | None`, `search_summary(project, prefix) -> JiraIssue | None` (JQL `project = X AND summary ~ "\"<prefix>\""`, primo risultato il cui summary inizia con il prefisso), `create_issue(*, project, issue_type, summary, description_adf, labels, parent_key, component, assignee_id) -> JiraIssue`, `create_link(link_type, inward_key, outward_key) -> None`.
   - `create_issue` accetta `parent_key=None` (per l'Epic QA) e `issue_type` per nome (`Epic` per l'Epic QA).
+  - `search_epics(project, text, limit=20) -> list[JiraIssue]`: JQL `project = X AND issuetype = Epic AND summary ~ "<text>*" ORDER BY updated DESC` (testo vuoto: le Epic più recenti); il testo viene ripulito dai caratteri speciali JQL.
   - `get_jira_client()`: richiede `jira_base_url`, `jira_email`, `jira_api_token` (vuoti → `TlJiraNotConfigured`).
   - `issue_url(key) -> str`: `{jira_base_url}/browse/{key}`.
 
-- [ ] **Step 1: Test** (`httpx.MockTransport`): `test_get_issue_maps_status_category`, `test_get_issue_404_returns_none`, `test_find_account_id_matches_email_exactly`, `test_create_issue_payload` (progetto, tipo per nome, summary, label, parent, componente, assegnatario, descrizione ADF), `test_create_link_payload`, `test_search_summary_prefix`, `test_error_carries_jira_message`, `test_create_epic_without_parent`, `test_not_configured_raises`.
+- [ ] **Step 1: Test** (`httpx.MockTransport`): `test_get_issue_maps_status_category`, `test_get_issue_404_returns_none`, `test_find_account_id_matches_email_exactly`, `test_create_issue_payload` (progetto, tipo per nome, summary, label, parent, componente, assegnatario, descrizione ADF), `test_create_link_payload`, `test_search_summary_prefix`, `test_error_carries_jira_message`, `test_create_epic_without_parent`, `test_search_epics_jql_and_escaping`, `test_not_configured_raises`.
 - [ ] **Step 2–4:** FAIL → implementare → PASS.
 - [ ] **Step 5: Commit** `feat(test-lifecycle): jira write client`.
 
@@ -79,6 +80,7 @@
 - `TlFeature` + `jira_qa_epic_key: str|None` (override), `jira_cache: dict` (JSONB, default `{}`: `{"<chiave>": {"summary", "status", "category", "issue_type", "url", "verified": bool, "checked_at"}}`), `jira_error: str|None` (Text).
 - Enum `tl_issue_kind` + valore `jira_creation_failed` (`ALTER TYPE … ADD VALUE`; il downgrade non può togliere il valore: documentarlo e lasciarlo).
 - Validazione schema: Epic QA `^PQ-\d+$` (prefisso da `tl_jira_project`), componente ≤100 caratteri trimmed.
+- Salvataggio dell'Epic QA di un Ambito (create/update) e dell'override sulla feature: verifica su Jira prima di salvare; inesistente → 422 `jira_issue_not_found`; esistente ma non Epic o di un altro progetto → 422 `jira_not_an_epic`; Jira giù → salvata come non verificata (come le altre chiavi).
 
 - [ ] **Step 1: Test**: default dei nuovi campi; scope API accetta e restituisce Epic QA e componente; formato Epic QA errato → 422.
 - [ ] **Step 2–4:** FAIL → implementare (migrazione reversibile tranne il valore enum) → PASS (`alembic upgrade head && downgrade -1 && upgrade head`).
@@ -116,8 +118,9 @@
   - Errore Jira al passo 3 → `jira_error` salvato, eccezione `TlJiraError` → 502 (Review Focus 4: nessuna chiave salvata).
 - Endpoint `POST /features/{id}/jira/design-task` (`{actor_email}`) → `TlFeatureDetail` + `jira_warning: str|None`.
 - `async create_scope_epic(db, scope_id, actor: User, client) -> TlScopeOut`: stesso schema (lock advisory `tl_jira_scope:<scope_id>`, lock breve, rete senza lock, rilock): richiede `jira_qa_epic_key` vuota (altrimenti 409 `jira_task_exists`); cerca prima un'Epic con summary `[QA Epic] <nome>` nel progetto (riuso); altrimenti crea l'issue di tipo `tl_jira_epic_issue_type`, label `testing`, componente dell'Ambito, senza assegnatario; salva la chiave sull'Ambito. Endpoint `POST /scopes/{id}/jira/epic` (`{actor_email}`; permesso UI `manage:tl_scopes`) → `TlScopeOut`.
+- `GET /jira/epics?q=` → `[TlJiraLink]` (chiave, titolo, stato, url) per il selettore delle Epic esistenti; Jira non configurato → 503.
 
-- [ ] **Step 1: Test** (con `FakeJiraClient`): `test_create_design_task_payload` (tipo, titolo, label, parent = Epic dell'Ambito, componente, assegnatario, descrizione con link e tag, link Relates al prodotto), `test_feature_epic_overrides_scope`, `test_create_reuses_existing_task_found_by_jql`, `test_unknown_assignee_creates_unassigned_with_warning`, `test_jira_400_surfaces_message_and_keeps_feature_unchanged`, `test_concurrent_create_second_gets_409`, `test_design_task_not_allowed_outside_draft`, `test_design_task_exists_409`, `test_without_jira_config_503`, `test_create_scope_epic_payload_and_saves_key`, `test_scope_epic_reuses_existing_by_summary`, `test_scope_epic_exists_409`, `test_concurrent_epic_create_second_gets_409`.
+- [ ] **Step 1: Test** (con `FakeJiraClient`): `test_create_design_task_payload` (tipo, titolo, label, parent = Epic dell'Ambito, componente, assegnatario, descrizione con link e tag, link Relates al prodotto), `test_feature_epic_overrides_scope`, `test_create_reuses_existing_task_found_by_jql`, `test_unknown_assignee_creates_unassigned_with_warning`, `test_jira_400_surfaces_message_and_keeps_feature_unchanged`, `test_concurrent_create_second_gets_409`, `test_design_task_not_allowed_outside_draft`, `test_design_task_exists_409`, `test_without_jira_config_503`, `test_create_scope_epic_payload_and_saves_key`, `test_scope_epic_reuses_existing_by_summary`, `test_scope_epic_exists_409`, `test_concurrent_epic_create_second_gets_409`, `test_epics_search_endpoint`, `test_scope_existing_epic_verified_on_save`, `test_scope_epic_not_an_epic_422`.
 - [ ] **Step 2–4:** FAIL → implementare → PASS.
 - [ ] **Step 5: Commit** `feat(test-lifecycle): create design task and scope qa epic on jira`.
 
@@ -159,7 +162,7 @@
 
 **Files:** `src/types/test-lifecycle.ts`, `src/hooks/useTestLifecycle.ts`, test relativi.
 - Tipi: `TlJiraLink`, campi `jira`, `jira_error`, `jira_qa_epic_effective` sul dettaglio, `jira_qa_epic_key`/`jira_component` su Ambito e feature; codici errore nuovi.
-- Hook: `useCreateTlJiraTask()` (`{featureId, kind}` → POST design-task/impl-task, restituisce anche `jira_warning`), `useRefreshTlJira()`, `useCreateTlScopeEpic()` (`{scopeId}` → POST scopes/{id}/jira/epic, invalida gli ambiti); invalidano feature, issues, history.
+- Hook: `useCreateTlJiraTask()` (`{featureId, kind}` → POST design-task/impl-task, restituisce anche `jira_warning`), `useRefreshTlJira()`, `useCreateTlScopeEpic()` (`{scopeId}` → POST scopes/{id}/jira/epic, invalida gli ambiti), `useTlJiraEpics(q)` (attivo con ricerca debounced, `staleTime` 60 s); invalidano feature, issues, history.
 - [ ] TDD come nelle fasi precedenti → **Commit** `feat(test-lifecycle): jira types and hooks`.
 
 ### Task 9 (frontend): Sezione Jira, Ambiti e guida
@@ -167,9 +170,9 @@
 **Files:** `src/components/test-lifecycle/JiraLinks.tsx` (+ test), `FeatureMetaPanel.tsx`, `ScopeManagerDialog.tsx`, `src/app/(portal)/test-lifecycle/guida/page.tsx`, `LifecycleDiagram.tsx`.
 - `JiraLinks`: per ogni ruolo (Progettazione, Implementazione, Epic QA, Prodotto) chiave come link (solo http/https), titolo, badge di stato colorato per categoria (Da fare / In corso / Fatto; "Non verificata" se `verified=false`).
 - Pulsante **Crea task Progettazione** (revisione in bozza, chiave vuota, permesso `edit:tl_feature`); pulsante **Riprova task Implementazione** (approvata, chiave vuota, `jira_error` presente); **Aggiorna da Jira**; `jira_warning` e `jira_error` mostrati inline.
-- Ambiti: campi Epic QA e componente Jira, con pulsante **Crea Epic QA** quando l'Epic è vuota (crea l'Epic su PQ e compila il campo); pannello feature: campo Epic QA (sovrascrive quella dell'Ambito, placeholder con quella effettiva).
+- Ambiti: campo **Epic QA** con selettore che cerca per nome tra le Epic esistenti di PQ (mostra chiave e titolo; si può anche scrivere la chiave), più il pulsante **Crea Epic QA** quando il campo è vuoto (crea l'Epic su PQ e compila il campo); campo componente Jira; pannello feature: campo Epic QA (sovrascrive quella dell'Ambito, placeholder con quella effettiva).
 - Guida: nuova sezione "Jira" (cosa crea l'hub e quando, link al prodotto, stati) e nota nel diagramma ("task Jira" su Bozza e Progettata).
-- [ ] TDD: link solo http(s); pulsanti visibili solo nei casi giusti; avviso assegnatario mostrato; campi Ambito inviati; "Crea Epic QA" chiama l'hook e mostra la chiave creata → **Commit** `feat(test-lifecycle): jira section in feature and scopes`.
+- [ ] TDD: link solo http(s); pulsanti visibili solo nei casi giusti; avviso assegnatario mostrato; campi Ambito inviati; "Crea Epic QA" chiama l'hook e mostra la chiave creata; scegliendo un'Epic dal selettore la sua chiave viene inviata al salvataggio; errore `jira_not_an_epic` mostrato sul campo → **Commit** `feat(test-lifecycle): jira section in feature and scopes`.
 
 ### Task 10: Verifica finale
 
