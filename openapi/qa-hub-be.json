@@ -7041,6 +7041,124 @@
         }
       }
     },
+    "/api/v1/test-lifecycle/features/{feature_id}/revisions/{revision_id}/import-git": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Import Git",
+        "description": "Sostituisce gli scenari della bozza con quelli di un feature file su Git (ogni branch).",
+        "operationId": "import_git_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__import_git_post",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlImportGitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlImportGitResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}/import-cleanup": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Retry Import Cleanup",
+        "description": "Riprova la PR che toglie il file importato dal branch di partenza.",
+        "operationId": "retry_import_cleanup_api_v1_test_lifecycle_features__feature_id__import_cleanup_post",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlJiraActorRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlFeatureDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/test-lifecycle/category-tags": {
       "get": {
         "tags": [
@@ -16670,6 +16788,12 @@
             "type": "boolean",
             "title": "Alignment Pending",
             "default": false
+          },
+          "import_source": {
+            "title": "Import Source",
+            "additionalProperties": true,
+            "type": "object",
+            "nullable": true
           }
         },
         "type": "object",
@@ -17017,6 +17141,55 @@
           "at"
         ],
         "title": "TlHistoryItem"
+      },
+      "TlImportGitRequest": {
+        "properties": {
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          },
+          "lock_version": {
+            "type": "integer",
+            "title": "Lock Version"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "actor_email",
+          "lock_version",
+          "url"
+        ],
+        "title": "TlImportGitRequest"
+      },
+      "TlImportGitResult": {
+        "properties": {
+          "feature": {
+            "$ref": "#/components/schemas/TlFeatureDetail"
+          },
+          "ignored_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ignored Tags",
+            "default": []
+          },
+          "replaced": {
+            "type": "integer",
+            "title": "Replaced",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "feature"
+        ],
+        "title": "TlImportGitResult"
       },
       "TlIssueKind": {
         "type": "string",
