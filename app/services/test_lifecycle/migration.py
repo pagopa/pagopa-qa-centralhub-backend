@@ -293,6 +293,8 @@ async def _propose(
     problems = [_problem(c) for c in match_problems]
     code = (page.data.code if page else None) or (file.code if file else None)
     parts = code_parts(code)
+    if parts is None and page is not None:
+        parts = code_parts(page.title)  # il titolo della pagina inizia col codice FEAT
     scope_code, number = (parts[0], parts[1]) if parts else ("", None)
     if parts is None:
         problems.append(_problem("no_code"))

@@ -77,3 +77,14 @@ def test_irregular_page_never_raises():
 )
 def test_map_status(text, status):
     assert map_status(text) == status
+
+
+def test_code_falls_back_to_document_name():
+    storage = (
+        "<table><tbody>"
+        "<tr><td><p>ID documento</p></td><td><p>NodoInviaRPT_NoStamp_001</p></td></tr>"
+        "<tr><td><p>Nome documento</p></td>"
+        "<td><p>FEAT_001_NodoInviaRPT_NoStamp_Utente paga un pagamento</p></td></tr>"
+        "</tbody></table>"
+    )
+    assert parse_feat_page(storage).code == "FEAT_001_NodoInviaRPT"

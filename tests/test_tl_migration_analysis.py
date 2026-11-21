@@ -171,3 +171,14 @@ async def test_tags_counted_and_duplicates(clean_migration):
     items = await _items()
     assert "duplicate_identity_tag" in _codes(items["src/a.feature"])
     assert "fixture_or_copy" in _codes(items["src/tas_pass/c.feature"])
+
+
+async def test_code_from_page_title_when_id_is_not_feat(clean_migration):
+    s = unique_scope()
+    conf, git = FakeConfluenceClient(), FakeGitClient()
+    storage = "<table><tbody><tr><td><p>ID documento</p></td><td><p>Altro_001</p></td></tr></tbody></table>"
+    conf.add_page("p9", f"FEAT_004_{s}_Utente paga", storage)
+    await _analyze(conf, git)
+    item = (await _items())["p9"]
+    assert (item.scope_code, item.number) == (s, 4)
+    assert "no_code" not in _codes(item)

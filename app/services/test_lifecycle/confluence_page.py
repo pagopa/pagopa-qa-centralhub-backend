@@ -15,7 +15,7 @@ from html.parser import HTMLParser
 from app.models.test_lifecycle import TlFeatureStatus
 
 _JIRA_KEY = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
-_FEAT_CODE = re.compile(r"\bFEAT_\d{3}_[A-Za-z][A-Za-z0-9]*\b")
+_FEAT_CODE = re.compile(r"(?<![A-Za-z0-9])FEAT_\d{3}_[A-Za-z][A-Za-z0-9]*(?![A-Za-z0-9])")
 _SCENARIO = re.compile(r"^\s*Scenario\s*(\d+)\s*[:\-–—]\s*(.+?)\s*$", re.IGNORECASE)
 _NUMBER = re.compile(r"(\d+(?:[.,]\d+)?)")
 _KEYWORD_RE = re.compile(r"^(Dato|Data|Dati|Date|Quando|Allora|E|Ma)\b")
@@ -338,4 +338,9 @@ def parse_feat_page(storage: str) -> FeatPage:
             page.description = text
     flush_unparsed()
     page.note = "\n\n".join(n for n in notes if n)
+    if not re.fullmatch(_FEAT_CODE.pattern, page.code or ""):
+        # alcune pagine (es. WISP) mettono un altro identificativo: il codice è nel nome
+        m = _FEAT_CODE.search(page.doc_name or "")
+        if m:
+            page.code = m.group(0)
     return page
