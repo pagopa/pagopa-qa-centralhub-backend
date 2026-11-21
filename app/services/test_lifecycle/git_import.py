@@ -32,6 +32,7 @@ from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_import_content as content
 from app.services.test_lifecycle import history
 from app.services.test_lifecycle import issues as issues_svc
+from app.services.test_lifecycle.category_tags import category_tags
 from app.services.test_lifecycle.feature_parser import (
     DiffResult,
     ParsedFeature,
@@ -40,7 +41,7 @@ from app.services.test_lifecycle.feature_parser import (
     normalize_text,
     parse_feature_file,
 )
-from app.services.test_lifecycle.gherkin import render_feature_file
+from app.services.test_lifecycle.gherkin import ALLOWED_EXTRA_TAGS, render_feature_file
 from app.services.test_lifecycle.git_client import TlGitClient
 
 SYSTEM_ACTOR = history.SYSTEM_ACTOR
@@ -55,6 +56,7 @@ class _Fetched:
     text: str  # normalizzato
     blob_sha: str
     parsed: ParsedFeature
+    allowed_extra: tuple[str, ...] = ALLOWED_EXTRA_TAGS
 
 
 @dataclass
@@ -67,13 +69,20 @@ class _Locked:
 
 
 async def _fetch(
-    client: TlGitClient, path: str, previous_path: str | None, commit_sha: str
+    client: TlGitClient,
+    path: str,
+    previous_path: str | None,
+    commit_sha: str,
+    allowed_extra: tuple[str, ...] = ALLOWED_EXTRA_TAGS,
 ) -> _Fetched | None:
     file = await client.get_file(path, commit_sha)
     if file is None:
         return None
     text = normalize_text(file.text)
-    return _Fetched(path, previous_path, commit_sha, text, file.blob_sha, parse_feature_file(text))
+    parsed = parse_feature_file(text, allowed_extra)
+    return _Fetched(
+        path, previous_path, commit_sha, text, file.blob_sha, parsed, tuple(allowed_extra)
+    )
 
 
 async def _find_feature(db: AsyncSession, fetched: _Fetched) -> tuple[Any, ...] | None:
@@ -215,7 +224,11 @@ async def _import_locked(
     if expected_rev is None or normalize_text(render_feature_file(render)) != fetched.text:
         content.fill_defaults(parsed, render)
         diff = classify(
-            render, parsed, scope_prefix=locked.scope.code, feature_number=feature.number
+            render,
+            parsed,
+            scope_prefix=locked.scope.code,
+            feature_number=feature.number,
+            allowed_extra=fetched.allowed_extra,
         )
         valid = content.valid_scenarios(parsed, locked.scope.code, feature.number)
         changed = bool(diff.textual) or [s.identity_tag for s in valid] != [
@@ -335,7 +348,9 @@ async def import_changed_file(
     `merged_revision` è interno: importa nel contenuto di quella revisione senza marcarla
     mergiata (usarlo solo tramite `mark_revision_merged`).
     """
-    fetched = await _fetch(client, path, previous_path, commit_sha)
+    allowed = await category_tags(db)
+    await db.rollback()  # nessuna transazione aperta durante la rete
+    fetched = await _fetch(client, path, previous_path, commit_sha, allowed)
     if fetched is None:
         return  # non più presente a quel commit: ci pensa `handle_removed_file`
     found = await _find_feature(db, fetched)
@@ -401,7 +416,11 @@ async def _mark_merged(
         await db.execute(select(TlFeature.git_path).where(TlFeature.id == feature_id))
     ).scalar_one()
     await db.rollback()  # nessuna transazione aperta durante la rete
-    fetched = await _fetch(client, git_path, None, merge_commit_sha) if git_path else None
+    allowed = await category_tags(db)
+    await db.rollback()
+    fetched = (
+        await _fetch(client, git_path, None, merge_commit_sha, allowed) if git_path else None
+    )
 
     locked = await _lock_all(db, feature_id, rev_id)
     merged = locked.extra

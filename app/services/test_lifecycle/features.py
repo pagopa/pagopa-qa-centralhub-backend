@@ -33,6 +33,7 @@ from app.schemas.test_lifecycle import (
 )
 from app.services.test_lifecycle import history, jira_tasks
 from app.services.test_lifecycle.actors import UnknownActorError, resolve_actor
+from app.services.test_lifecycle.category_tags import check_extra_tags
 from app.services.test_lifecycle.gherkin import (
     feature_code,
     scenario_tag,
@@ -572,6 +573,7 @@ async def update_scenario(
     scenario, content = await _load_content(db, rev.id, scenario_id)
     _require_draft(rev)
     _require_lock(rev, data.lock_version)
+    await check_extra_tags(db, data.extra_tags)
     changes = data.model_dump(
         exclude_unset=True, exclude={"actor_email", "lock_version", "position"}
     )

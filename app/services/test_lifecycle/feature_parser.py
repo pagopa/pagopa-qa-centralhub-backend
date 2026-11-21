@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -113,7 +114,10 @@ def _description(text: str | None) -> str | None:
     return "\n".join(ln.strip() for ln in text.strip("\n").split("\n"))
 
 
-def parse_feature_file(text: str) -> ParsedFeature:
+def parse_feature_file(
+    text: str, allowed_extra: Iterable[str] = ALLOWED_EXTRA_TAGS
+) -> ParsedFeature:
+    allowed = frozenset(allowed_extra)
     text = normalize_text(text)
     code = _read_code(text)
     try:
@@ -159,11 +163,13 @@ def parse_feature_file(text: str) -> ParsedFeature:
         if "background" in child:
             parsed.background_steps = _steps_text(child["background"]["steps"]) or None
         elif "scenario" in child:
-            parsed.scenarios.append(_parse_scenario(child["scenario"], links))
+            parsed.scenarios.append(_parse_scenario(child["scenario"], links, allowed))
     return parsed
 
 
-def _parse_scenario(sc: dict[str, Any], links: dict[int, str]) -> ParsedScenario:
+def _parse_scenario(
+    sc: dict[str, Any], links: dict[int, str], allowed: frozenset[str]
+) -> ParsedScenario:
     tags = [t["name"] for t in sc.get("tags", [])]
     identity = next((t for t in tags if _IDENTITY_RE.match(t)), None)
     polarity = None
@@ -172,7 +178,7 @@ def _parse_scenario(sc: dict[str, Any], links: dict[int, str]) -> ParsedScenario
         name = t.lstrip("@")
         if name in (TlPolarity.POSITIVO.value, TlPolarity.NEGATIVO.value):
             polarity = TlPolarity(name)
-        elif name in ALLOWED_EXTRA_TAGS:
+        elif name in allowed:
             extra.append(name)
     line = sc["location"]["line"]
     tag_lines = [t["location"]["line"] for t in sc.get("tags", [])]
@@ -221,9 +227,11 @@ def _diff_scenario(exp: ParsedScenario, got: ParsedScenario) -> list[str]:
     return out
 
 
-def _canonical(expected: RenderFeature) -> ParsedFeature:
+def _canonical(
+    expected: RenderFeature, allowed_extra: Iterable[str] = ALLOWED_EXTRA_TAGS
+) -> ParsedFeature:
     """Il lato atteso passa dallo stesso render + parse del file reale: stessa normalizzazione."""
-    canon = parse_feature_file(render_feature_file(expected))
+    canon = parse_feature_file(render_feature_file(expected), allowed_extra)
     if canon.errors or len(canon.scenarios) != len(expected.scenarios):
         # contenuto atteso non renderizzabile: si confronta il testo grezzo normalizzato
         canon = ParsedFeature(
@@ -260,6 +268,7 @@ def classify(
     *,
     scope_prefix: str,
     feature_number: int,
+    allowed_extra: Iterable[str] = ALLOWED_EXTRA_TAGS,
 ) -> DiffResult:
     result = DiffResult()
     structural = result.structural
@@ -286,7 +295,7 @@ def classify(
             )
         )
 
-    canon = _canonical(expected)
+    canon = _canonical(expected, allowed_extra)
     if _norm(canon.title) != _norm(parsed.title):
         result.textual.append("Titolo della funzionalità modificato.")
     if _norm(canon.description) != _norm(parsed.description):

@@ -18,7 +18,6 @@ from app.models.test_lifecycle import (
     TlRevisionStatus,
     TlScenarioKind,
 )
-from app.services.test_lifecycle.gherkin import ALLOWED_EXTRA_TAGS
 
 SCOPE_CODE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9]{1,19}$")
 
@@ -186,14 +185,16 @@ def _check_url(value: str | None) -> str | None:
     return value
 
 
+_EXTRA_TAG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,49}$")
+
+
 def _check_extra_tags(value: list[str] | None) -> list[str] | None:
+    """Solo il formato: l'appartenenza ai tag di categoria la verifica il servizio."""
     if value is None:
         return None
-    unknown = [t for t in value if t not in ALLOWED_EXTRA_TAGS]
-    if unknown:
-        raise ValueError(
-            f"Tag non ammessi: {', '.join(unknown)}. Ammessi: {', '.join(ALLOWED_EXTRA_TAGS)}"
-        )
+    bad = [t for t in value if not _EXTRA_TAG_RE.match(t)]
+    if bad:
+        raise ValueError(f"Tag non validi: {', '.join(bad)} (senza @, lettere, numeri, _ e -)")
     return list(dict.fromkeys(value))
 
 

@@ -66,6 +66,7 @@ from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle import scopes as scopes_svc
 from app.services.test_lifecycle import workflow as workflow_svc
 from app.services.test_lifecycle.actors import UnknownActorError, resolve_actor
+from app.services.test_lifecycle.category_tags import UnknownExtraTagError, category_tags
 from app.services.test_lifecycle.git_client import TlGitError, TlGitNotConfigured
 
 router = APIRouter()
@@ -138,6 +139,15 @@ def _translate(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, issues_svc.IssueNotFoundError):
         return HTTPException(status_code=404, detail="Anomalia non trovata")
+    if isinstance(exc, UnknownExtraTagError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "unknown_extra_tag",
+                "message": f"Tag non ammessi: {', '.join(exc.tags)}. "
+                f"Ammessi: {', '.join(exc.allowed)}",
+            },
+        )
     if isinstance(exc, features_svc.FeatureNotFoundError):
         return HTTPException(status_code=404, detail="Feature non trovata")
     if isinstance(exc, features_svc.RevisionNotFoundError):
@@ -336,6 +346,12 @@ async def get_feature(
         return await features_svc.get_feature_detail(db, feature_id, actor_email)
     except Exception as exc:
         raise _translate(exc) from exc
+
+
+@router.get("/category-tags", response_model=list[str])
+async def list_category_tags(db: DbDep) -> list[str]:
+    """Tag di categoria ammessi sugli scenari."""
+    return list(await category_tags(db))
 
 
 @router.get("/features/{feature_id}/nrt", response_model=TlFeatureNrt)
