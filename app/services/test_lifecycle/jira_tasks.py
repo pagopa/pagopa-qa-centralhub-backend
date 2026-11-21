@@ -267,12 +267,15 @@ async def refresh_all(
             continue
         cache = dict(feature.jira_cache or {})
         changed = [k for k, v in entries.items() if _comparable(cache.get(k)) != _comparable(v)]
-        cache.update(entries)
+        if not changed:
+            # nessuna scrittura: `checked_at` cambia sempre e toccherebbe updated_at ogni giro
+            await db.rollback()
+            continue
+        cache.update({k: entries[k] for k in changed})
         feature.jira_cache = cache
-        if changed:
-            history.record_event(db, feature.id, "tl.jira.refreshed", None, {"keys": changed})
-            updated += 1
+        history.record_event(db, feature.id, "tl.jira.refreshed", None, {"keys": changed})
         await db.commit()
+        updated += 1
     return updated
 
 

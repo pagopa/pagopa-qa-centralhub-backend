@@ -80,6 +80,17 @@ async def test_refresh_all_ignores_single_key_errors(client, scope, actor, jira)
     assert sorted(done) == [False, True]  # la voce fallita resta com'era
 
 
+async def test_refresh_all_leaves_unchanged_features_untouched(client, scope, actor, jira):
+    a = await _with_key(client, scope, actor, "PQ-12")
+    async with TestSession() as s:
+        before = (await s.get(TlFeature, uuid.UUID(a["id"]))).updated_at
+    async with TestSession() as db:
+        updated = await jira_tasks.refresh_all(db, jira, feature_ids=[uuid.UUID(a["id"])])
+    assert updated == 0
+    async with TestSession() as s:
+        assert (await s.get(TlFeature, uuid.UUID(a["id"]))).updated_at == before
+
+
 async def test_task_not_configured_returns_status():
     from app.tasks.sync_test_lifecycle_jira import _async_refresh
 
