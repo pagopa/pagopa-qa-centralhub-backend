@@ -114,6 +114,10 @@ class Settings(BaseSettings):
     tl_jira_label: str = "testing"
     tl_jira_link_type: str = "Relates"
     tl_jira_refresh_interval_s: float = 900.0
+    # Test Lifecycle — NRT
+    tl_nrt_window: int = 10  # ultime run per scenario nel pass rate
+    tl_nrt_lookback_days: int = 90  # esecuzioni lette per panoramica e link
+    tl_nrt_running_interval_s: float = 900.0
 
     # PSP Fee catalog (Data Hub)
     psp_fee_json_url: str = (

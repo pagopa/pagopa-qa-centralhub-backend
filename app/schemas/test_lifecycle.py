@@ -635,3 +635,41 @@ class TlRebaseApply(BaseModel):
 class TlJiraActorRequest(BaseModel):
     actor_email: str
 
+
+
+# ── NRT (fase 4) ───────────────────────────────────────────────────────────────
+
+
+class TlNrtEnvResult(BaseModel):
+    env: str
+    status: str
+    run_id: uuid.UUID
+    run_at: datetime | None = None
+    allure_url: str | None = None
+    origin: str | None = None
+
+
+class TlScenarioNrt(BaseModel):
+    scenario_id: uuid.UUID
+    number: int
+    tag: str
+    title: str
+    envs: list[TlNrtEnvResult] = []
+    pass_rate: float | None = None
+    runs: int = 0
+    flaky: bool = False
+    last_run_at: datetime | None = None
+
+
+class TlFeatureNrt(BaseModel):
+    feature_id: uuid.UUID
+    last_run_at: datetime | None = None
+    pass_rate: float | None = None
+    scenarios: list[TlScenarioNrt] = []
+
+
+class TlNrtRunLink(BaseModel):
+    execution_id: uuid.UUID
+    feature_id: uuid.UUID
+    feature_code: str
+    scenario_tag: str
