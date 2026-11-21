@@ -7375,6 +7375,270 @@
         }
       }
     },
+    "/api/v1/test-lifecycle/features/{feature_id}/jira/design-task": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Create Jira Design Task",
+        "description": "Crea (o ritrova) il task Jira di progettazione: revisione in bozza, chiave vuota.",
+        "operationId": "create_jira_design_task_api_v1_test_lifecycle_features__feature_id__jira_design_task_post",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlJiraActorRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlFeatureDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}/jira/impl-task": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Create Jira Impl Task",
+        "description": "Crea (o ritrova) il task Jira di implementazione: feature approvata, chiave vuota.",
+        "operationId": "create_jira_impl_task_api_v1_test_lifecycle_features__feature_id__jira_impl_task_post",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlJiraActorRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlFeatureDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/scopes/{scope_id}/jira/epic": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Create Scope Jira Epic",
+        "description": "Crea (o ritrova per titolo) l'Epic QA dell'ambito su Jira e la collega.",
+        "operationId": "create_scope_jira_epic_api_v1_test_lifecycle_scopes__scope_id__jira_epic_post",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Scope Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlJiraActorRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlScopeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/jira/epics": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Search Jira Epics",
+        "description": "Epic del progetto QA per il selettore dell'ambito (testo vuoto: le più recenti).",
+        "operationId": "search_jira_epics_api_v1_test_lifecycle_jira_epics_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TlJiraLink"
+                  },
+                  "title": "Response Search Jira Epics Api V1 Test Lifecycle Jira Epics Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/features/{feature_id}/jira/refresh": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Refresh Jira",
+        "description": "Rilegge da Jira lo stato dei task collegati (Jira non configurato -> 503).",
+        "operationId": "refresh_jira_api_v1_test_lifecycle_features__feature_id__jira_refresh_post",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlJiraActorRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlFeatureDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/test-lifecycle/features/{feature_id}/revisions/{revision_id}/rebase": {
       "get": {
         "tags": [
@@ -15822,6 +16086,34 @@
             "type": "integer",
             "title": "Open Issues",
             "default": 0
+          },
+          "jira": {
+            "items": {
+              "$ref": "#/components/schemas/TlJiraLink"
+            },
+            "type": "array",
+            "title": "Jira",
+            "default": []
+          },
+          "jira_error": {
+            "title": "Jira Error",
+            "type": "string",
+            "nullable": true
+          },
+          "jira_qa_epic_key": {
+            "title": "Jira Qa Epic Key",
+            "type": "string",
+            "nullable": true
+          },
+          "jira_qa_epic_effective": {
+            "title": "Jira Qa Epic Effective",
+            "type": "string",
+            "nullable": true
+          },
+          "jira_warning": {
+            "title": "Jira Warning",
+            "type": "string",
+            "nullable": true
           }
         },
         "type": "object",
@@ -15949,6 +16241,11 @@
           },
           "jira_impl_key": {
             "title": "Jira Impl Key",
+            "type": "string",
+            "nullable": true
+          },
+          "jira_qa_epic_key": {
+            "title": "Jira Qa Epic Key",
             "type": "string",
             "nullable": true
           },
@@ -16135,7 +16432,8 @@
           "unknown_feature_code",
           "parse_error",
           "pr_closed_unmerged",
-          "pr_creation_failed"
+          "pr_creation_failed",
+          "jira_creation_failed"
         ],
         "title": "TlIssueKind"
       },
@@ -16246,6 +16544,73 @@
           "actor_email"
         ],
         "title": "TlIssueUpdate"
+      },
+      "TlJiraActorRequest": {
+        "properties": {
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "actor_email"
+        ],
+        "title": "TlJiraActorRequest"
+      },
+      "TlJiraLink": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "design",
+              "impl",
+              "qa_epic",
+              "product"
+            ],
+            "title": "Role"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "title": "Status",
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "title": "Category",
+            "type": "string",
+            "enum": [
+              "new",
+              "indeterminate",
+              "done"
+            ],
+            "nullable": true
+          },
+          "url": {
+            "title": "Url",
+            "type": "string",
+            "nullable": true
+          },
+          "verified": {
+            "type": "boolean",
+            "title": "Verified",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "key"
+        ],
+        "title": "TlJiraLink"
       },
       "TlLineError": {
         "properties": {
@@ -16969,6 +17334,16 @@
             "title": "Owner Team",
             "type": "string",
             "nullable": true
+          },
+          "jira_qa_epic_key": {
+            "title": "Jira Qa Epic Key",
+            "type": "string",
+            "nullable": true
+          },
+          "jira_component": {
+            "title": "Jira Component",
+            "type": "string",
+            "nullable": true
           }
         },
         "type": "object",
@@ -17005,6 +17380,16 @@
           },
           "owner_team": {
             "title": "Owner Team",
+            "type": "string",
+            "nullable": true
+          },
+          "jira_qa_epic_key": {
+            "title": "Jira Qa Epic Key",
+            "type": "string",
+            "nullable": true
+          },
+          "jira_component": {
+            "title": "Jira Component",
             "type": "string",
             "nullable": true
           },
@@ -17071,6 +17456,16 @@
           },
           "owner_team": {
             "title": "Owner Team",
+            "type": "string",
+            "nullable": true
+          },
+          "jira_qa_epic_key": {
+            "title": "Jira Qa Epic Key",
+            "type": "string",
+            "nullable": true
+          },
+          "jira_component": {
+            "title": "Jira Component",
             "type": "string",
             "nullable": true
           }
