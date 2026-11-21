@@ -11,15 +11,25 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from functools import partial
 
+import httpx
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.test_lifecycle import TlFeatureRevision, TlGitSyncState, TlIssue, TlIssueKind
+from app.models.test_lifecycle import (
+    TlFeature,
+    TlFeatureRevision,
+    TlGitSyncState,
+    TlIssue,
+    TlIssueKind,
+)
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_import, history
 from app.services.test_lifecycle import issues as issues_svc
@@ -46,9 +56,17 @@ class SyncSummary:
     issues_opened: int
     steps_indexed: bool
     head_sha: str
+    full_resync: bool = False
 
 
 async def _record_error(db: AsyncSession, message: str) -> None:
+    try:
+        await _write_error(db, message)
+    except Exception:  # noqa: BLE001 - non deve mascherare l'errore originale
+        logger.exception("impossibile salvare last_error del sync git")
+
+
+async def _write_error(db: AsyncSession, message: str) -> None:
     await db.rollback()
     values = {"id": 1, "last_run_at": datetime.now(UTC), "last_error": message}
     stmt = pg_insert(TlGitSyncState).values(**values)
@@ -140,6 +158,43 @@ async def _sync_pull_requests(db: AsyncSession, client: TlGitClient) -> tuple[in
     return merged, closed
 
 
+def _is_transient(exc: BaseException) -> bool:
+    if isinstance(exc, TlGitError):
+        return exc.status >= 500 or exc.status == 429
+    return isinstance(exc, httpx.HTTPError | SQLAlchemyError)
+
+
+async def _guarded(
+    db: AsyncSession, path: str, commit_sha: str, op: Callable[[], Awaitable[None]]
+) -> None:
+    """Esegue l'operazione su un file. Errore non transitorio -> anomalia `parse_error` e si
+    prosegue; transitorio -> il giro si interrompe (`last_main_sha` invariato)."""
+    try:
+        await op()
+    except Exception as exc:
+        if _is_transient(exc):
+            raise
+        message = exc.message if isinstance(exc, TlGitError) else (str(exc) or type(exc).__name__)
+        logger.warning("sync git: file %s non importabile: %s", path, message)
+        await db.rollback()
+        feature_id = (
+            await db.execute(select(TlFeature.id).where(TlFeature.git_path == path).limit(1))
+        ).scalar_one_or_none()
+        await issues_svc.open_issue(
+            db,
+            kind=TlIssueKind.PARSE_ERROR,
+            feature_id=feature_id,
+            path=path,
+            commit_sha=commit_sha,
+            detail={"key": "parse_error", "message": message},
+        )
+        await db.commit()
+
+
+async def _is_unreachable(exc: TlGitError) -> bool:
+    return exc.status in (404, 422)
+
+
 def _touches_steps(paths: list[str]) -> bool:
     return any(p.endswith(".feature") or _STEPS_PY.search(p) for p in paths)
 
@@ -154,27 +209,61 @@ async def _run_locked(db: AsyncSession, client: TlGitClient) -> SyncSummary:
 
     files_imported = 0
     steps_indexed = False
+    full_resync = False
     if last_sha is None:
         steps_indexed = True  # primo giro: nessun import, ma l'indice degli step parte
     elif last_sha != head:
-        changes = await client.compare(last_sha, head)
-        present = [c for c in changes if c.status != "removed"]
-        present_features = [c.path for c in present if c.path.endswith(".feature")]
-        for change in present:
-            if change.path.endswith(".feature"):
-                await git_import.import_changed_file(
-                    db, change.path, change.previous_path, head, client
-                )
-                files_imported += 1
-        for change in changes:
-            if change.status == "removed" and change.path.endswith(".feature"):
-                await git_import.handle_removed_file(
-                    db, change.path, head, client, present_features
-                )
-        steps_indexed = _touches_steps(
-            [c.path for c in changes]
-            + [c.previous_path for c in changes if c.previous_path]
-        )
+        try:
+            changes = await client.compare(last_sha, head)
+        except TlGitError as exc:
+            if not await _is_unreachable(exc):
+                raise
+            logger.warning(
+                "SHA di riferimento non più raggiungibile su main: risincronizzazione completa"
+            )
+            full_resync = True
+            steps_indexed = True
+            await db.rollback()
+            tree = await client.list_tree(head)
+            for path in tree:
+                if path.endswith(".feature"):
+                    await _guarded(
+                        db,
+                        path,
+                        head,
+                        partial(git_import.import_changed_file, db, path, None, head, client),
+                    )
+                    files_imported += 1
+        else:
+            present = [c for c in changes if c.status != "removed"]
+            present_features = [c.path for c in present if c.path.endswith(".feature")]
+            for change in present:
+                if change.path.endswith(".feature"):
+                    await _guarded(
+                        db,
+                        change.path,
+                        head,
+                        partial(
+                            git_import.import_changed_file,
+                            db, change.path, change.previous_path, head, client,
+                        ),
+                    )
+                    files_imported += 1
+            for change in changes:
+                if change.status == "removed" and change.path.endswith(".feature"):
+                    await _guarded(
+                        db,
+                        change.path,
+                        head,
+                        partial(
+                            git_import.handle_removed_file,
+                            db, change.path, head, client, present_features,
+                        ),
+                    )
+            steps_indexed = _touches_steps(
+                [c.path for c in changes]
+                + [c.previous_path for c in changes if c.previous_path]
+            )
     if steps_indexed:
         await rebuild_step_index(db, client, head)
 
@@ -185,6 +274,7 @@ async def _run_locked(db: AsyncSession, client: TlGitClient) -> SyncSummary:
         issues_opened=max(await _count_issues(db) - issues_before, 0),
         steps_indexed=steps_indexed,
         head_sha=head,
+        full_resync=full_resync,
     )
     await _save_state(db, summary)
     return summary

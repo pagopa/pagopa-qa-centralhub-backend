@@ -28,4 +28,11 @@ async def try_advisory_lock(db: AsyncSession, key: str) -> AsyncIterator[bool]:
             yield bool(got)
         finally:
             if got:
-                await conn.execute(text("SELECT pg_advisory_unlock(hashtext(:k))"), {"k": key})
+                try:
+                    await conn.execute(
+                        text("SELECT pg_advisory_unlock(hashtext(:k))"), {"k": key}
+                    )
+                except BaseException:
+                    # unlock fallito o annullato: la connessione del pool non deve tenere il lock
+                    await conn.invalidate()
+                    raise

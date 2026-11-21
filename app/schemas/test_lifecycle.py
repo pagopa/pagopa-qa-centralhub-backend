@@ -401,6 +401,7 @@ class TlGitSyncSummaryOut(BaseModel):
     issues_opened: int
     steps_indexed: bool
     head_sha: str
+    full_resync: bool = False
 
 
 class TlGitStatusOut(BaseModel):

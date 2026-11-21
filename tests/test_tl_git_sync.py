@@ -20,6 +20,7 @@ from app.models.test_lifecycle import (
     TlStepPhrase,
 )
 from app.services.test_lifecycle import git_sync
+from app.services.test_lifecycle.git_client import TlGitError
 from tests._db import TestSession
 from tests.test_tl_features import (  # noqa: F401  (fixture riusate)
     BASE,
@@ -224,6 +225,65 @@ async def test_failure_records_error_and_keeps_sha(client, fake):
     assert (await _state()).last_error is None
 
 
+async def test_unreachable_reference_sha_triggers_full_resync(
+    client, scope, actor, reviewer, fake
+):
+    done = await _approved(client, scope, actor, reviewer)
+    fake.merge_pull(PR)
+    await _sync(fake)
+    path = done["git_path"]
+    text = fake.files("main")[path][0]
+    async with TestSession() as s:
+        await s.execute(
+            TlGitSyncState.__table__.update().values(last_main_sha="deadbeef" * 5)
+        )
+        await s.commit()
+    fake.seed_file(path, text.replace("Quando paga\n", "Quando paga con la carta\n"))
+    fake.fail_once("compare", 404, "No common ancestor")
+    summary = await _sync(fake)
+    assert summary.full_resync is True
+    assert summary.files_imported >= 1
+    assert summary.steps_indexed is True
+    assert [v.origin for v in await _versions(done["id"])] == ["hub", "git"]
+    state = await _state()
+    assert state.last_main_sha == fake.branches["main"]
+    assert state.last_summary["full_resync"] is True
+    assert state.last_error is None
+
+
+async def test_poison_file_opens_parse_error_and_run_advances(client, fake):
+    async with TestSession() as s:  # anomalie residue di giri precedenti (dedup per path)
+        await s.execute(delete(TlIssue).where(TlIssue.path == "src/big.feature"))
+        await s.commit()
+    await _sync(fake)
+    fake.seed_file("src/big.feature", "# qa-hub: BIG\nFunzionalità: grande\n")
+    fake.fail_once("get_file", 413, "file too large")
+    summary = await _sync(fake)
+    assert summary.head_sha == fake.branches["main"]
+    assert (await _state()).last_main_sha == fake.branches["main"]
+    async with TestSession() as s:
+        issues = (
+            await s.execute(select(TlIssue).where(TlIssue.path == "src/big.feature"))
+        ).scalars().all()
+    assert [i.kind for i in issues] == [TlIssueKind.PARSE_ERROR]
+    assert "too large" in issues[0].detail["message"]
+    assert summary.issues_opened == 1
+    async with TestSession() as s:
+        await s.execute(delete(TlIssue).where(TlIssue.path == "src/big.feature"))
+        await s.commit()
+
+
+async def test_transient_file_error_aborts_and_keeps_sha(client, fake):
+    first = await _sync(fake)
+    fake.seed_file("src/a.feature", "# qa-hub: AAA\nFunzionalità: a\n")
+    fake.fail_once("get_file", 502, "bad gateway")
+    with pytest.raises(Exception, match="bad gateway"):
+        await _sync(fake)
+    assert (await _state()).last_main_sha == first.head_sha
+    async with TestSession() as s:
+        assert (await s.execute(select(TlIssue).where(TlIssue.path == "src/a.feature"))).all() == []
+
+
 async def test_concurrent_sync_second_gets_409(client, actor, fake):
     await _sync(fake)
     started, release = fake.block("head_sha")
@@ -250,6 +310,7 @@ async def test_sync_endpoint_returns_summary(client, actor, fake):
     assert body["head_sha"] == fake.branches["main"]
     assert set(body) == {
         "prs_merged", "prs_closed", "files_imported", "issues_opened", "steps_indexed", "head_sha",
+        "full_resync",
     }
 
 
@@ -297,6 +358,55 @@ async def test_task_exits_silently_without_token(monkeypatch):
 
     uninstall_git(monkeypatch)
     assert (await task_mod._async_sync())["status"] == "not_configured"
+
+
+async def test_task_busy_and_error_branches(monkeypatch, fake):
+    from app.tasks import sync_test_lifecycle as task_mod
+
+    async def _busy(db, client):
+        raise git_sync.SyncInProgress()
+
+    monkeypatch.setattr(git_sync, "run_sync", _busy)
+    assert (await task_mod._async_sync())["status"] == "busy"
+
+    async def _err(db, client):
+        raise TlGitError(502, "giù")
+
+    monkeypatch.setattr(git_sync, "run_sync", _err)
+    out = await task_mod._async_sync()
+    assert out == {"status": "error", "error": "giù"}
+
+    async def _boom(db, client):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(git_sync, "run_sync", _boom)
+    assert (await task_mod._async_sync())["status"] == "error"
+
+
+async def test_lock_invalidates_connection_when_unlock_fails(monkeypatch):
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
+    from app.services.test_lifecycle.advisory_lock import try_advisory_lock
+
+    invalidated = []
+    real_execute, real_invalidate = AsyncConnection.execute, AsyncConnection.invalidate
+
+    async def execute(self, stmt, *a, **k):
+        if "pg_advisory_unlock" in str(stmt):
+            raise RuntimeError("unlock boom")
+        return await real_execute(self, stmt, *a, **k)
+
+    async def invalidate(self, *a, **k):
+        invalidated.append(True)
+        return await real_invalidate(self, *a, **k)
+
+    monkeypatch.setattr(AsyncConnection, "execute", execute)
+    monkeypatch.setattr(AsyncConnection, "invalidate", invalidate)
+    async with TestSession() as s:
+        with pytest.raises(RuntimeError, match="unlock boom"):
+            async with try_advisory_lock(s, "tl_test_unlock") as got:
+                assert got
+    assert invalidated == [True]
 
 
 def test_beat_entry():
