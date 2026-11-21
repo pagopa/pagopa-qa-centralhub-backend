@@ -178,6 +178,19 @@ class LocalGitClient:
     ) -> str:
         return await self._call(self._put_file, path, text, branch, message, blob_sha)
 
+    def _delete_file(self, path: str, branch: str, message: str, blob_sha: str) -> str:
+        current = self._get_file(path, branch)
+        if current is None:
+            raise TlGitError(404, f"{path} non esiste su {branch}")
+        if current.blob_sha != blob_sha:
+            raise TlGitError(409, f"{path} does not match {blob_sha}")
+        parent = _resolve(self.repo, branch)
+        assert parent is not None  # noqa: S101 - il file esiste, quindi il branch pure
+        return _commit_tree_change(self.repo, branch, parent, message, ["--force-remove", path])
+
+    async def delete_file(self, path: str, branch: str, message: str, blob_sha: str) -> str:
+        return await self._call(self._delete_file, path, branch, message, blob_sha)
+
     # ── pull request simulate ─────────────────────────────────────────────────
 
     async def find_open_pull(self, head_branch: str) -> PullInfo | None:

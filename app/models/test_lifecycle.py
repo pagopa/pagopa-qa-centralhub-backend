@@ -156,6 +156,7 @@ class TlFeature(Base):
     running_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     migration_note: Mapped[str | None] = mapped_column(Text)
     migrated_from: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    import_source: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     alignment_pending: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )

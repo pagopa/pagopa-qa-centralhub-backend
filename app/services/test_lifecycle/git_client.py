@@ -185,6 +185,14 @@ class TlGitClient:
         resp = await self._request("PUT", f"contents/{quote(path, safe='/')}", json=body)
         return _json(resp)["commit"]["sha"]
 
+    async def delete_file(self, path: str, branch: str, message: str, blob_sha: str) -> str:
+        resp = await self._request(
+            "DELETE",
+            f"contents/{quote(path, safe='/')}",
+            json={"message": message, "sha": blob_sha, "branch": branch},
+        )
+        return _json(resp)["commit"]["sha"]
+
     async def find_open_pull(self, head_branch: str) -> PullInfo | None:
         owner = self.repo.split("/", 1)[0]
         resp = await self._request(

@@ -138,6 +138,18 @@ class FakeGitClient:
         self.put_messages.append(message)
         return self.branches[branch]
 
+    async def delete_file(self, path: str, branch: str, message: str, blob_sha: str) -> str:
+        await self._enter("delete_file", path, branch, message, blob_sha)
+        files = dict(self.commits[self.branches[branch]])
+        current = files.get(path)
+        if current is None:
+            raise TlGitError(404, f"{path} not found")
+        if current[1] != blob_sha:
+            raise TlGitError(409, f"{path} does not match")
+        del files[path]
+        self.branches[branch] = self._commit(files)
+        return self.branches[branch]
+
     async def find_open_pull(self, head_branch: str) -> PullInfo | None:
         await self._enter("find_open_pull", head_branch)
         for pull in self.pulls.values():
