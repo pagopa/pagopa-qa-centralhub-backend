@@ -154,6 +154,11 @@ class TlFeature(Base):
     )
     jira_error: Mapped[str | None] = mapped_column(Text)
     running_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    migration_note: Mapped[str | None] = mapped_column(Text)
+    migrated_from: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    alignment_pending: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     working_revision_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey(
             f"{SCHEMA}.tl_feature_revisions.id",
@@ -390,3 +395,99 @@ class TlStepPhrase(Base):
         Boolean, nullable=False, default=False, server_default=false()
     )
     updated_at: Mapped[datetime] = _updated_at()
+
+
+# ── Migrazione da Confluence (fase 5) ─────────────────────────────────────────
+
+
+class TlMigrationItem(Base):
+    """Una feature da migrare: proposta dall'analisi, decisa da una persona, poi eseguita."""
+
+    __tablename__ = "tl_migration_items"
+    __table_args__ = (
+        Index(
+            "uq_tl_migration_items_page", "page_id", unique=True,
+            postgresql_where=text("page_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_tl_migration_items_file", "file_path", unique=True,
+            postgresql_where=text("file_path IS NOT NULL"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    page_id: Mapped[str | None] = mapped_column(String(32))
+    page_version: Mapped[int | None] = mapped_column(Integer)
+    page_title: Mapped[str | None] = mapped_column(String(500))
+    file_path: Mapped[str | None] = mapped_column(String(1024))
+    file_blob_sha: Mapped[str | None] = mapped_column(String(64))
+    scope_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    number: Mapped[int | None] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    status: Mapped[TlFeatureStatus] = mapped_column(tl_feature_status_enum, nullable=False)
+    decision: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
+    problems: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    proposal: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    overrides: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    feature_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(f"{SCHEMA}.tl_features.id", ondelete="SET NULL")
+    )
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class TlMigrationScope(Base):
+    __tablename__ = "tl_migration_scopes"
+    __table_args__ = ({"schema": SCHEMA},)
+
+    scope_code: Mapped[str] = mapped_column(String(20), primary_key=True)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pr_number: Mapped[int | None] = mapped_column(Integer)
+    pr_url: Mapped[str | None] = mapped_column(String(1024))
+    pr_state: Mapped[str | None] = mapped_column(String(16))
+    pr_error: Mapped[str | None] = mapped_column(Text)
+    confluence_errors: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class TlMigrationTag(Base):
+    __tablename__ = "tl_migration_tags"
+    __table_args__ = ({"schema": SCHEMA},)
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    occurrences: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    decision: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="keep", server_default="keep"
+    )
+
+
+class TlCategoryTag(Base):
+    """Tag di categoria ammessi sugli scenari (oltre a identità e polarità)."""
+
+    __tablename__ = "tl_category_tags"
+    __table_args__ = ({"schema": SCHEMA},)
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class TlMigrationState(Base):
+    __tablename__ = "tl_migration_state"
+    __table_args__ = ({"schema": SCHEMA},)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="idle")
+    error: Mapped[str | None] = mapped_column(Text)

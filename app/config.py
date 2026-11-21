@@ -118,6 +118,10 @@ class Settings(BaseSettings):
     tl_nrt_window: int = 10  # ultime run per scenario nel pass rate
     tl_nrt_lookback_days: int = 90  # esecuzioni lette per panoramica e link
     tl_nrt_running_interval_s: float = 900.0
+    # Test Lifecycle — migrazione da Confluence
+    tl_confluence_root_page_id: str = "2815950851"  # "Testing Suites" (spazio QDP)
+    tl_confluence_space: str = "QDP"
+    tl_migration_confluence_write: bool = False  # True solo quando il team decide di scrivere
 
     # PSP Fee catalog (Data Hub)
     psp_fee_json_url: str = (

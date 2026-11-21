@@ -9,7 +9,7 @@ def test_action_keys_match_catalog() -> None:
 
 
 def test_action_catalog_size() -> None:
-    assert len(ACTION_CATALOG) == 35
+    assert len(ACTION_CATALOG) == 36
 
 
 def test_quality_gate_report_is_readable_by_every_role_including_guest() -> None:

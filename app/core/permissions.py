@@ -223,6 +223,12 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "category": "Test Lifecycle",
         "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": False, "guest": False},
     },
+    {
+        "key": "manage:tl_migration",
+        "label": "Test Lifecycle (migrazione da Confluence)",
+        "category": "Test Lifecycle",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": False, "guest": False},
+    },
 ]
 
 ACTION_KEYS: set[str] = {entry["key"] for entry in ACTION_CATALOG}
