@@ -113,6 +113,12 @@ class FakeGitClient:
             return  # idempotent, like the real client on "already exists"
         self.branches[branch] = from_sha
 
+    async def reset_branch(self, branch: str, sha: str) -> None:
+        await self._enter("reset_branch", branch, sha)
+        if branch not in self.branches:
+            raise TlGitError(422, "Reference does not exist")
+        self.branches[branch] = sha
+
     async def get_file(self, path: str, ref: str) -> GitFile | None:
         await self._enter("get_file", path, ref)
         sha = self.branches.get(ref, ref)

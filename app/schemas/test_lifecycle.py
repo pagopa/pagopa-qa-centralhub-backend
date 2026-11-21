@@ -531,3 +531,51 @@ class TlStepPhraseOut(BaseModel):
     text: str
     occurrences: int
     implemented: bool
+
+
+# ── Riallineamento a tre vie (fase 2) ──────────────────────────────────────────
+
+RebaseSide = Literal["git", "draft"]
+
+
+class TlScenarioContentOut(BaseModel):
+    position: int
+    title: str
+    kind: TlScenarioKind
+    polarity: TlPolarity
+    extra_tags: list[str] = []
+    steps: str
+    examples: dict[str, Any] | None = None
+    detail_link: str | None = None
+
+
+class TlRebaseScenario(BaseModel):
+    scenario_id: uuid.UUID
+    tag: str
+    base: TlScenarioContentOut | None = None
+    git: TlScenarioContentOut | None = None
+    draft: TlScenarioContentOut | None = None
+    conflict: bool = False
+
+
+class TlRebaseField(BaseModel):
+    field: Literal["title", "description", "background"]
+    base: str | None = None
+    git: str | None = None
+    draft: str | None = None
+    conflict: bool = False
+
+
+class TlRebaseView(BaseModel):
+    revision_id: uuid.UUID
+    base_revision_id: uuid.UUID | None = None
+    published_revision_id: uuid.UUID | None = None
+    lock_version: int
+    metadata: list[TlRebaseField] = []
+    scenarios: list[TlRebaseScenario] = []
+
+
+class TlRebaseApply(BaseModel):
+    lock_version: int
+    actor_email: str
+    choices: dict[str, RebaseSide] = {}

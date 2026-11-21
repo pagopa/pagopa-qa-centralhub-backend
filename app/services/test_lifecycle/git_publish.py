@@ -137,14 +137,27 @@ async def record_unexpected_error(db: AsyncSession, revision_id: uuid.UUID) -> N
         await db.refresh(rev)
 
 
+def _publishable(rev: TlFeatureRevision, allow_open: bool) -> bool:
+    if rev.status != TlRevisionStatus.APPROVED:
+        return False
+    allowed: tuple[str | None, ...] = (None, "closed", "open") if allow_open else (None, "closed")
+    return rev.pr_state in allowed
+
+
 async def publish_revision(
     db: AsyncSession,
     feature_id: uuid.UUID,
     revision_id: uuid.UUID,
     actor: User,
     client: TlGitClient,
+    *,
+    allow_open: bool = False,
 ) -> TlFeatureDetail:
     """Scrive il feature file sul branch della revisione e apre (o riusa) la PR. Idempotente.
+
+    `allow_open=True` (solo dopo una nuova approvazione) consente di ripubblicare una revisione
+    che ha già una PR aperta, ad esempio dopo un riallineamento: il branch viene riportato su
+    main e il file riscritto; la PR resta la stessa.
 
     Nessun lock di riga durante le chiamate GitHub: lock advisory per revisione (409 se già in
     corso), stato validato e letto sotto lock di riga, commit, chiamate di rete, poi righe
@@ -155,7 +168,7 @@ async def publish_revision(
         # (b) validazione e lettura sotto lock di riga
         feature = await features_svc._lock_feature(db, feature_id)
         rev = await features_svc._lock_revision(db, feature_id, revision_id)
-        if rev.status != TlRevisionStatus.APPROVED or rev.pr_state not in (None, "closed"):
+        if not _publishable(rev, allow_open):
             raise PublishNotAllowedError(str(revision_id))
         scope = await db.get(TlScope, feature.scope_id)
         assert scope is not None  # noqa: S101 - FK guarantees it
@@ -171,6 +184,7 @@ async def publish_revision(
         title = pr_title(feature, rev)
         body = pr_body(feature, rev, [sc.tag for sc, _ in rows])
         known_base_sha = rev.base_commit_sha
+        republish = rev.pr_state == "open"
         await db.commit()  # rilascia i lock di riga prima della rete
 
         # (c) GitHub, senza lock di riga
@@ -178,7 +192,11 @@ async def publish_revision(
         try:
             base_sha = await client.head_sha(base)
             branch_existed = await client.branch_exists(branch)
-            await client.create_branch(branch, base_sha)
+            if republish and branch_existed:
+                # PR già aperta: il branch riparte da main con il solo file riallineato
+                await client.reset_branch(branch, base_sha)
+            else:
+                await client.create_branch(branch, base_sha)
             existing = await client.get_file(path, branch)
             if existing is None or existing.text != text_:
                 await client.put_file(
@@ -194,14 +212,14 @@ async def publish_revision(
         # (d) esito, righe rilockate e stato ricontrollato
         feature = await features_svc._lock_feature(db, feature_id)
         rev = await features_svc._lock_revision(db, feature_id, revision_id)
-        if rev.status != TlRevisionStatus.APPROVED or rev.pr_state not in (None, "closed"):
+        if not _publishable(rev, allow_open):
             raise PublishNotAllowedError(str(revision_id))
         rev.pr_number = pull.number
         rev.pr_url = pull.url
         rev.pr_branch = branch
         rev.pr_state = "open"
         rev.pr_error = None
-        if not (branch_existed and known_base_sha):
+        if republish or not (branch_existed and known_base_sha):
             rev.base_commit_sha = base_sha
         if feature.git_path is None:
             feature.git_path = path
@@ -209,7 +227,7 @@ async def publish_revision(
             db, kind=TlIssueKind.PR_CREATION_FAILED, revision_id=rev.id, actor=actor
         )
         history.record_event(
-            db, feature.id, "tl.pr.created", actor,
+            db, feature.id, "tl.pr.updated" if republish else "tl.pr.created", actor,
             {
                 "revision_id": str(rev.id),
                 "revision_number": rev.number,

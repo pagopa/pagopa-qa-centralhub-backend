@@ -147,6 +147,14 @@ class TlGitClient:
         if resp.status_code == 422 and "already exists" not in _error_message(resp):
             raise TlGitError(422, _error_message(resp))
 
+    async def reset_branch(self, branch: str, sha: str) -> None:
+        """Riporta il branch su `sha` (force): usato per riallineare il branch di una PR a main."""
+        await self._request(
+            "PATCH",
+            f"git/refs/heads/{quote(branch, safe='/')}",
+            json={"sha": sha, "force": True},
+        )
+
     async def get_file(self, path: str, ref: str) -> GitFile | None:
         resp = await self._request(
             "GET", f"contents/{quote(path, safe='/')}", params={"ref": ref}, ok_statuses=(404,)

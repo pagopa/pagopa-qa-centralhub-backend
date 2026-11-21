@@ -9,8 +9,8 @@ from sqlalchemy import case, select
 
 from app.deps import DbDep
 from app.models.test_lifecycle import (
-    TlGitSyncState,
     TlFeatureStatus,
+    TlGitSyncState,
     TlIssueKind,
     TlIssueStatus,
     TlStepPhrase,
@@ -25,13 +25,15 @@ from app.schemas.test_lifecycle import (
     TlFeatureUpdate,
     TlGherkinValidateOut,
     TlGherkinValidateRequest,
+    TlGitStatusOut,
+    TlGitSyncSummaryOut,
     TlHistoryItem,
     TlIssueOut,
     TlIssueUpdate,
     TlPreviewOut,
-    TlGitStatusOut,
-    TlGitSyncSummaryOut,
     TlPrRequest,
+    TlRebaseApply,
+    TlRebaseView,
     TlRevisionOut,
     TlRevisionUpdate,
     TlScenarioCreate,
@@ -50,6 +52,7 @@ from app.services.test_lifecycle import git_publish as git_publish_svc
 from app.services.test_lifecycle import git_sync as git_sync_svc
 from app.services.test_lifecycle import history as history_svc
 from app.services.test_lifecycle import issues as issues_svc
+from app.services.test_lifecycle import rebase as rebase_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle import scopes as scopes_svc
 from app.services.test_lifecycle import workflow as workflow_svc
@@ -160,6 +163,23 @@ def _translate(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, history_svc.VersionNotFoundError):
         return HTTPException(status_code=404, detail="Versione non trovata")
+    if isinstance(exc, rebase_svc.RebaseRequiredError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "rebase_required",
+                "message": "Scegli un lato per ogni elemento in conflitto",
+                "conflicts": exc.conflicts,
+            },
+        )
+    if isinstance(exc, rebase_svc.RebaseNotNeededError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "rebase_not_needed",
+                "message": "La bozza non è basata su una versione superata",
+            },
+        )
     if isinstance(exc, workflow_svc.TransitionNotAllowedError):
         return HTTPException(
             status_code=409,
@@ -350,6 +370,33 @@ async def transition_revision(
         return await workflow_svc.apply_transition(
             db, feature_id, revision_id, body.action, body.actor_email, body.note
         )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get(
+    "/features/{feature_id}/revisions/{revision_id}/rebase",
+    response_model=TlRebaseView,
+)
+async def get_rebase(feature_id: uuid.UUID, revision_id: uuid.UUID, db: DbDep) -> TlRebaseView:
+    """Confronto a tre vie (base / Git / bozza) per metadati e scenari."""
+    try:
+        return await rebase_svc.get_rebase_view(db, feature_id, revision_id)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post(
+    "/features/{feature_id}/revisions/{revision_id}/rebase",
+    response_model=TlFeatureDetail,
+)
+async def apply_rebase(
+    feature_id: uuid.UUID, revision_id: uuid.UUID, body: TlRebaseApply, db: DbDep
+) -> TlFeatureDetail:
+    """Riallinea la bozza alla versione pubblicata. Conflitti senza scelta -> 409
+    `rebase_required` con l'elenco; bozza non superata -> 409 `rebase_not_needed`."""
+    try:
+        return await rebase_svc.apply_rebase(db, feature_id, revision_id, body)
     except Exception as exc:
         raise _translate(exc) from exc
 

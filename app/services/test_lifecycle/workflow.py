@@ -26,13 +26,14 @@ from app.schemas.test_lifecycle import (
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_client as git_client_mod
 from app.services.test_lifecycle import git_publish, history
+from app.services.test_lifecycle import rebase as rebase_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle.actors import resolve_actor
 from app.services.test_lifecycle.git_client import TlGitError, TlGitNotConfigured
 
 logger = logging.getLogger(__name__)
 
-REOPEN_PHASE1_REASON = "Disponibile dopo il merge del feature file (fase Git)"
+REOPEN_PHASE1_REASON = rebase_svc.REOPEN_PHASE1_REASON
 REVIEWER_REQUIRED_REASON = "Accesso come reviewer richiesto"
 NOT_REVIEWER_REASON = "Solo il reviewer assegnato può eseguire questa azione"
 NOTE_REQUIRED_REASON = "Serve una nota per richiedere modifiche"
@@ -68,6 +69,8 @@ def _submit_reasons(
     if revision.status != TlRevisionStatus.DRAFT:
         return ["La revisione non è in bozza"]
     reasons: list[str] = []
+    if revision.base_stale:
+        reasons.append(rebase_svc.STALE_REASON)
     if feature.design_owner_id is None:
         reasons.append("Manca l'owner di progettazione")
     if feature.reviewer_id is None:
@@ -128,12 +131,15 @@ def available_transitions(
         if not approve and feature.reviewer_id == feature.design_owner_id:
             # Difesa in profondità: l'owner non può approvare il proprio lavoro.
             approve = [REVIEWER_IS_OWNER_REASON]
+        if not approve and revision.base_stale:
+            approve = [rebase_svc.STALE_REASON]
         checks = [
             TransitionCheck(TlTransitionAction.SUBMIT.value, not submit, submit),
             TransitionCheck(TlTransitionAction.APPROVE.value, not approve, approve),
             TransitionCheck(TlTransitionAction.REQUEST_CHANGES.value, not review, list(review)),
         ]
-    checks.append(TransitionCheck(TlTransitionAction.REOPEN.value, False, [REOPEN_PHASE1_REASON]))
+    reopen = rebase_svc.reopen_reasons(feature)
+    checks.append(TransitionCheck(TlTransitionAction.REOPEN.value, not reopen, reopen))
     return [
         TlTransitionOut(action=TlTransitionAction(c.action), allowed=c.allowed, reasons=c.reasons)
         for c in checks
@@ -153,7 +159,12 @@ async def apply_transition(
     rev = await features_svc._lock_revision(db, feature_id, revision_id)
 
     if action == TlTransitionAction.REOPEN:
-        raise TransitionNotAllowedError([REOPEN_PHASE1_REASON])
+        reasons = rebase_svc.reopen_reasons(feature)
+        if reasons:
+            raise TransitionNotAllowedError(reasons)
+        await rebase_svc.reopen(db, feature, actor)
+        await db.commit()
+        return await features_svc.get_feature_detail(db, feature_id, actor.email)
 
     view = await features_svc._revision_out(db, rev)
     scope = await db.get(TlScope, feature.scope_id)
@@ -226,7 +237,9 @@ async def _publish_best_effort(
         await git_publish.record_not_configured(db, revision_id)
         return
     try:
-        await git_publish.publish_revision(db, feature_id, revision_id, actor, client)
+        await git_publish.publish_revision(
+            db, feature_id, revision_id, actor, client, allow_open=True
+        )
     except (TlGitError, git_publish.RepoFolderMissingError):
         pass  # già registrato da publish_revision
     except Exception:
