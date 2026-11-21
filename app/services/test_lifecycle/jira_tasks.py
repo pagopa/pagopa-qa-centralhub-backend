@@ -360,6 +360,13 @@ async def create_task(
             setattr(feature, field, issue.key)
         merge_cache(feature, {issue.key: _entry(issue)})
         feature.jira_error = None
+        if kind == "impl":
+            from app.models.test_lifecycle import TlIssueKind
+            from app.services.test_lifecycle import issues as issues_svc
+
+            await issues_svc.resolve_feature_issues(
+                db, kind=TlIssueKind.JIRA_CREATION_FAILED, feature_id=feature_id
+            )
         history.record_event(
             db,
             feature.id,

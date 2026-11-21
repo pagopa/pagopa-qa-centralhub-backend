@@ -13,6 +13,7 @@ from app.models.test_lifecycle import (
     TlFeature,
     TlFeatureRevision,
     TlFeatureStatus,
+    TlIssueKind,
     TlRevisionStatus,
     TlScope,
 )
@@ -25,7 +26,9 @@ from app.schemas.test_lifecycle import (
 )
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_client as git_client_mod
-from app.services.test_lifecycle import git_publish, history
+from app.services.test_lifecycle import git_publish, history, jira_tasks
+from app.services.test_lifecycle import issues as issues_svc
+from app.services.test_lifecycle import jira_client as jira_mod
 from app.services.test_lifecycle import rebase as rebase_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle.actors import resolve_actor
@@ -187,7 +190,10 @@ async def apply_transition(
         if first_publication:
             feature.status = TlFeatureStatus.IN_REVIEW
         history.record_event(
-            db, feature.id, "tl.revision.submitted", actor,
+            db,
+            feature.id,
+            "tl.revision.submitted",
+            actor,
             {"revision_id": str(rev.id), "revision_number": rev.number},
         )
     elif action == TlTransitionAction.REQUEST_CHANGES:
@@ -199,7 +205,10 @@ async def apply_transition(
             feature.status = TlFeatureStatus.DRAFT
         reviews_svc.create_comment(db, feature.id, rev, actor, text, emit_event=False)
         history.record_event(
-            db, feature.id, "tl.revision.changes_requested", actor,
+            db,
+            feature.id,
+            "tl.revision.changes_requested",
+            actor,
             {"revision_id": str(rev.id), "revision_number": rev.number, "note": text},
         )
     else:  # APPROVE
@@ -210,7 +219,10 @@ async def apply_transition(
             feature.status = TlFeatureStatus.DESIGNED
         version = await history.snapshot(db, feature, rev, actor)
         history.record_event(
-            db, feature.id, "tl.revision.approved", actor,
+            db,
+            feature.id,
+            "tl.revision.approved",
+            actor,
             {
                 "revision_id": str(rev.id),
                 "revision_number": rev.number,
@@ -219,9 +231,11 @@ async def apply_transition(
         )
     await db.commit()
     await db.refresh(rev)
+    actor_email = actor.email  # gli step successivi fanno rollback: l'oggetto scade
     if action == TlTransitionAction.APPROVE:
         await _publish_best_effort(db, feature_id, revision_id, actor)
-    return await features_svc.get_feature_detail(db, feature_id, actor.email)
+        await _jira_impl_best_effort(db, feature_id, actor_email)
+    return await features_svc.get_feature_detail(db, feature_id, actor_email)
 
 
 async def _publish_best_effort(
@@ -246,3 +260,39 @@ async def _publish_best_effort(
         # l'approvazione è già committata: mai trasformarla in un 500
         logger.exception("Creazione PR fallita per la revisione %s", revision_id)
         await git_publish.record_unexpected_error(db, revision_id)
+
+
+async def _jira_impl_best_effort(db: AsyncSession, feature_id: uuid.UUID, actor_email: str) -> None:
+    """Dopo l'approvazione: crea il task Jira di implementazione se manca. Mai propagato.
+
+    Jira non configurato -> solo `jira_error`; errore Jira -> `jira_error` e anomalia
+    `jira_creation_failed` (una sola aperta per feature), risolta quando il task viene creato.
+    """
+    feature = await db.get(TlFeature, feature_id, populate_existing=True)
+    if feature is None or feature.jira_impl_key:
+        return
+    await db.rollback()
+    try:
+        client = jira_mod.get_jira_client()
+    except jira_mod.TlJiraNotConfigured:
+        feature = await features_svc._lock_feature(db, feature_id)
+        feature.jira_error = "Jira non configurato"
+        await db.commit()
+        return
+    try:
+        await jira_tasks.create_task(db, feature_id, "impl", actor_email, client)
+    except jira_tasks.JiraTaskExists:
+        return
+    except Exception as exc:  # l'approvazione è già salvata: mai un 500
+        await db.rollback()
+        message = exc.message if isinstance(exc, jira_mod.TlJiraError) else str(exc)
+        logger.warning("Task Jira di implementazione non creato per %s: %s", feature_id, message)
+        feature = await features_svc._lock_feature(db, feature_id)
+        feature.jira_error = message or "Creazione del task Jira non riuscita"
+        await issues_svc.open_issue(
+            db,
+            kind=TlIssueKind.JIRA_CREATION_FAILED,
+            feature_id=feature_id,
+            detail={"key": "impl", "message": feature.jira_error},
+        )
+        await db.commit()

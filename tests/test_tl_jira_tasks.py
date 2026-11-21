@@ -31,6 +31,7 @@ def jira(monkeypatch):
         "PQ-12", "Progettazione esistente", issue_type="Progettazione Scenari e casi di test"
     )
     fake.add_issue("CHK-7", "Story di prodotto", issue_type="Story")
+    fake.add_issue("ABC-1", "Epic di prodotto", issue_type="Epic")  # usata da _ready_feature
     return fake
 
 
@@ -405,3 +406,103 @@ async def test_epics_search_endpoint(client, jira):
     assert resp.status_code == 200, resp.text
     assert [e["key"] for e in resp.json()] == ["PQ-495"]
     assert resp.json()[0]["summary"] == "[QA Epic] FdR"
+
+
+# ── Task 5: task Implementazione all'approvazione ─────────────────────────────
+
+
+async def _approved_with_jira(client, scope_, actor, jira, impl_owner=None):
+    from tests.test_tl_workflow import _do, _ready_feature
+
+    reviewer = await _make_user("rev")
+    detail = await _ready_feature(client, scope_, actor, reviewer)
+    if impl_owner:
+        await _patch_feature(client, detail, actor, impl_owner_id=impl_owner["id"])
+    detail = (await _do(client, detail, "submit", actor["email"])).json()
+    resp = await _do(client, detail, "approve", reviewer["email"])
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+async def _make_user(prefix):
+    from app.models.user import User
+
+    email = f"tl-{prefix}-{uuid.uuid4().hex[:8]}@example.test"
+    async with TestSession() as s:
+        user = User(email=email, name=prefix, role="qa_analyst", is_active=True)
+        s.add(user)
+        await s.commit()
+        return {"id": str(user.id), "email": email}
+
+
+async def _impl_issues(fid):
+    from app.models.test_lifecycle import TlIssue, TlIssueKind
+
+    async with TestSession() as s:
+        return (
+            await s.execute(
+                select(TlIssue).where(
+                    TlIssue.feature_id == uuid.UUID(fid),
+                    TlIssue.kind == TlIssueKind.JIRA_CREATION_FAILED,
+                )
+            )
+        ).scalars().all()
+
+
+async def test_approve_creates_impl_task_and_link(client, scope, actor, jira):
+    await _jira_scope(client, scope, jira)
+    engineer = await _make_user("eng")
+    jira.users[engineer["email"].lower()] = "acc-eng"
+    done = await _approved_with_jira(client, scope, actor, jira, impl_owner=engineer)
+    impl = [c for c in jira.created if c["issue_type"] == "Implementazione suite di TA"]
+    assert len(impl) == 1
+    assert impl[0]["summary"].startswith(f"[{done['code']}] Implementazione suite — ")
+    assert impl[0]["assignee_id"] == "acc-eng"
+    assert impl[0]["parent_key"] == "PQ-495"
+    row = await _feature_row(done["id"])
+    assert row.jira_impl_key == impl[0]["key"]
+    assert row.jira_error is None
+    assert ("Relates", impl[0]["key"], "ABC-1") in jira.links
+
+
+async def test_approve_jira_failure_keeps_approval_and_opens_issue(client, scope, actor, jira):
+    jira.fail_once("create_issue", 500, "Jira giù")
+    done = await _approved_with_jira(client, scope, actor, jira)
+    assert done["working_revision"]["status"] == "approved"
+    row = await _feature_row(done["id"])
+    assert row.jira_impl_key is None and "Jira giù" in row.jira_error
+    issues = await _impl_issues(done["id"])
+    assert len(issues) == 1 and issues[0].status.value == "open"
+
+
+async def test_retry_impl_task_resolves_issue(client, scope, actor, jira):
+    jira.fail_once("create_issue", 500, "Jira giù")
+    done = await _approved_with_jira(client, scope, actor, jira)
+    resp = await client.post(
+        f"{BASE}/features/{done['id']}/jira/impl-task", json={"actor_email": actor["email"]}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["jira_impl_key"]
+    assert resp.json()["jira_error"] is None
+    assert [i.status.value for i in await _impl_issues(done["id"])] == ["resolved"]
+
+
+async def test_approve_without_jira_config_sets_error_only(client, scope, actor, monkeypatch):
+    from tests.tl_fakes import uninstall_jira
+
+    uninstall_jira(monkeypatch)
+    done = await _approved_with_jira(client, scope, actor, None)
+    row = await _feature_row(done["id"])
+    assert row.jira_error == "Jira non configurato"
+    assert await _impl_issues(done["id"]) == []
+
+
+async def test_reapproval_does_not_create_second_impl_task(client, scope, actor, jira):
+    done = await _approved_with_jira(client, scope, actor, jira)
+    count = len([c for c in jira.created if c["issue_type"] == "Implementazione suite di TA"])
+    resp = await client.post(
+        f"{BASE}/features/{done['id']}/jira/impl-task", json={"actor_email": actor["email"]}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "jira_task_exists"
+    assert len([c for c in jira.created if c["issue_type"] == "Implementazione suite di TA"]) == count
