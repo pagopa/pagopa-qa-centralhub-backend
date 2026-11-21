@@ -229,6 +229,7 @@ class TlFeatureUpdate(BaseModel):
     jira_design_key: str | None = None
     jira_impl_key: str | None = None
     jira_qa_epic_key: str | None = None
+    migration_note: str | None = Field(default=None, max_length=20000)
     actor_email: str
 
     _validate_epic = field_validator("jira_qa_epic_key")(_check_epic_key)
@@ -417,6 +418,9 @@ class TlFeatureDetail(BaseModel):
     jira_qa_epic_key: str | None = None
     jira_qa_epic_effective: str | None = None
     jira_warning: str | None = None
+    migration_note: str | None = None
+    migrated_from: dict[str, Any] | None = None
+    alignment_pending: bool = False
 
 
 # ── Workflow e storico ────────────────────────────────────────────────────────

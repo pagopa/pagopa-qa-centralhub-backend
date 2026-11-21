@@ -7041,6 +7041,32 @@
         }
       }
     },
+    "/api/v1/test-lifecycle/category-tags": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "List Category Tags",
+        "description": "Tag di categoria ammessi sugli scenari.",
+        "operationId": "list_category_tags_api_v1_test_lifecycle_category_tags_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response List Category Tags Api V1 Test Lifecycle Category Tags Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/test-lifecycle/features/{feature_id}/nrt": {
       "get": {
         "tags": [
@@ -8519,6 +8545,428 @@
                     "$ref": "#/components/schemas/TlStepPhraseOut"
                   },
                   "title": "Response Search Steps Api V1 Test Lifecycle Steps Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/migration": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Get Migration",
+        "operationId": "get_migration_api_v1_test_lifecycle_migration_get",
+        "parameters": [
+          {
+            "name": "actor_email",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Actor Email"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlMigrationSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/migration/analyze": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Analyze",
+        "description": "Legge pagine FEAT e feature file e ricostruisce le proposte (nessuna scrittura esterna).",
+        "operationId": "analyze_api_v1_test_lifecycle_migration_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlMigrationActor"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlMigrationSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/migration/items": {
+      "get": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "List Items",
+        "operationId": "list_items_api_v1_test_lifecycle_migration_items_get",
+        "parameters": [
+          {
+            "name": "actor_email",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Actor Email"
+            }
+          },
+          {
+            "name": "scope_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Scope Code",
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "decision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Decision",
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "problem",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "title": "Problem",
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TlMigrationItemOut"
+                  },
+                  "title": "Response List Items Api V1 Test Lifecycle Migration Items Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/migration/items/{item_id}": {
+      "patch": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Patch Item",
+        "operationId": "patch_item_api_v1_test_lifecycle_migration_items__item_id__patch",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlMigrationItemPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlMigrationItemOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/migration/tags/{name}": {
+      "patch": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Patch Tag",
+        "operationId": "patch_tag_api_v1_test_lifecycle_migration_tags__name__patch",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlMigrationTagPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlMigrationSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/migration/scopes/{scope_code}/execute": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Execute",
+        "description": "Crea le feature confermate dell'ambito, aggiorna Confluence (se abilitato), apre la PR.",
+        "operationId": "execute_api_v1_test_lifecycle_migration_scopes__scope_code__execute_post",
+        "parameters": [
+          {
+            "name": "scope_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Code"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlMigrationActor"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlMigrationScopeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/migration/scopes/{scope_code}/retry-pr": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Retry Pr",
+        "operationId": "retry_pr_api_v1_test_lifecycle_migration_scopes__scope_code__retry_pr_post",
+        "parameters": [
+          {
+            "name": "scope_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Code"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlMigrationActor"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlMigrationScopeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/test-lifecycle/migration/scopes/{scope_code}/retry-confluence": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Retry Confluence",
+        "operationId": "retry_confluence_api_v1_test_lifecycle_migration_scopes__scope_code__retry_confluence_post",
+        "parameters": [
+          {
+            "name": "scope_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Code"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TlMigrationActor"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlMigrationScopeOut"
                 }
               }
             }
@@ -16206,6 +16654,22 @@
             "title": "Jira Warning",
             "type": "string",
             "nullable": true
+          },
+          "migration_note": {
+            "title": "Migration Note",
+            "type": "string",
+            "nullable": true
+          },
+          "migrated_from": {
+            "title": "Migrated From",
+            "additionalProperties": true,
+            "type": "object",
+            "nullable": true
+          },
+          "alignment_pending": {
+            "type": "boolean",
+            "title": "Alignment Pending",
+            "default": false
           }
         },
         "type": "object",
@@ -16372,6 +16836,12 @@
           "jira_qa_epic_key": {
             "title": "Jira Qa Epic Key",
             "type": "string",
+            "nullable": true
+          },
+          "migration_note": {
+            "title": "Migration Note",
+            "type": "string",
+            "maxLength": 20000,
             "nullable": true
           },
           "actor_email": {
@@ -16754,6 +17224,335 @@
           "message"
         ],
         "title": "TlLineError"
+      },
+      "TlMigrationActor": {
+        "properties": {
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "actor_email"
+        ],
+        "title": "TlMigrationActor"
+      },
+      "TlMigrationItemOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "page_id": {
+            "title": "Page Id",
+            "type": "string",
+            "nullable": true
+          },
+          "page_title": {
+            "title": "Page Title",
+            "type": "string",
+            "nullable": true
+          },
+          "page_url": {
+            "title": "Page Url",
+            "type": "string",
+            "nullable": true
+          },
+          "file_path": {
+            "title": "File Path",
+            "type": "string",
+            "nullable": true
+          },
+          "scope_code": {
+            "type": "string",
+            "title": "Scope Code"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer",
+            "nullable": true
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TlFeatureStatus"
+          },
+          "decision": {
+            "type": "string",
+            "title": "Decision"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/TlMigrationProblem"
+            },
+            "type": "array",
+            "title": "Problems",
+            "default": []
+          },
+          "proposal": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Proposal",
+            "default": {}
+          },
+          "overrides": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Overrides",
+            "default": {}
+          },
+          "effective": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Effective",
+            "default": {}
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "executed_at": {
+            "title": "Executed At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "scope_code",
+          "title",
+          "status",
+          "decision"
+        ],
+        "title": "TlMigrationItemOut"
+      },
+      "TlMigrationItemPatch": {
+        "properties": {
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string",
+            "enum": [
+              "pending",
+              "confirmed",
+              "excluded"
+            ],
+            "nullable": true
+          },
+          "overrides": {
+            "title": "Overrides",
+            "additionalProperties": true,
+            "type": "object",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "actor_email"
+        ],
+        "title": "TlMigrationItemPatch"
+      },
+      "TlMigrationProblem": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TlMigrationProblem"
+      },
+      "TlMigrationScopeOut": {
+        "properties": {
+          "scope_code": {
+            "type": "string",
+            "title": "Scope Code"
+          },
+          "items": {
+            "type": "integer",
+            "title": "Items",
+            "default": 0
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending",
+            "default": 0
+          },
+          "confirmed": {
+            "type": "integer",
+            "title": "Confirmed",
+            "default": 0
+          },
+          "excluded": {
+            "type": "integer",
+            "title": "Excluded",
+            "default": 0
+          },
+          "executed": {
+            "type": "integer",
+            "title": "Executed",
+            "default": 0
+          },
+          "with_problems": {
+            "type": "integer",
+            "title": "With Problems",
+            "default": 0
+          },
+          "executed_at": {
+            "title": "Executed At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "pr_number": {
+            "title": "Pr Number",
+            "type": "integer",
+            "nullable": true
+          },
+          "pr_url": {
+            "title": "Pr Url",
+            "type": "string",
+            "nullable": true
+          },
+          "pr_state": {
+            "title": "Pr State",
+            "type": "string",
+            "nullable": true
+          },
+          "pr_error": {
+            "title": "Pr Error",
+            "type": "string",
+            "nullable": true
+          },
+          "confluence_errors": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Confluence Errors",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope_code"
+        ],
+        "title": "TlMigrationScopeOut"
+      },
+      "TlMigrationSummary": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "analyzed_at": {
+            "title": "Analyzed At",
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "error": {
+            "title": "Error",
+            "type": "string",
+            "nullable": true
+          },
+          "confluence_write": {
+            "type": "boolean",
+            "title": "Confluence Write",
+            "default": false
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/TlMigrationScopeOut"
+            },
+            "type": "array",
+            "title": "Scopes",
+            "default": []
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TlMigrationTagOut"
+            },
+            "type": "array",
+            "title": "Tags",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "TlMigrationSummary"
+      },
+      "TlMigrationTagOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "occurrences": {
+            "type": "integer",
+            "title": "Occurrences"
+          },
+          "decision": {
+            "type": "string",
+            "title": "Decision"
+          },
+          "category": {
+            "type": "boolean",
+            "title": "Category",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "occurrences",
+          "decision"
+        ],
+        "title": "TlMigrationTagOut"
+      },
+      "TlMigrationTagPatch": {
+        "properties": {
+          "actor_email": {
+            "type": "string",
+            "title": "Actor Email"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "keep",
+              "drop"
+            ],
+            "title": "Decision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "actor_email",
+          "decision"
+        ],
+        "title": "TlMigrationTagPatch"
       },
       "TlNrtEnvResult": {
         "properties": {

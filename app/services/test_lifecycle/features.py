@@ -400,6 +400,9 @@ async def get_feature_detail(
         jira_error=feature.jira_error,
         jira_qa_epic_key=feature.jira_qa_epic_key,
         jira_qa_epic_effective=jira_tasks.effective_epic(feature, scope),
+        migration_note=feature.migration_note,
+        migrated_from=feature.migrated_from,
+        alignment_pending=feature.alignment_pending,
     )
 
 
