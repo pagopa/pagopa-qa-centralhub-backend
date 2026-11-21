@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.config import settings
 from app.models.test_lifecycle import (
     TlFeatureStatus,
     TlIssueKind,
@@ -33,14 +34,38 @@ def _check_scope_code(value: str) -> str:
 
 # ── Ambiti ────────────────────────────────────────────────────────────────────
 
+def _check_epic_key(value: str | None) -> str | None:
+    """Epic QA: chiave del progetto Jira dei task QA (es. PQ-495)."""
+    if value is None:
+        return None
+    value = value.strip()
+    project = re.escape(settings.tl_jira_project)
+    if not re.fullmatch(rf"{project}-\d+", value):
+        raise ValueError(f"Epic QA non valida: atteso {settings.tl_jira_project}-<numero>")
+    return value
+
+
+def _check_component(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    if len(value) > 100:
+        raise ValueError("Il componente Jira non può superare 100 caratteri")
+    return value or None
+
+
 class TlScopeCreate(BaseModel):
     code: str
     name: str
     area: str | None = None
     repo_folder: str | None = None
     owner_team: str | None = None
+    jira_qa_epic_key: str | None = None
+    jira_component: str | None = None
 
     _validate_code = field_validator("code")(_check_scope_code)
+    _validate_epic = field_validator("jira_qa_epic_key")(_check_epic_key)
+    _validate_component = field_validator("jira_component")(_check_component)
 
 
 class TlScopeUpdate(BaseModel):
@@ -49,6 +74,11 @@ class TlScopeUpdate(BaseModel):
     area: str | None = None
     repo_folder: str | None = None
     owner_team: str | None = None
+    jira_qa_epic_key: str | None = None
+    jira_component: str | None = None
+
+    _validate_epic = field_validator("jira_qa_epic_key")(_check_epic_key)
+    _validate_component = field_validator("jira_component")(_check_component)
 
     @field_validator("code")
     @classmethod
@@ -72,6 +102,8 @@ class TlScopeOut(BaseModel):
     area: str | None = None
     repo_folder: str | None = None
     owner_team: str | None = None
+    jira_qa_epic_key: str | None = None
+    jira_component: str | None = None
     next_feature_number: int
     created_at: datetime
     updated_at: datetime
@@ -194,7 +226,10 @@ class TlFeatureUpdate(BaseModel):
     impl_owner_id: uuid.UUID | None = None
     jira_design_key: str | None = None
     jira_impl_key: str | None = None
+    jira_qa_epic_key: str | None = None
     actor_email: str
+
+    _validate_epic = field_validator("jira_qa_epic_key")(_check_epic_key)
 
     @field_validator("jira_design_key")
     @classmethod

@@ -139,3 +139,23 @@ async def test_list_scopes_includes_status_counts(client, cleanup):
     assert row["status_counts"] == {
         "draft": 2, "in_review": 0, "designed": 1, "implemented": 0, "running": 0
     }
+
+
+async def test_scope_jira_fields_round_trip(client, cleanup):
+    resp = await _create(
+        client, cleanup, _code(), jira_qa_epic_key="PQ-495", jira_component=" FDR "
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["jira_qa_epic_key"] == "PQ-495"
+    assert body["jira_component"] == "FDR"
+    url = f"/api/v1/test-lifecycle/scopes/{body['id']}"
+    resp = await client.patch(url, json={"jira_qa_epic_key": None})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["jira_qa_epic_key"] is None
+
+
+@pytest.mark.parametrize("bad", ["CHK-1", "PQ1", "pq-12"])
+async def test_scope_epic_key_format(client, cleanup, bad):
+    resp = await _create(client, cleanup, _code(), jira_qa_epic_key=bad)
+    assert resp.status_code == 422

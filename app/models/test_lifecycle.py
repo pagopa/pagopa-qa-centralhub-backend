@@ -62,6 +62,7 @@ class TlIssueKind(str, enum.Enum):
     PARSE_ERROR = "parse_error"
     PR_CLOSED_UNMERGED = "pr_closed_unmerged"
     PR_CREATION_FAILED = "pr_creation_failed"
+    JIRA_CREATION_FAILED = "jira_creation_failed"
 
 
 class TlIssueStatus(str, enum.Enum):
@@ -115,6 +116,8 @@ class TlScope(Base):
     area: Mapped[str | None] = mapped_column(String(255))
     repo_folder: Mapped[str | None] = mapped_column(String(255))
     owner_team: Mapped[str | None] = mapped_column(String(255))
+    jira_qa_epic_key: Mapped[str | None] = mapped_column(String(32))
+    jira_component: Mapped[str | None] = mapped_column(String(100))
     next_feature_number: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"
     )
@@ -144,6 +147,12 @@ class TlFeature(Base):
     impl_owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     jira_design_key: Mapped[str | None] = mapped_column(String(32))
     jira_impl_key: Mapped[str | None] = mapped_column(String(32))
+    jira_qa_epic_key: Mapped[str | None] = mapped_column(String(32))
+    # stato dei task Jira collegati: {"<chiave>": {summary, status, category, ...}}
+    jira_cache: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    jira_error: Mapped[str | None] = mapped_column(Text)
     working_revision_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey(
             f"{SCHEMA}.tl_feature_revisions.id",
