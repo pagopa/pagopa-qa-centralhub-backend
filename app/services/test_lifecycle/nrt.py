@@ -20,6 +20,7 @@ from app.config import settings
 from app.models.flaky import FlakyRegistry
 from app.models.test_lifecycle import (
     TlFeature,
+    TlFeatureStatus,
     TlScenario,
     TlScenarioAlias,
     TlScenarioContent,
@@ -283,3 +284,58 @@ async def scope_pass_rates(db: AsyncSession) -> dict[uuid.UUID, float | None]:
         acc[scope_id][0] += passed
         acc[scope_id][1] += counted
     return {scope_id: _rate(p, c) for scope_id, (p, c) in acc.items()}
+
+
+# ── RUNNING automatico ────────────────────────────────────────────────────────
+
+RUNNING_LOCK_KEY = "tl_nrt_running"
+
+
+async def promote_running(
+    db: AsyncSession, *, run_ids: list[uuid.UUID] | None = None, limit: int = 500
+) -> int:
+    """IMPLEMENTED → RUNNING per le feature con almeno uno scenario eseguito (spec §6).
+
+    `run_ids` restringe alle run indicate (ingest); senza, guarda tutte le esecuzioni.
+    Mai all'indietro; un evento `tl.feature.running` per feature. Commit per feature.
+    """
+    from app.services.test_lifecycle import features as features_svc
+    from app.services.test_lifecycle import history
+
+    rows = (
+        await db.execute(
+            select(TlScenario.id, TlScenario.tag, TlScenario.feature_id)
+            .join(TlFeature, TlFeature.id == TlScenario.feature_id)
+            .where(TlFeature.status == TlFeatureStatus.IMPLEMENTED)
+        )
+    ).all()
+    if not rows:
+        return 0
+    feature_of = {r.id: r.feature_id for r in rows}
+    tag_map = await _tag_map(db, list(feature_of))
+    first: dict[uuid.UUID, tuple[uuid.UUID, str]] = {}
+    for ex in await _executions(db, list(tag_map), run_ids=run_ids):
+        for t in ex.tags or []:
+            sid = tag_map.get(t)
+            if sid is not None:
+                first.setdefault(feature_of[sid], (ex.run_id, t))
+    await db.rollback()
+
+    promoted = 0
+    for feature_id, (run_id, tag) in list(first.items())[:limit]:
+        try:
+            feature = await features_svc._lock_feature(db, feature_id)
+        except features_svc.FeatureNotFoundError:
+            await db.rollback()
+            continue
+        if feature.status != TlFeatureStatus.IMPLEMENTED:  # già promossa o cambiata nel frattempo
+            await db.rollback()
+            continue
+        feature.status = TlFeatureStatus.RUNNING
+        feature.running_at = datetime.now(UTC)
+        history.record_event(
+            db, feature.id, "tl.feature.running", None, {"run_id": str(run_id), "tag": tag}
+        )
+        await db.commit()
+        promoted += 1
+    return promoted

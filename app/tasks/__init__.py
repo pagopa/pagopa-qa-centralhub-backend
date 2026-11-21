@@ -44,4 +44,5 @@ from app.tasks import (
     sync_status_page,  # noqa: E402, F401
     sync_test_lifecycle,  # noqa: E402, F401
     sync_test_lifecycle_jira,  # noqa: E402, F401
+    sync_test_lifecycle_nrt,  # noqa: E402, F401
 )

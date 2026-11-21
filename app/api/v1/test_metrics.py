@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Annotated
 
@@ -15,10 +16,12 @@ from app.schemas.test_metrics import PendingRunsOut
 from app.schemas.quality_gate import QualityGateScenarioOut
 from app.services import quality_gate as quality_gate_svc
 from app.services import test_metrics as test_metrics_svc
+from app.services.test_lifecycle import nrt as tl_nrt_svc
 from app.schemas.common import PaginatedResponse
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.post("/test-suites", response_model=TestSuiteOut)
 async def create_test_suite(
@@ -123,7 +126,23 @@ async def create_test_execution(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create test execution",
         )
-    return test_executions_out
+    out = [TestExecutionOut.model_validate(te) for te in test_executions_out]
+    await _promote_running_best_effort(db, {te.run_id for te in out})
+    return out
+
+
+async def _promote_running_best_effort(db: DbDep, run_ids: set[uuid.UUID]) -> None:
+    """Test Lifecycle: feature IMPLEMENTED -> RUNNING. Non fa mai fallire l'ingest."""
+    if not run_ids:
+        return
+    try:
+        await tl_nrt_svc.promote_running(db, run_ids=list(run_ids))
+    except Exception:
+        logger.exception("tl_nrt_promote_running_failed")
+        try:
+            await db.rollback()
+        except Exception:
+            logger.exception("tl_nrt_promote_running_rollback_failed")
 
 @router.get("/nrts", response_model=PaginatedResponse[NrtListObject])
 async def get_nrts(db: DbDep, test_object: Annotated[str| None, Query()] = None,
