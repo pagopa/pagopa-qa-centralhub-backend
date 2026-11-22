@@ -165,3 +165,9 @@ def test_validate_registry_rejects_unknown_consumer_and_role(consumers: None) ->
 
 def test_rule_ids_are_unique() -> None:
     assert len({rule.id for rule in RULES}) == len(RULES)
+
+
+def test_announcement_routes_to_inbox_for_the_three_roles() -> None:
+    from app.messaging.catalog import ANNOUNCEMENT_PUBLISHED
+
+    assert route(_event(ANNOUNCEMENT_PUBLISHED)) == [DeliverySpec("inbox", {"roles": THREE_ROLES})]

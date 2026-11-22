@@ -145,3 +145,22 @@ async def test_audit_row_is_written_for_an_accepted_event(client: AsyncClient, c
         assert COND in (row.detail or "")
     finally:
         await _cleanup([str(body["id"])], [key])
+
+
+async def test_announcement_ingest_accepts_valid_and_rejects_external_link(
+    client: AsyncClient,
+) -> None:
+    from app.messaging.catalog import ANNOUNCEMENT_PUBLISHED
+
+    good = _body(type=ANNOUNCEMENT_PUBLISHED, data={"title": "T", "body": "B", "link": "/messages"})
+    bad = _body(
+        type=ANNOUNCEMENT_PUBLISHED, data={"title": "T", "body": "B", "link": "https://x.io"}
+    )
+    try:
+        assert (await client.post(URL, json=good)).status_code == 202
+        assert (await client.post(URL, json=bad)).status_code == 422
+    finally:
+        async with TestSession() as s:
+            await s.execute(delete(MsgEvent).where(MsgEvent.id == uuid.UUID(str(good["id"]))))
+            await s.execute(delete(AuditLog).where(AuditLog.resource_id == str(good["id"])))
+            await s.commit()

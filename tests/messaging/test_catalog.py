@@ -5,6 +5,7 @@ import pytest
 from pydantic import BaseModel
 
 from app.messaging.catalog import (
+    ANNOUNCEMENT_PUBLISHED,
     NRT_REVIEWS_PENDING,
     QG_RUN_COMPLETED,
     SANP_CHECKS_FAILING,
@@ -130,3 +131,36 @@ def test_condition_key_and_members() -> None:
     assert et2.key(sanp) == "sanp_health.checks.failing"
     assert et2.members(sanp) == frozenset({"SANP:x"})
     assert get_event_type(QG_RUN_COMPLETED).policy == "occurrence"
+
+
+def test_announcement_is_an_occurrence_rendered_verbatim() -> None:
+    event = new_event(
+        ANNOUNCEMENT_PUBLISHED,
+        "/s",
+        "info",
+        {"title": "Novità", "body": "Testo dell'annuncio.", "link": "/messages"},
+    )
+    et = get_event_type(ANNOUNCEMENT_PUBLISHED)
+    assert et.policy == "occurrence"
+    assert et.render(event) == RenderedMessage("Novità", "Testo dell'annuncio.", "/messages")
+
+
+def test_announcement_link_is_optional() -> None:
+    event = new_event(ANNOUNCEMENT_PUBLISHED, "/s", "info", {"title": "T", "body": "B"})
+    assert get_event_type(ANNOUNCEMENT_PUBLISHED).render(event).link is None
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"title": "", "body": "B"},
+        {"title": "T", "body": ""},
+        {"title": "T", "body": "B", "link": "https://example.com"},
+        {"title": "T", "body": "B", "link": "//example.com"},
+        {"title": "T", "body": "B", "link": "javascript:alert(1)"},
+    ],
+)
+def test_announcement_rejects_invalid_data(data: dict[str, object]) -> None:
+    event = new_event(ANNOUNCEMENT_PUBLISHED, "/s", "info", data)
+    with pytest.raises(ValueError):
+        get_event_type(ANNOUNCEMENT_PUBLISHED).data_model.model_validate(event.data)

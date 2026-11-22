@@ -7,7 +7,12 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 
 import app.messaging  # noqa: F401  (registers the inbox consumer)
-from app.messaging.catalog import NRT_REVIEWS_PENDING, QG_RUN_COMPLETED, SANP_CHECKS_FAILING
+from app.messaging.catalog import (
+    ANNOUNCEMENT_PUBLISHED,
+    NRT_REVIEWS_PENDING,
+    QG_RUN_COMPLETED,
+    SANP_CHECKS_FAILING,
+)
 from app.messaging.consumers import CONSUMERS
 from app.messaging.inbox import merge_roles
 from app.messaging.rules import validate_registry
@@ -82,6 +87,22 @@ async def test_fan_out_by_role_with_rendered_snapshot() -> None:
         assert row.dedupe_key is None
         assert row.read_at is None
         assert row.auto_read is False
+
+
+async def test_announcement_is_delivered_with_its_own_text_and_link() -> None:
+    data = {"title": "Novità", "body": "Testo.", "link": "/messages"}
+    async with users(("qa_analyst", True)) as (analyst,):
+        async with seeded(
+            ["inbox"],
+            event_type=ANNOUNCEMENT_PUBLISHED,
+            data=data,
+            params={"roles": ["qa_analyst"]},
+        ):
+            await _drain()
+            rows = await _inbox_for([analyst])
+        assert [(r.title, r.body, r.link, r.severity) for r in rows] == [
+            ("Novità", "Testo.", "/messages", "info")
+        ]
 
 
 async def test_inactive_users_are_skipped() -> None:
