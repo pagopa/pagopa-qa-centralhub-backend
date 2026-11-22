@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 
 from app.deps import DbDep
+from app.messaging.producers.quality_gate import emit_quality_gate_completed
 from app.models.test_metrics import TestSuite, TestExecution, TestRun, FlakyScenario
 from app.schemas.test_metrics import NrtDetailsObject, TestExecutionCreate, TestExecutionOut, FlakyScenarioIn, FlakyScenarioOut
 from app.schemas.test_metrics import TestSuiteOut, TestSuiteCreate, TestRunCreate, TestRunOut, NrtListObject, UpdateNrtsObject, NrtWithLatestRunOut
@@ -85,8 +86,10 @@ async def create_test_run(
             detail="Request body cannot be None",
         )
     model = TestRun(**body.model_dump())
+    is_quality_gate = body.test_origin == "QG"
     try:
-        test_run_out = await test_metrics_svc.create_test_run(db, model)
+        # A Quality Gate run is committed together with its message (see the emitter below).
+        test_run_out = await test_metrics_svc.create_test_run(db, model, commit=not is_quality_gate)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -97,7 +100,10 @@ async def create_test_run(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create test run",
         )
-    return test_run_out
+    if is_quality_gate:
+        await emit_quality_gate_completed(db, test_run_out)
+        await db.refresh(test_run_out)
+    return TestRunOut.model_validate(test_run_out)
 
 @router.post("/test-executions", response_model=list[TestExecutionOut])
 async def create_test_execution(
