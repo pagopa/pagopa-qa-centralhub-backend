@@ -64,3 +64,25 @@ and `docs/superpowers/specs/2026-11-14-flaky-scenarios-management-design.md`.
   (`pagopa-platform-integration-test`, `.github/scripts/qa_hub_adx_sync.py`). A column change
   needs the sync `TableSpec`, the ADX schema in `pagopa-infra`
   (`create_adx_nrt_tables.dexp`) and the Grafana "QA - NRT metrics" queries updated together.
+
+## Messaging Hub
+
+Code: `app/messaging/`, `app/api/v1/messaging.py`, `app/tasks/messaging.py`, `msg_*` tables. Details in
+`README.md` ("QA Messaging Hub"), `docs/messaging/event-catalog.md` and
+`docs/superpowers/specs/2026-11-22-qa-messaging-hub-design.md`.
+
+- **Only `app/messaging` reads or writes `msg_*` tables.** Everyone else uses `publish()`,
+  `clear_condition()` and the inbox service, so the Postgres transport stays replaceable by Service Bus.
+- **Every event type declares `occurrence` or `condition`** in the catalog (startup validation). Scanners call
+  `clear_condition` when their condition is empty; otherwise the next occurrence would stay silent.
+- **Handlers are idempotent and keyed by `event.id`**; delivery is at-least-once, with no ordering guarantee.
+  Handlers never read delivery state and never commit (the dispatcher commits after success).
+- **Routing is evaluated once, at acceptance**, in `rules.py` (not in subscription filters); a rule naming an
+  unknown consumer, role or event type fails at startup.
+- **The inbox stores a rendered snapshot** (title, body, link); a template change never rewrites history. A new
+  message for a condition marks the user's older unread messages with the same key as read (`auto_read`).
+- **`view:inbox` gates the bell and the page; the rules gate the audience** of each message.
+- **Never fail a producer's job because of the hub:** `emit_*` helpers swallow and log errors; scanners run
+  isolated from each other.
+- A new Celery task module must be imported in `app/tasks/__init__.py` or the worker never registers it.
+- The status page sync failure is intentionally not published in phase 1 (inbox flooding).

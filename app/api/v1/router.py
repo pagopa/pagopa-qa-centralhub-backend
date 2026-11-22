@@ -15,6 +15,7 @@ from app.api.v1 import (
     health,
     integrations,
     jira,
+    messaging,
     meta,
     notifications,
     overview,
@@ -53,6 +54,7 @@ router.include_router(dashboards.router, prefix="/dashboards", tags=["dashboards
 router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
 router.include_router(users.router, prefix="/users", tags=["users"])
 router.include_router(roles.router, prefix="/roles", tags=["roles"])
+router.include_router(messaging.router, prefix="/messaging", tags=["messaging"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 router.include_router(tm.router, prefix="/tm", tags=["tm"])
 router.include_router(test_metrics.router, prefix="/test-metrics", tags=["test-metrics"])

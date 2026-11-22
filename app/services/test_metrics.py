@@ -67,11 +67,16 @@ async def get_latest_test_suite_version(
         logger.exception("get_latest_test_suite_version failed")
         raise
 
-async def create_test_run(db: AsyncSession, test_run: TestRun):
+async def create_test_run(db: AsyncSession, test_run: TestRun, *, commit: bool = True):
+    """Store a run. With ``commit=False`` the run is only flushed: the caller commits it together
+    with anything else written in the same transaction (the Quality Gate event)."""
     try:
         db.add(test_run)
-        await db.commit()
-        await db.refresh(test_run)
+        if commit:
+            await db.commit()
+            await db.refresh(test_run)
+        else:
+            await db.flush()
         return test_run
     except Exception:
         logger.exception("create_test_run failed")
@@ -317,6 +322,26 @@ async def list_suites_with_latest_run(
         raise
 
 
+def _is_nrt_origin():  # type: ignore[no-untyped-def]
+    """NRT runs are those whose origin is neither TAS nor QG (as in the NRT list)."""
+    return TestRun.test_origin.not_in(("TAS", "QG"))
+
+
+def _pending_review_filters():  # type: ignore[no-untyped-def]
+    """Runs waiting for review that the lists show: PENDING, with an origin, in the list window."""
+    return (
+        TestRun.revision_result == RevisionResultEnum.PENDING,
+        TestRun.test_origin.is_not(None),
+        TestRun.timestamp_end > _list_window_start(),
+    )
+
+
+async def list_pending_nrt_run_ids(db: AsyncSession) -> list[UUID]:
+    """Ids of the NRT runs pending review: the same set that ``get_pending_runs`` counts."""
+    rows = await db.execute(select(TestRun.id).where(*_pending_review_filters(), _is_nrt_origin()))
+    return list(rows.scalars())
+
+
 async def get_pending_runs(db: AsyncSession) -> PendingRunsOut:
     """Count the runs PENDING review that reviewers find in the NRT and Quality Gate lists.
 
@@ -326,17 +351,13 @@ async def get_pending_runs(db: AsyncSession) -> PendingRunsOut:
     """
     try:
         is_qg = TestRun.test_origin == "QG"
-        is_nrt = TestRun.test_origin.not_in(("TAS", "QG"))
+        is_nrt = _is_nrt_origin()
         row = (
             await db.execute(
                 select(
                     func.count().filter(is_nrt).label("nrt"),
                     func.count().filter(is_qg).label("qg"),
-                ).where(
-                    TestRun.revision_result == RevisionResultEnum.PENDING,
-                    TestRun.test_origin.is_not(None),
-                    TestRun.timestamp_end > _list_window_start(),
-                )
+                ).where(*_pending_review_filters())
             )
         ).one()
         return PendingRunsOut(total=row.nrt + row.qg, nrt=row.nrt, qg=row.qg)

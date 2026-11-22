@@ -90,6 +90,7 @@ app/
 │   ├── status_page_catalog.py  # Catalog CRUD (products, applications) with audit log
 │   ├── status_page_versions.py # Version parsing and comparison
 │   └── ...
+├── messaging/              # QA Messaging Hub: envelope, catalog, rules, bus, transport, dispatcher, inbox, scanners
 └── tasks/                  # Celery/Arq background workers (sync_gpd_position, sync_status_page, ...)
 alembic/                    # DB migration scripts
 tests/                      # pytest test suite
@@ -169,6 +170,68 @@ for host in ("api.dev.platform.pagopa.it", "api.uat.platform.pagopa.it", "api.pl
         print(host, "FAILED", type(e).__name__, e)
 EOF
 ```
+
+## QA Messaging Hub
+
+An event-driven messaging backbone for the QA Hub. Producers deposit **events** (CloudEvents 1.0) that say
+*what happened*; routing rules in code decide *who is told and how*; independent **consumers** act on them.
+The first consumer is the **inbox**: the bell and the "Messaggi" page of the frontend, filtered by the user's
+role. Types, policies and rules: [docs/messaging/event-catalog.md](docs/messaging/event-catalog.md). Design:
+`docs/superpowers/specs/2026-11-22-qa-messaging-hub-design.md`.
+
+```
+producers                    app/messaging                                   consumers
+backend code ──publish()──┐  validate ─► deduplicate ─► route (rules.py) ─►  msg_events + msg_deliveries
+QG ingestion, scanners    │                                                        │ dispatcher (Celery, 30 s)
+POST /messaging/events ───┘                                                        ▼
+                                                                          handler(event, ctx) ─► inbox ─► API ─► bell
+```
+
+- **Producers** call `publish(session, event)` (no commit: the event is written in the caller's transaction, a
+  transactional outbox) and, for periodic scans, `clear_condition(session, key)`. After committing they may call
+  `wake_dispatcher()`; the beat schedule recovers from any failure. External producers use
+  `POST /api/v1/messaging/events`; like the rest of the API it is reachable only through Azure APIM (subscription
+  key), so it has no key of its own.
+- **Deduplication.** Every event type declares `occurrence` or `condition`. A `condition` (for example
+  "NRT runs pending review") is reported once and again only when a new member appears.
+- **Delivery** is at-least-once with no ordering: a Celery task claims due deliveries with a lease, runs the
+  handler outside any transaction (60 s timeout), and records the result. Failures back off 1 min, 5 min, 30 min,
+  2 h, 6 h; the sixth failure marks the delivery `DEAD`. Handlers must be idempotent and keyed by `event.id`.
+- **Inbox API** (`/api/v1/messaging`): `GET /inbox`, `GET /inbox/summary` (`unread`, `total`, `max_unread_severity`,
+  so the bell can tell "no messages" from "all read"), `POST /inbox/{id}/read`, `POST /inbox/read-all`. Permission
+  `view:inbox` (off for `guest`). **Interim identity:** until `verify_jwt` is implemented the routes read the
+  user's email from the `X-User-Email` header, as trustworthy as the rest of the unauthenticated API; an unknown
+  or inactive user gets an empty inbox. Only `get_inbox_user` changes when real authentication lands.
+- **Settings:** `MESSAGING_RETENTION_DAYS` (90), `MESSAGING_SCAN_INTERVAL_S` (900),
+  `MESSAGING_DISPATCH_INTERVAL_S` (30). Tasks: `app.tasks.messaging.dispatch_messages`, `scan_conditions`,
+  `purge_messages`.
+- **Re-queue a dead delivery:**
+  `UPDATE msg_deliveries SET status='PENDING', attempts=0, next_attempt_at=now(), lease_until=NULL WHERE id='<id>';`
+
+### Replacing Postgres with Azure Service Bus
+
+The architecture is built so that Azure Service Bus can replace the Postgres transport later without touching
+producers, rules or handlers. Nothing needs it today (all producers are in or reach the backend, volumes are tens
+of events per day); consider it when a consumer or producer cannot reach the backend, throughput grows well
+beyond tens of events per hour, or native fan-out and dead-letter operations become necessary.
+
+*Stays stable:* the producer contract (`publish()`, the ingest route, the CloudEvents envelope); routing rules and
+their output (deliveries with `consumer` and `params`); deduplication (it runs at acceptance, before any
+transport); scanners; consumer handlers (`handle(event, ctx)`); the inbox table, API and frontend.
+
+*Changes:* only what moves a delivery from "accepted" to "handler called" (`app/messaging/transport.py`).
+`msg_events` and `msg_deliveries` become the **outbox** (events are still written in the business transaction); a
+relay task publishes one Service Bus message per delivery to a topic with application properties `consumer` and
+the delivery params and `MessageId = event.id`; one subscription per consumer with a trivial filter on
+`consumer`; a receiver per consumer calls the same handler. Service Bus provides locks, retry and dead-letter, so
+the custom backoff is retired for that transport. A consumer outside the backend (for example an Azure Function
+posting to Slack) reads its subscription directly; the CloudEvents envelope is its contract.
+
+*Rules that keep this true* (enforced in review): (1) only `app/messaging` reads or writes `msg_*` tables;
+(2) handlers are idempotent and keyed by `event.id`; (3) nothing depends on delivery order across events;
+(4) handlers do not query delivery state; (5) routing stays in `rules.py`, not in subscription filters; (6) the
+transport sits behind the `Transport` interface (`enqueue`, `drain_due`), and
+`tests/messaging/test_transport_contract.py` defines what any implementation must satisfy.
 
 ## Environment variables
 

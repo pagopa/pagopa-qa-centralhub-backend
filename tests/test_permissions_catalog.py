@@ -9,7 +9,7 @@ def test_action_keys_match_catalog() -> None:
 
 
 def test_action_catalog_size() -> None:
-    assert len(ACTION_CATALOG) == 30
+    assert len(ACTION_CATALOG) == 31
 
 
 def test_quality_gate_report_is_readable_by_every_role_including_guest() -> None:
@@ -95,3 +95,11 @@ def test_status_page_actions_defaults() -> None:
     }
     assert by_key["view:status_page"]["category"] == "Release Status"
     assert by_key["manage:status_page"]["category"] == "Release Status"
+
+
+def test_inbox_permission_is_on_for_qa_roles_and_off_for_guest() -> None:
+    entry = next(e for e in ACTION_CATALOG if e["key"] == "view:inbox")
+    assert entry["defaults"] == {
+        "qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False,
+    }
+    assert entry["category"] == "Generale"
