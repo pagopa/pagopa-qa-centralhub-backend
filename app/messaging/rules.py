@@ -16,6 +16,7 @@ from typing import Any
 
 from app.core.permissions import EDITABLE_ROLES
 from app.messaging.catalog import (
+    ANNOUNCEMENT_PUBLISHED,
     EVENT_TYPES,
     NRT_REVIEWS_PENDING,
     QG_RUN_COMPLETED,
@@ -76,6 +77,11 @@ RULES: tuple[Rule, ...] = (
     Rule(
         "sanp-failing",
         Match(type=SANP_CHECKS_FAILING),
+        (DeliverySpec("inbox", {"roles": list(_ALL_QA_ROLES)}),),
+    ),
+    Rule(
+        "announcement",
+        Match(type=ANNOUNCEMENT_PUBLISHED),
         (DeliverySpec("inbox", {"roles": list(_ALL_QA_ROLES)}),),
     ),
 )

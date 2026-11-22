@@ -21,6 +21,7 @@ Event types are named `it.pagopa.qa.<domain>.<entity>.<verb>`.
 | `it.pagopa.qa.quality_gate.run.completed` | `occurrence` (id = UUIDv5 of the run id) | Backend, when `POST /api/v1/test-metrics/test-runs` stores a run with `test_origin = QG` | `warning` when `failed + broken + skipped > 0`, otherwise `info` | `run_id`, `test_object`, `test_type`, `environment`, `scenario_qty`, `passed`, `failed`, `broken`, `skipped` | `/quality-gate/report/{run_id}` |
 | `it.pagopa.qa.nrt.reviews.pending` | `condition`, key `nrt.reviews.pending`, members = run ids | NRT scanner (every `MESSAGING_SCAN_INTERVAL_S`) | `info` | `count`, `run_ids` (full list) | `/nrts` |
 | `it.pagopa.qa.sanp_health.checks.failing` | `condition`, key `sanp_health.checks.failing`, members = `<environment>:<spec_name>` | SANP Health scanner | `warning` | `ko`, `warning`, `items` (full list) | `/sanp-health` |
+| `it.pagopa.qa.announcement.published` | `occurrence` (id supplied by the publisher, a UUID) | Any publisher through `POST /api/v1/messaging/events` | `info` (or as chosen) | `title` (1-200 chars), `body` (1-2000 chars), optional `link` (an in-app path starting with a single `/`) | `data.link` |
 
 The NRT set is the one the NRT list shows: `revision_result = PENDING`, origin neither `TAS` nor `QG`,
 finished within the list window (`NRT_LIST_WINDOW_DAYS`). The SANP members omit the status, so a check
@@ -35,6 +36,7 @@ The status page sync failure is intentionally **not** published in phase 1, to a
 | `qg-completed` | Quality Gate run completed, any severity | `qa_analyst`, `qa_engineer`, `qa_manager` |
 | `nrt-pending-review` | NRT reviews pending | `qa_analyst`, `qa_engineer`, `qa_manager` |
 | `sanp-failing` | SANP Health checks failing | `qa_analyst`, `qa_engineer`, `qa_manager` |
+| `announcement` | Free-text announcement | `qa_analyst`, `qa_engineer`, `qa_manager` |
 
 The `superadmin` role is not listed in any rule on purpose: the inbox consumer always adds it to the
 audience, so a superadmin receives every inbox message (`ALWAYS_RECIPIENT_ROLES` in
@@ -50,6 +52,21 @@ curl -X POST "$HUB/api/v1/messaging/events" \
   -H "Content-Type: application/json" -H "Ocp-Apim-Subscription-Key: $APIM_KEY" \
   -d '{"specversion":"1.0","id":"'"$(uuidgen | tr A-Z a-z)"'","source":"/example","severity":"info",
        "type":"it.pagopa.qa.nrt.reviews.pending","data":{"count":1,"run_ids":["r-1"]}}'
+```
+
+### Announcements
+
+An announcement is a free-text message for everybody who has the inbox (`guest` has no `view:inbox`
+permission, so it is not in the audience). The text is stored as sent, so it can be published without a
+deployment. Reusing an `id` publishes nothing, so a retry never duplicates the message. Users created
+after the announcement do not receive it (the audience is resolved at delivery time).
+
+```bash
+curl -X POST "$HUB/api/v1/messaging/events" \
+  -H "Content-Type: application/json" -H "Ocp-Apim-Subscription-Key: $APIM_KEY" \
+  -d '{"specversion":"1.0","id":"'"$(uuidgen | tr A-Z a-z)"'","source":"/announcements","severity":"info",
+       "type":"it.pagopa.qa.announcement.published",
+       "data":{"title":"Title","body":"Text of the announcement.","link":"/messages"}}'
 ```
 
 `202` accepted, `200` duplicate id or suppressed condition, `422` invalid envelope, unknown

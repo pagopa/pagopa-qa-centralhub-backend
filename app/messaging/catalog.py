@@ -11,13 +11,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal, NamedTuple
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from app.messaging.envelope import CloudEvent
 
 QG_RUN_COMPLETED = "it.pagopa.qa.quality_gate.run.completed"
 NRT_REVIEWS_PENDING = "it.pagopa.qa.nrt.reviews.pending"
 SANP_CHECKS_FAILING = "it.pagopa.qa.sanp_health.checks.failing"
+ANNOUNCEMENT_PUBLISHED = "it.pagopa.qa.announcement.published"
 
 # Identity of each condition (the deduplication key), shared with the scanners that clear it.
 NRT_PENDING_KEY = "nrt.reviews.pending"
@@ -55,6 +56,21 @@ class SanpFailingData(BaseModel):
     ko: int
     warning: int
     items: list[str]
+
+
+class AnnouncementData(BaseModel):
+    """A free-text announcement; the link, when present, must be an in-app path."""
+
+    title: str = Field(min_length=1, max_length=200)
+    body: str = Field(min_length=1, max_length=2000)
+    link: str | None = Field(default=None, max_length=500)
+
+    @field_validator("link")
+    @classmethod
+    def _internal_link(cls, value: str | None) -> str | None:
+        if value is not None and (not value.startswith("/") or value.startswith("//")):
+            raise ValueError("link must be an in-app path starting with a single '/'")
+        return value
 
 
 # Alias defined outside the dataclass: inside it, the field named ``type`` shadows the builtin.
@@ -111,6 +127,11 @@ def _render_sanp(event: CloudEvent) -> RenderedMessage:
     )
 
 
+def _render_announcement(event: CloudEvent) -> RenderedMessage:
+    data = AnnouncementData.model_validate(event.data)
+    return RenderedMessage(data.title, data.body, data.link)
+
+
 def _nrt_members(event: CloudEvent) -> frozenset[str]:
     return frozenset(NrtPendingData.model_validate(event.data).run_ids)
 
@@ -122,6 +143,12 @@ def _sanp_members(event: CloudEvent) -> frozenset[str]:
 EVENT_TYPES: dict[str, EventType] = {
     QG_RUN_COMPLETED: EventType(
         type=QG_RUN_COMPLETED, policy="occurrence", data_model=QgRunData, render=_render_qg
+    ),
+    ANNOUNCEMENT_PUBLISHED: EventType(
+        type=ANNOUNCEMENT_PUBLISHED,
+        policy="occurrence",
+        data_model=AnnouncementData,
+        render=_render_announcement,
     ),
     NRT_REVIEWS_PENDING: EventType(
         type=NRT_REVIEWS_PENDING,
