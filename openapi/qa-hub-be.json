@@ -4683,27 +4683,15 @@
         "summary": "Ingest Event",
         "description": "Accept one CloudEvent (202), or report it as duplicate or suppressed (200).",
         "operationId": "ingest_event_api_v1_messaging_events_post",
-        "parameters": [
-          {
-            "name": "x-hub-ingest-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "title": "X-Hub-Ingest-Key",
-              "type": "string",
-              "nullable": true
-            }
-          }
-        ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CloudEvent"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "202": {

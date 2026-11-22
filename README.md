@@ -190,7 +190,8 @@ POST /messaging/events ───┘                                             
 - **Producers** call `publish(session, event)` (no commit: the event is written in the caller's transaction, a
   transactional outbox) and, for periodic scans, `clear_condition(session, key)`. After committing they may call
   `wake_dispatcher()`; the beat schedule recovers from any failure. External producers use
-  `POST /api/v1/messaging/events` (header `X-Hub-Ingest-Key`, setting `MESSAGING_INGEST_KEY`; 503 when unset).
+  `POST /api/v1/messaging/events`; like the rest of the API it is reachable only through Azure APIM (subscription
+  key), so it has no key of its own.
 - **Deduplication.** Every event type declares `occurrence` or `condition`. A `condition` (for example
   "NRT runs pending review") is reported once and again only when a new member appears.
 - **Delivery** is at-least-once with no ordering: a Celery task claims due deliveries with a lease, runs the
@@ -201,7 +202,7 @@ POST /messaging/events ───┘                                             
   `view:inbox` (off for `guest`). **Interim identity:** until `verify_jwt` is implemented the routes read the
   user's email from the `X-User-Email` header, as trustworthy as the rest of the unauthenticated API; an unknown
   or inactive user gets an empty inbox. Only `get_inbox_user` changes when real authentication lands.
-- **Settings:** `MESSAGING_INGEST_KEY`, `MESSAGING_RETENTION_DAYS` (90), `MESSAGING_SCAN_INTERVAL_S` (900),
+- **Settings:** `MESSAGING_RETENTION_DAYS` (90), `MESSAGING_SCAN_INTERVAL_S` (900),
   `MESSAGING_DISPATCH_INTERVAL_S` (30). Tasks: `app.tasks.messaging.dispatch_messages`, `scan_conditions`,
   `purge_messages`.
 - **Re-queue a dead delivery:**

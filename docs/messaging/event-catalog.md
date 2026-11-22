@@ -38,14 +38,15 @@ The status page sync failure is intentionally **not** published in phase 1, to a
 
 ## Publishing from outside the backend
 
-`POST /api/v1/messaging/events` with the header `X-Hub-Ingest-Key` and a CloudEvent body:
+`POST /api/v1/messaging/events` with a CloudEvent body. Like the rest of the API it is exposed through
+Azure APIM, so callers send their APIM subscription key (the route has no key of its own):
 
 ```bash
 curl -X POST "$HUB/api/v1/messaging/events" \
-  -H "Content-Type: application/json" -H "X-Hub-Ingest-Key: $MESSAGING_INGEST_KEY" \
+  -H "Content-Type: application/json" -H "Ocp-Apim-Subscription-Key: $APIM_KEY" \
   -d '{"specversion":"1.0","id":"'"$(uuidgen | tr A-Z a-z)"'","source":"/example","severity":"info",
        "type":"it.pagopa.qa.nrt.reviews.pending","data":{"count":1,"run_ids":["r-1"]}}'
 ```
 
-`202` accepted, `200` duplicate id or suppressed condition, `401` wrong key, `422` invalid envelope, unknown
-type or `data` that does not match the catalog, `503` when `MESSAGING_INGEST_KEY` is not set.
+`202` accepted, `200` duplicate id or suppressed condition, `422` invalid envelope, unknown
+type or `data` that does not match the catalog.

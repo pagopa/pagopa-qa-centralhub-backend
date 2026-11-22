@@ -35,8 +35,7 @@ class Settings(BaseSettings):
     # GitHub integration
     github_token: str = ""
 
-    # QA Messaging Hub: shared secret for the event ingest route, retention and task intervals.
-    messaging_ingest_key: str = ""
+    # QA Messaging Hub: retention and task intervals.
     messaging_retention_days: int = 90
     messaging_scan_interval_s: float = 900.0
     messaging_dispatch_interval_s: float = 30.0

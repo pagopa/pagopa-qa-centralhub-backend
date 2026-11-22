@@ -243,10 +243,9 @@ outbox): the business change and the event commit or roll back together.
   through `run_async_task`).
 - External: `POST /api/v1/messaging/events` takes one CloudEvent (structured JSON) and returns 202 with
   the event id, 200 when the same id was already accepted, 422 for an invalid envelope, unknown type or
-  invalid `data`. It is protected with a shared secret header `X-Hub-Ingest-Key`
-  (`MESSAGING_INGEST_KEY`, 401 when wrong or missing, 503 when unset) and is meant to be exposed through
-  APIM like the other routes. This is an interim guard consistent with the rest of the backend until
-  `verify_jwt` exists; the secret is never logged.
+  invalid `data`. It has no authentication of its own: like every route of the backend it is exposed only
+  through Azure APIM, which requires a subscription key. (An earlier draft had a shared-secret header,
+  `X-Hub-Ingest-Key`; it was dropped because APIM already provides this protection.)
 - Every accepted event writes an audit-log row only for the HTTP route (`messaging.event.ingest`), not
   for in-process publishes, to keep the audit table free of noise.
 
@@ -523,13 +522,11 @@ These were decided without an explicit answer from the owner; each can be revers
 - Fan-out on write for the inbox (new role holders do not see past messages).
 - 90-day retention for events, deliveries and inbox rows.
 - The frontend polls every 60 s; no SSE or WebSocket in phase 1.
-- Shared-secret header for the ingest route as the interim guard.
+- The ingest route has no key of its own; Azure APIM (subscription key) protects it like the rest of the API.
 - `X-User-Email` as the interim identity for inbox routes.
 - Quality Gate completion is published in-process at test-run ingestion instead of by TAS.
 - `FOR UPDATE SKIP LOCKED` with a lease column instead of an advisory lock for the dispatcher.
-- The ingest key `MESSAGING_INGEST_KEY` is provisioned like the other secrets: a Key Vault secret
-  referenced by name in `envSecret` of the Helm values for dev, uat and prod; APIM re-import follows the
-  existing OpenAPI regeneration step.
+- No new secret is needed; after deploying, re-import the regenerated OpenAPI in APIM.
 - A failed QG run is `warning`, a passing one `info`; `critical` is reserved for external alerts.
 - Deduplication is a property of the event type (accept or suppress before routing), not of each routing
   rule; "something new" means a member not present in the last reported set.

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 import json
 import uuid
 from typing import Annotated, Literal
@@ -9,7 +8,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, 
 from pydantic import ValidationError
 from sqlalchemy import func, select
 
-from app.config import settings
 from app.deps import DbDep
 from app.messaging import PublishStatus, inbox_service, publish, wake_dispatcher
 from app.messaging.catalog import UnknownEventType
@@ -91,24 +89,10 @@ async def read_one(inbox_id: uuid.UUID, db: DbDep, user: InboxUser) -> MarkReadO
     return MarkReadOut(updated=1)
 
 
-def require_ingest_key(
-    x_hub_ingest_key: Annotated[str | None, Header()] = None,
-) -> None:
-    """Interim guard for external producers: a shared secret in ``X-Hub-Ingest-Key``."""
-    expected = settings.messaging_ingest_key
-    if not expected:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Event ingest is not configured")
-    if not x_hub_ingest_key or not hmac.compare_digest(
-        x_hub_ingest_key.encode(), expected.encode()
-    ):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid ingest key")
-
-
 @router.post(
     "/events",
     response_model=EventIngestOut,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_ingest_key)],
 )
 async def ingest_event(event: CloudEvent, db: DbDep, response: Response) -> EventIngestOut:
     """Accept one CloudEvent (202), or report it as duplicate or suppressed (200)."""

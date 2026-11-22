@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # ruff: noqa: S101
-import logging
 import uuid
 from collections.abc import AsyncIterator, Iterator
 
@@ -10,7 +9,6 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 
-from app.config import settings
 from app.deps import get_db
 from app.main import app
 from app.messaging import rules as rules_module
@@ -21,7 +19,6 @@ from app.models.messaging import MsgDedupe, MsgEvent
 from tests._db import TestSession, get_test_db
 
 URL = "/api/v1/messaging/events"
-KEY = "ingest-secret-for-tests"
 COND = "it.pagopa.qa.test.condition.reported"
 
 
@@ -33,7 +30,6 @@ class CondData(BaseModel):
 @pytest.fixture
 async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
     app.dependency_overrides[get_db] = get_test_db
-    monkeypatch.setattr(settings, "messaging_ingest_key", KEY)
     monkeypatch.setattr("app.api.v1.messaging.wake_dispatcher", lambda: None)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
@@ -83,33 +79,18 @@ async def _cleanup(event_ids: list[str], keys: list[str]) -> None:
         await s.commit()
 
 
-async def test_ingest_is_503_when_the_key_is_not_configured(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(settings, "messaging_ingest_key", "")
-    response = await client.post(URL, json=_body(), headers={"X-Hub-Ingest-Key": KEY})
-    assert response.status_code == 503
-
-
-async def test_ingest_is_401_without_or_with_a_wrong_key(client: AsyncClient) -> None:
-    assert (await client.post(URL, json=_body())).status_code == 401
-    wrong = await client.post(URL, json=_body(), headers={"X-Hub-Ingest-Key": "nope"})
-    assert wrong.status_code == 401
-
-
 async def test_accepted_then_suppressed_for_the_same_condition(
     client: AsyncClient, cond: None
 ) -> None:
-    headers = {"X-Hub-Ingest-Key": KEY}
     first = _body()
     key = first["data"]["key"]  # type: ignore[index]
     second = _body(data={"key": key, "items": ["a"]})
     try:
-        accepted = await client.post(URL, json=first, headers=headers)
+        accepted = await client.post(URL, json=first)
         assert accepted.status_code == 202
         assert accepted.json() == {"id": first["id"], "status": "accepted"}
 
-        suppressed = await client.post(URL, json=second, headers=headers)
+        suppressed = await client.post(URL, json=second)
         assert suppressed.status_code == 200
         assert suppressed.json()["status"] == "suppressed"
     finally:
@@ -129,10 +110,9 @@ async def test_repeated_event_id_is_a_duplicate(client: AsyncClient) -> None:
         "skipped": 0,
     }
     body = _body(event_id, type=QG_RUN_COMPLETED, data=data)
-    headers = {"X-Hub-Ingest-Key": KEY}
     try:
-        assert (await client.post(URL, json=body, headers=headers)).status_code == 202
-        again = await client.post(URL, json=body, headers=headers)
+        assert (await client.post(URL, json=body)).status_code == 202
+        again = await client.post(URL, json=body)
         assert again.status_code == 200
         assert again.json()["status"] == "duplicate"
     finally:
@@ -140,27 +120,21 @@ async def test_repeated_event_id_is_a_duplicate(client: AsyncClient) -> None:
 
 
 async def test_invalid_events_are_422(client: AsyncClient) -> None:
-    headers = {"X-Hub-Ingest-Key": KEY}
-    unknown = await client.post(URL, json=_body(type="it.pagopa.qa.nope.x.y"), headers=headers)
+    unknown = await client.post(URL, json=_body(type="it.pagopa.qa.nope.x.y"))
     assert unknown.status_code == 422
-    bad_severity = await client.post(URL, json=_body(severity="fatal"), headers=headers)
+    bad_severity = await client.post(URL, json=_body(severity="fatal"))
     assert bad_severity.status_code == 422
-    bad_data = await client.post(
-        URL, json=_body(type=QG_RUN_COMPLETED, data={"run_id": "only"}), headers=headers
-    )
+    bad_data = await client.post(URL, json=_body(type=QG_RUN_COMPLETED, data={"run_id": "only"}))
     assert bad_data.status_code == 422
-    bad_id = await client.post(URL, json=_body("not-a-uuid"), headers=headers)
+    bad_id = await client.post(URL, json=_body("not-a-uuid"))
     assert bad_id.status_code == 422
 
 
-async def test_audit_row_is_written_and_the_key_is_never_logged(
-    client: AsyncClient, cond: None, caplog: pytest.LogCaptureFixture
-) -> None:
+async def test_audit_row_is_written_for_an_accepted_event(client: AsyncClient, cond: None) -> None:
     body = _body()
     key = body["data"]["key"]  # type: ignore[index]
     try:
-        with caplog.at_level(logging.DEBUG):
-            response = await client.post(URL, json=body, headers={"X-Hub-Ingest-Key": KEY})
+        response = await client.post(URL, json=body)
         assert response.status_code == 202
         async with TestSession() as s:
             row = (
@@ -169,6 +143,5 @@ async def test_audit_row_is_written_and_the_key_is_never_logged(
         assert row.action == "messaging.event.ingest"
         assert row.resource_type == "msg_event"
         assert COND in (row.detail or "")
-        assert KEY not in caplog.text
     finally:
         await _cleanup([str(body["id"])], [key])
