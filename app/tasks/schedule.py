@@ -46,6 +46,20 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.sync_ea.sync_ea",
         "schedule": crontab(minute=17, hour=4, day_of_week="mon"),  # lunedì 04:17 UTC
     },
+    "dispatch-messages": {
+        "task": "app.tasks.messaging.dispatch_messages",
+        "schedule": settings.messaging_dispatch_interval_s,
+        "options": {"expires": settings.messaging_dispatch_interval_s},
+    },
+    "scan-conditions": {
+        "task": "app.tasks.messaging.scan_conditions",
+        "schedule": settings.messaging_scan_interval_s,
+        "options": {"expires": settings.messaging_scan_interval_s},
+    },
+    "purge-messages-daily": {
+        "task": "app.tasks.messaging.purge_messages",
+        "schedule": crontab(minute=30, hour=3),  # 03:30 UTC
+    },
     "recompute-flaky-scores-daily": {
         "task": "app.tasks.recompute_flaky_scores.recompute_flaky_scores",
         "schedule": crontab(minute=0, hour=12, nowfun=_now_rome),  # 12:00 Europe/Rome
