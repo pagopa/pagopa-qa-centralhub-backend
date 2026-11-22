@@ -13,6 +13,7 @@ from app.messaging.inbox import merge_roles
 from app.messaging.rules import validate_registry
 from app.messaging.transport import PostgresTransport
 from app.models.messaging import MsgDelivery, MsgInbox
+from app.models.user import User
 from tests._db import TestSession
 from tests.messaging.helpers import NOW, get_delivery, seeded, users
 
@@ -96,6 +97,19 @@ async def test_inactive_users_are_skipped() -> None:
         assert {r.user_id for r in rows} == {active}
 
 
+async def test_superadmin_always_receives_even_when_not_in_the_audience() -> None:
+    async with users(("superadmin", True), ("guest", True)) as (admin, guest):
+        async with seeded(
+            ["inbox"],
+            event_type=QG_RUN_COMPLETED,
+            data=QG_DATA,
+            params={"roles": ["qa_manager"]},
+        ):
+            await _drain()
+            rows = await _inbox_for([admin, guest])
+        assert {r.user_id for r in rows} == {admin}
+
+
 async def test_no_matching_users_ends_done_without_rows() -> None:
     async with seeded(
         ["inbox"], event_type=QG_RUN_COMPLETED, data=QG_DATA, params={"roles": []}
@@ -105,7 +119,11 @@ async def test_no_matching_users_ends_done_without_rows() -> None:
         assert delivery.status == "DONE"
         async with TestSession() as s:
             rows = (
-                await s.execute(select(MsgInbox).where(MsgInbox.event_id == seed.event_id))
+                await s.execute(
+                    select(MsgInbox)
+                    .join(User, User.id == MsgInbox.user_id)
+                    .where(MsgInbox.event_id == seed.event_id, User.role != "superadmin")
+                )
             ).all()
         assert rows == []
 

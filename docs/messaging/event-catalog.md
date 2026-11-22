@@ -36,6 +36,10 @@ The status page sync failure is intentionally **not** published in phase 1, to a
 | `nrt-pending-review` | NRT reviews pending | `qa_analyst`, `qa_engineer`, `qa_manager` |
 | `sanp-failing` | SANP Health checks failing | `qa_analyst`, `qa_engineer`, `qa_manager` |
 
+The `superadmin` role is not listed in any rule on purpose: the inbox consumer always adds it to the
+audience, so a superadmin receives every inbox message (`ALWAYS_RECIPIENT_ROLES` in
+`app/messaging/inbox.py`).
+
 ## Publishing from outside the backend
 
 `POST /api/v1/messaging/events` with a CloudEvent body. Like the rest of the API it is exposed through

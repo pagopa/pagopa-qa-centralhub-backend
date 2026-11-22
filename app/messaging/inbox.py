@@ -22,6 +22,9 @@ from app.models.user import User
 
 logger = structlog.get_logger(__name__)
 
+# The superadmin is outside every audience list on purpose: it always receives every inbox message.
+ALWAYS_RECIPIENT_ROLES = ("superadmin",)
+
 
 def merge_roles(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     """Two inbox deliveries for the same event become one addressed to the union of the roles."""
@@ -29,7 +32,7 @@ def merge_roles(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
 
 
 async def inbox_handler(event: CloudEvent, ctx: DeliveryContext) -> None:
-    roles = list(ctx.params.get("roles", []))
+    roles = sorted({*ctx.params.get("roles", []), *ALWAYS_RECIPIENT_ROLES})
     event_type = get_event_type(event.type)
     message = event_type.render(event)
     dedupe_key = (
