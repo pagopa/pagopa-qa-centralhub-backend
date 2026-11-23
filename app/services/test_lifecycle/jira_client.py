@@ -16,27 +16,8 @@ import httpx
 from app.config import settings
 
 StatusCategory = Literal["new", "indeterminate", "done"]
-_ISSUE_KEY_MAX = 32
-_PROJECT_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
-
-
-def _is_issue_key(key: str) -> bool:
-    """`PROGETTO-123`: progetto di 2+ caratteri A-Z/0-9/_ che inizia con una lettera, numero
-    senza zeri iniziali. Controllo carattere per carattere, senza regex (input dell'utente)."""
-    if not key or len(key) > _ISSUE_KEY_MAX:
-        return False
-    project, sep, number = key.rpartition("-")
-    return (
-        bool(sep)
-        and len(project) >= 2
-        and "A" <= project[0] <= "Z"
-        and all(ch in _PROJECT_CHARS for ch in project)
-        and number.isascii()
-        and number.isdigit()
-        and number[0] != "0"
-    )
-
-
+# `PROGETTO-123`. Ripetizioni limitate: niente backtracking costoso su input dell'utente.
+_ISSUE_KEY_RE = re.compile(r"[A-Z][A-Z0-9_]{1,15}-[1-9][0-9]{0,9}")
 _JQL_TEXT_STRIP = re.compile(r'[\\"\'+\-&|!(){}\[\]^~*?:/]')
 
 
@@ -138,7 +119,7 @@ class TlJiraClient:
 
     async def get_issue(self, key: str) -> JiraIssue | None:
         # la chiave può arrivare dall'utente: solo una vera chiave Jira entra nell'URL
-        if not _is_issue_key(key):
+        if len(key) > 32 or not _ISSUE_KEY_RE.fullmatch(key):
             raise TlJiraError(400, "chiave Jira non valida")
         resp = await self._request(
             "GET",
