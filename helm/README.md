@@ -27,6 +27,10 @@ Only `dev` is currently configured — copy and adapt for `uat`/`prod` when need
 
 ## Local commands
 
+All `microservice-chart.envConfig` values must be strings, including numbers
+and booleans. Quote them in values files and use `--set-string` for overrides;
+Helm validates this requirement before rendering or deploying.
+
 ```bash
 # Pull chart dependencies (downloads microservice-chart 7.5.0)
 helm dependency build ./helm
