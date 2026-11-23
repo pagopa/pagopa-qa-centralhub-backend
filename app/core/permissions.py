@@ -20,6 +20,12 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": True},
     },
     {
+        "key": "view:inbox",
+        "label": "Messaggi",
+        "category": "Generale",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
+    },
+    {
         "key": "view:bdd",
         "label": "Gherkin Generator (visualizza)",
         "category": "BDD",

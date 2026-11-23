@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # GitHub integration
     github_token: str = ""
 
+    # QA Messaging Hub: retention and task intervals.
+    messaging_retention_days: int = 90
+    messaging_scan_interval_s: float = 900.0
+    messaging_dispatch_interval_s: float = 30.0
+
     # Release Status (status page port): per-environment platform info endpoints and sync tuning.
     status_page_dev_base_url: str = "https://api.dev.platform.pagopa.it"
     status_page_uat_base_url: str = "https://api.uat.platform.pagopa.it"

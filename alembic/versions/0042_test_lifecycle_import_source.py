@@ -1,7 +1,7 @@
 """test lifecycle: feature import source (importa da Git)
 
-Revision ID: 0041
-Revises: 0040
+Revision ID: 0042
+Revises: 0041
 Create Date: 2026-11-21
 """
 
@@ -12,8 +12,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision = "0041"
-down_revision = "0040"
+revision = "0042"
+down_revision = "0041"
 branch_labels = None
 depends_on = None
 
