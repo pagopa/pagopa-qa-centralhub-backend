@@ -76,3 +76,13 @@ async def test_local_delete_file(local_client):
 
 def test_feature_has_import_source():
     assert TlFeature.__table__.c.import_source is not None
+
+
+@pytest.mark.parametrize(
+    "rest",
+    ["main/../../../x.feature", "main/src/./x.feature", "main//x.feature", "ma\\in/x.feature"],
+)
+async def test_link_with_dot_segments_or_odd_chars_is_rejected(rest):
+    url = f"https://github.com/{settings.tl_repo}/blob/{rest}"
+    with pytest.raises(ImportUrlInvalid):
+        await resolve_blob(FakeGitClient(), url)

@@ -184,3 +184,12 @@ def test_not_configured_raises(monkeypatch):
     monkeypatch.setattr(settings, "jira_email", "a@b.c")
     monkeypatch.setattr(settings, "jira_api_token", "t")
     assert isinstance(jira_client.get_jira_client(), TlJiraClient)
+
+
+@pytest.mark.parametrize("key", ["../../myself", "PQ-1/../../user", "pq-1", "PQ-1?x=1", ""])
+async def test_get_issue_rejects_keys_that_are_not_issue_keys(key):
+    c, seen = _client(lambda req: httpx.Response(200, json=_issue()))
+    with pytest.raises(TlJiraError) as exc:
+        await c.get_issue(key)
+    assert exc.value.status == 400
+    assert seen == []

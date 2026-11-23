@@ -33,6 +33,11 @@ def parse_blob_url(url: str) -> tuple[str, str]:
     if not m:
         raise ImportUrlInvalid("Il link deve puntare a un file (…/blob/<branch>/<percorso>)")
     repo, rest = m.group(1), m.group(2).strip("/")
+    # branch e percorso finiscono negli URL delle API GitHub: niente segmenti vuoti, `.`, `..`
+    if any(seg in ("", ".", "..") for seg in rest.split("/")) or any(
+        ch in rest for ch in "\\?#"
+    ) or any(ord(ch) < 32 for ch in rest):
+        raise ImportUrlInvalid("Il link contiene un percorso non valido")
     # TL_REPO vuoto (modalità Git locale): si accetta il repository del link
     if settings.tl_repo and repo.lower() != settings.tl_repo.lower():
         raise ImportUrlInvalid(f"Il file deve stare nel repository {settings.tl_repo}")

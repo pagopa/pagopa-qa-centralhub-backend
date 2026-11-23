@@ -14,6 +14,27 @@ from app.config import settings
 
 _PAGE_SIZE = 100
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
+# Branch e percorsi possono arrivare da link incollati dagli utenti: solo caratteri che non
+# cambiano l'API chiamata (niente `..`, `?`, `#`, `\`, caratteri di controllo).
+_REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+@/-]{0,254}")
+_PATH_SEGMENT_RE = re.compile(r"[^\x00-\x1f\x7f/?#\\]{1,255}")
+
+def _ref(ref: str) -> str:
+    """Branch o sha validato e codificato per l'URL; `TlGitError(400)` se non è sicuro."""
+    if not _REF_RE.fullmatch(ref) or ".." in ref or "//" in ref or ref.endswith(("/", ".")):
+        raise TlGitError(400, "nome di branch non valido")
+    return quote(ref, safe="/")
+
+
+def _path(path: str) -> str:
+    """Percorso di file validato (segmenti non vuoti, niente `.`/`..`) e codificato."""
+    segments = path.split("/")
+    if len(path) > 1024 or not all(
+        _PATH_SEGMENT_RE.fullmatch(seg) and seg not in (".", "..") for seg in segments
+    ):
+        raise TlGitError(400, "percorso del file non valido")
+    return quote(path, safe="/")
+
 
 PullState = Literal["open", "merged", "closed"]
 FileStatus = Literal["added", "modified", "removed", "renamed"]
@@ -125,7 +146,7 @@ class TlGitClient:
         return resp
 
     async def head_sha(self, branch: str) -> str:
-        resp = await self._request("GET", f"git/ref/heads/{quote(branch, safe='/')}")
+        resp = await self._request("GET", f"git/ref/heads/{_ref(branch)}")
         try:
             return _json(resp)["object"]["sha"]
         except (KeyError, TypeError) as exc:
@@ -133,7 +154,7 @@ class TlGitClient:
 
     async def branch_exists(self, branch: str) -> bool:
         resp = await self._request(
-            "GET", f"git/ref/heads/{quote(branch, safe='/')}", ok_statuses=(404,)
+            "GET", f"git/ref/heads/{_ref(branch)}", ok_statuses=(404,)
         )
         return resp.status_code != 404
 
@@ -151,13 +172,13 @@ class TlGitClient:
         """Riporta il branch su `sha` (force): usato per riallineare il branch di una PR a main."""
         await self._request(
             "PATCH",
-            f"git/refs/heads/{quote(branch, safe='/')}",
+            f"git/refs/heads/{_ref(branch)}",
             json={"sha": sha, "force": True},
         )
 
     async def get_file(self, path: str, ref: str) -> GitFile | None:
         resp = await self._request(
-            "GET", f"contents/{quote(path, safe='/')}", params={"ref": ref}, ok_statuses=(404,)
+            "GET", f"contents/{_path(path)}", params={"ref": ref}, ok_statuses=(404,)
         )
         if resp.status_code == 404:
             return None
@@ -182,13 +203,13 @@ class TlGitClient:
         }
         if blob_sha:
             body["sha"] = blob_sha
-        resp = await self._request("PUT", f"contents/{quote(path, safe='/')}", json=body)
+        resp = await self._request("PUT", f"contents/{_path(path)}", json=body)
         return _json(resp)["commit"]["sha"]
 
     async def delete_file(self, path: str, branch: str, message: str, blob_sha: str) -> str:
         resp = await self._request(
             "DELETE",
-            f"contents/{quote(path, safe='/')}",
+            f"contents/{_path(path)}",
             json={"message": message, "sha": blob_sha, "branch": branch},
         )
         return _json(resp)["commit"]["sha"]
@@ -217,7 +238,7 @@ class TlGitClient:
         while True:
             resp = await self._request(
                 "GET",
-                f"compare/{base_sha}...{head_sha}",
+                f"compare/{_ref(base_sha)}...{_ref(head_sha)}",
                 params={"per_page": str(_PAGE_SIZE), "page": str(page)},
             )
             files = _json(resp).get("files", [])
@@ -241,7 +262,7 @@ class TlGitClient:
 
         Raises TlGitError if GitHub truncated the listing, so callers never act on partial data.
         """
-        sha = ref if _SHA_RE.fullmatch(ref) else await self.head_sha(ref)
+        sha = _ref(ref) if _SHA_RE.fullmatch(ref) else await self.head_sha(ref)
         resp = await self._request("GET", f"git/trees/{sha}", params={"recursive": "1"})
         data = _json(resp)
         if data.get("truncated"):

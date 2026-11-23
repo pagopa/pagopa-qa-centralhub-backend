@@ -33,6 +33,7 @@ from app.services.test_lifecycle import rebase as rebase_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle.actors import resolve_actor
 from app.services.test_lifecycle.git_client import TlGitError, TlGitNotConfigured
+from app.services.test_lifecycle.log_safe import log_safe
 
 logger = logging.getLogger(__name__)
 
@@ -259,7 +260,7 @@ async def _publish_best_effort(
         pass  # già registrato da publish_revision
     except Exception:
         # l'approvazione è già committata: mai trasformarla in un 500
-        logger.exception("Creazione PR fallita per la revisione %s", revision_id)
+        logger.exception("Creazione PR fallita per la revisione %s", log_safe(revision_id))
         await git_publish.record_unexpected_error(db, revision_id)
 
 
@@ -273,7 +274,7 @@ async def _import_cleanup_best_effort(db: AsyncSession, feature_id: uuid.UUID) -
     except TlGitNotConfigured:
         return
     except Exception:
-        logger.exception("PR di pulizia non creata per la feature %s", feature_id)
+        logger.exception("PR di pulizia non creata per la feature %s", log_safe(feature_id))
         await db.rollback()
 
 
@@ -301,7 +302,11 @@ async def _jira_impl_best_effort(db: AsyncSession, feature_id: uuid.UUID, actor_
     except Exception as exc:  # l'approvazione è già salvata: mai un 500
         await db.rollback()
         message = exc.message if isinstance(exc, jira_mod.TlJiraError) else str(exc)
-        logger.warning("Task Jira di implementazione non creato per %s: %s", feature_id, message)
+        logger.warning(
+            "Task Jira di implementazione non creato per %s: %s",
+            log_safe(feature_id),
+            log_safe(message),
+        )
         feature = await features_svc._lock_feature(db, feature_id)
         feature.jira_error = message or "Creazione del task Jira non riuscita"
         await issues_svc.open_issue(

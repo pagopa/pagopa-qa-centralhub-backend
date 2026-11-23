@@ -27,6 +27,7 @@ from app.services.test_lifecycle import history
 from app.services.test_lifecycle import jira_client as jira_mod
 from app.services.test_lifecycle.actors import resolve_actor
 from app.services.test_lifecycle.jira_client import JiraIssue, TlJiraError, TlJiraNotConfigured
+from app.services.test_lifecycle.log_safe import log_safe
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ async def verify_key(key: str, *, epic: bool = False) -> dict[str, Any]:
         client = jira_mod.get_jira_client()
         issue = await client.get_issue(key)
     except (TlJiraNotConfigured, TlJiraError) as exc:
-        logger.info("Verifica Jira di %s non eseguita: %s", key, exc)
+        logger.info("Verifica Jira di %s non eseguita: %s", log_safe(key), log_safe(exc))
         return _unverified()
     if issue is None:
         raise JiraIssueNotFound(key)
@@ -487,5 +488,5 @@ async def create_scope_epic(db: AsyncSession, scope_id: uuid.UUID, client: Any) 
         if scope is not None and not scope.jira_qa_epic_key:
             scope.jira_qa_epic_key = issue.key
         await db.commit()
-        logger.info("Epic QA %s collegata all'ambito %s", issue.key, scope_id)
+        logger.info("Epic QA %s collegata all'ambito %s", log_safe(issue.key), log_safe(scope_id))
     return issue.key

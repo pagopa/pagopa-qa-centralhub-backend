@@ -386,3 +386,47 @@ def test_settings_defaults(monkeypatch):
     assert s.tl_repo == "pagopa/pagopa-platform-integration-test"
     assert s.tl_hub_base_url == ""
     assert s.tl_github_token == ""
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda c: c.branch_exists("../../../user"),
+        lambda c: c.head_sha("main/../../orgs"),
+        lambda c: c.reset_branch("a b", "c" * 40),
+        lambda c: c.get_file("src/../../../../user", "main"),
+        lambda c: c.put_file("src/x?y.feature", "t", "main", "m"),
+        lambda c: c.delete_file("src//x.feature", "main", "m", "s"),
+        lambda c: c.compare("main", "x/../../user"),
+        lambda c: c.list_tree("main\n"),
+    ],
+)
+async def test_unsafe_refs_and_paths_never_reach_github(call):
+    """Branch e percorsi arrivano da link incollati dagli utenti: niente `..` o caratteri
+    che cambino l'API chiamata con il token dell'hub."""
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        return httpx.Response(200, json={"object": {"sha": "abc"}})
+
+    with pytest.raises(TlGitError) as exc:
+        await call(make_client(handler))
+    assert exc.value.status == 400
+    assert seen == []
+
+
+async def test_safe_refs_and_paths_are_quoted():
+    paths: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        paths.append(req.url.raw_path.decode())
+        return httpx.Response(
+            200, json={"object": {"sha": "abc"}, "encoding": "base64", "content": "", "sha": "s"}
+        )
+
+    c = make_client(handler)
+    assert await c.branch_exists("PQ-827-fdr/e2e_test.1") is True
+    await c.get_file("src/fdr3/feature/FEAT 011 è.feature", "main")
+    assert paths[0] == "/repos/org/repo/git/ref/heads/PQ-827-fdr/e2e_test.1"
+    assert paths[1].startswith("/repos/org/repo/contents/src/fdr3/feature/FEAT%20011%20%C3%A8.feature")
