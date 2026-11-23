@@ -138,6 +138,16 @@ FEATURE_CATALOG: tuple[FeatureDefinition, ...] = (
         "action": "view:qg_nrts",
         "external": False,
     },
+    {
+        "key": "test_lifecycle",
+        "label": "Test Lifecycle",
+        "route": "/test-lifecycle",
+        "action": "view:test_lifecycle",
+        "external": False,
+    },
 )
+
+# Features that are hidden until a superadmin enables them (no DB row = disabled).
+DEFAULT_DISABLED_FEATURES = frozenset({"test_lifecycle"})
 
 FEATURE_KEYS = frozenset(feature["key"] for feature in FEATURE_CATALOG)

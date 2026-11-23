@@ -1,6 +1,6 @@
 import uuid
 import enum
-from sqlalchemy import Column, String, Integer, BigInteger, ForeignKey, UniqueConstraint, Index, Enum, Boolean, text
+from sqlalchemy import Column, Computed, String, Integer, BigInteger, ForeignKey, UniqueConstraint, Index, Enum, Boolean, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB, TIMESTAMP
 from app.core.db import Base
 
@@ -113,6 +113,15 @@ class TestExecution(Base):
     retries = Column(Integer)
     revision_note = Column(String)
     allure_url = Column(String)
+    # Tag behave (senza @) letti dalle label Allure: colonna generata da Postgres (0039).
+    tags = Column(
+        JSONB,
+        Computed(
+            "coalesce(jsonb_path_query_array(allure_report, "
+            "'$.labels[*] ? (@.name == \"tag\").value'), '[]'::jsonb)",
+            persisted=True,
+        ),
+    )
 
 class FlakyScenario(Base):
     __tablename__ = 'flaky_scenarios'

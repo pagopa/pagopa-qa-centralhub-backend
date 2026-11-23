@@ -9,7 +9,7 @@ def test_action_keys_match_catalog() -> None:
 
 
 def test_action_catalog_size() -> None:
-    assert len(ACTION_CATALOG) == 31
+    assert len(ACTION_CATALOG) == 37
 
 
 def test_quality_gate_report_is_readable_by_every_role_including_guest() -> None:
@@ -95,6 +95,27 @@ def test_status_page_actions_defaults() -> None:
     }
     assert by_key["view:status_page"]["category"] == "Release Status"
     assert by_key["manage:status_page"]["category"] == "Release Status"
+
+
+def test_test_lifecycle_actions_defaults() -> None:
+    by_key = {e["key"]: e for e in ACTION_CATALOG}
+    team = {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False}
+    assert by_key["view:test_lifecycle"]["defaults"] == team
+    assert by_key["edit:tl_feature"]["defaults"] == team
+    assert by_key["review:tl_feature"]["defaults"] == team
+    assert by_key["manage:tl_scopes"]["defaults"] == {
+        "qa_manager": True, "qa_analyst": False, "qa_engineer": False, "guest": False,
+    }
+    for key in ("view:test_lifecycle", "edit:tl_feature", "review:tl_feature", "manage:tl_scopes"):
+        assert by_key[key]["category"] == "Test Lifecycle"
+
+
+def test_tl_git_permission_defaults() -> None:
+    entry = next(e for e in ACTION_CATALOG if e["key"] == "manage:tl_git")
+    assert entry["category"] == "Test Lifecycle"
+    assert entry["defaults"] == {
+        "qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False,
+    }
 
 
 def test_inbox_permission_is_on_for_qa_roles_and_off_for_guest() -> None:

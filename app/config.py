@@ -66,6 +66,17 @@ class Settings(BaseSettings):
     # Comma-separated suites that can be launched; empty means any well-formed suite name.
     qg_launch_suites: str = ""
 
+    # Test Lifecycle git integration (empty tl_github_token falls back to tas_github_token).
+    tl_github_token: str = ""
+    tl_repo: str = "pagopa/pagopa-platform-integration-test"
+    tl_base_branch: str = "main"
+    tl_sync_interval_s: float = 300.0
+    # Public URL of the portal, used in PR body links.
+    tl_hub_base_url: str = ""
+    # Solo sviluppo: "local" usa un clone su disco al posto di GitHub (vedi local_git.py).
+    tl_git_mode: str = "github"
+    tl_local_repo_path: str = ""
+
     # Flaky scenarios scoring (design: docs/superpowers/specs/2026-11-14-flaky-*-design.md)
     flaky_window_days: int = 30
     flaky_max_runs: int = 30
@@ -100,6 +111,22 @@ class Settings(BaseSettings):
     jira_base_url: str = ""
     jira_email: str = ""
     jira_api_token: str = ""
+    # Test Lifecycle — task e Epic QA creati dall'hub (fase 3)
+    tl_jira_project: str = "PQ"
+    tl_jira_design_issue_type: str = "Progettazione Scenari e casi di test"
+    tl_jira_impl_issue_type: str = "Implementazione suite di TA"
+    tl_jira_epic_issue_type: str = "Epic"
+    tl_jira_label: str = "testing"
+    tl_jira_link_type: str = "Relates"
+    tl_jira_refresh_interval_s: float = 900.0
+    # Test Lifecycle — NRT
+    tl_nrt_window: int = 10  # ultime run per scenario nel pass rate
+    tl_nrt_lookback_days: int = 90  # esecuzioni lette per panoramica e link
+    tl_nrt_running_interval_s: float = 900.0
+    # Test Lifecycle — migrazione da Confluence
+    tl_confluence_root_page_id: str = "2815950851"  # "Testing Suites" (spazio QDP)
+    tl_confluence_space: str = "QDP"
+    tl_migration_confluence_write: bool = False  # True solo quando il team decide di scrivere
 
     # PSP Fee catalog (Data Hub)
     psp_fee_json_url: str = (

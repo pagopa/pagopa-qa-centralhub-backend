@@ -199,6 +199,42 @@ ACTION_CATALOG: list[CatalogEntry] = [
         "category": "Release Status",
         "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": False, "guest": False},
     },
+    {
+        "key": "view:test_lifecycle",
+        "label": "Test Lifecycle (visualizza)",
+        "category": "Test Lifecycle",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
+    },
+    {
+        "key": "edit:tl_feature",
+        "label": "Test Lifecycle (modifica feature e scenari)",
+        "category": "Test Lifecycle",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
+    },
+    {
+        "key": "review:tl_feature",
+        "label": "Test Lifecycle (revisione e approvazione)",
+        "category": "Test Lifecycle",
+        "defaults": {"qa_manager": True, "qa_analyst": True, "qa_engineer": True, "guest": False},
+    },
+    {
+        "key": "manage:tl_git",
+        "label": "Test Lifecycle (sincronizzazione Git, PR e anomalie)",
+        "category": "Test Lifecycle",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": True, "guest": False},
+    },
+    {
+        "key": "manage:tl_scopes",
+        "label": "Test Lifecycle (gestione ambiti)",
+        "category": "Test Lifecycle",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": False, "guest": False},
+    },
+    {
+        "key": "manage:tl_migration",
+        "label": "Test Lifecycle (migrazione da Confluence)",
+        "category": "Test Lifecycle",
+        "defaults": {"qa_manager": True, "qa_analyst": False, "qa_engineer": False, "guest": False},
+    },
 ]
 
 ACTION_KEYS: set[str] = {entry["key"] for entry in ACTION_CATALOG}
