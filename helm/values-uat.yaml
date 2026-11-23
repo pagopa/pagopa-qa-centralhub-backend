@@ -102,6 +102,26 @@ microservice-chart:
     EA_ASSISTANT_PROVIDER: "gemini"
     GROQ_MODEL: "openai/gpt-oss-120b"
     GEMINI_FALLBACK_MODELS: "gemini-3.8-flash,gemini-3.7-flash"
+    # Test Lifecycle — integrazione Git (vuoto: usa TAS_GITHUB_TOKEN) 
+    TL_GITHUB_TOKEN: ""
+    TL_REPO: "pagopa/pagopa-platform-integration-test"
+    TL_BASE_BRANCH: "main"
+    # Solo sviluppo: TL_GIT_MODE=local usa un clone su disco al posto di GitHubTL_GIT_MODE=github
+    # TL_LOCAL_REPO_PATH: ""
+    # Test Lifecycle — Jira (usa JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN)
+    TL_JIRA_PROJECT: "PQ"
+    TL_JIRA_DESIGN_ISSUE_TYPE: "Progettazione Scenari e casi di test"
+    TL_JIRA_IMPL_ISSUE_TYPE: "Implementazione suite di TA"
+    TL_JIRA_EPIC_ISSUE_TYPE: "Epic"
+    TL_JIRA_LABEL: "testing"
+    TL_JIRA_LINK_TYPE: "Relates"
+    TL_JIRA_REFRESH_INTERVAL_S: 900
+    # Test Lifecycle — migrazione da Confluence (credenziali Atlassian: JIRA_*)
+    TL_CONFLUENCE_ROOT_PAGE_ID: 2815950851
+    TL_CONFLUENCE_SPACE: "QDP"
+    # true solo quando il team decide di scrivere l’avviso “Migrata su QA Hub” sulle pagineTL_MIGRATION_CONFLUENCE_WRITE=false
+    TL_MIGRATION_CONFLUENCE_WRITE: true
+
   # TODO: confirm UAT Key Vault name and that the secrets are populated there.
   envSecret:
     DATABASE_URL: "qa-centralhub-database-url"
