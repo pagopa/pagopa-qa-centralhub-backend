@@ -186,10 +186,23 @@ def test_not_configured_raises(monkeypatch):
     assert isinstance(jira_client.get_jira_client(), TlJiraClient)
 
 
-@pytest.mark.parametrize("key", ["../../myself", "PQ-1/../../user", "pq-1", "PQ-1?x=1", ""])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "../../myself", "PQ-1/../../user", "pq-1", "PQ-1?x=1", "",
+        "PQ-01", "P-1", "A" * 5000, "PQ-" + "1" * 40,
+    ],
+)
 async def test_get_issue_rejects_keys_that_are_not_issue_keys(key):
     c, seen = _client(lambda req: httpx.Response(200, json=_issue()))
     with pytest.raises(TlJiraError) as exc:
         await c.get_issue(key)
     assert exc.value.status == 400
     assert seen == []
+
+
+@pytest.mark.parametrize("key", ["PQ-1", "PQ-857", "AB_2-10", "X9-1"])
+async def test_get_issue_accepts_issue_keys(key):
+    c, seen = _client(lambda req: httpx.Response(200, json=_issue(key=key)))
+    assert (await c.get_issue(key)).key == key
+    assert seen[0].url.path == f"/rest/api/3/issue/{key}"
