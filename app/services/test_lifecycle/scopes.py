@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.test_lifecycle import TlFeature, TlFeatureStatus, TlScope
 from app.schemas.test_lifecycle import TlScopeCreate, TlScopeOut, TlScopeUpdate
 from app.services.test_lifecycle import jira_tasks, nrt
+from app.services.test_lifecycle.deletable import undeletable_clause
 
 
 class ScopeNotFoundError(Exception):
@@ -41,11 +42,24 @@ async def _counts(
     return out
 
 
-def to_out(scope: TlScope, counts: dict[str, int] | None = None) -> TlScopeOut:
+async def _blocked_scope_ids(
+    db: AsyncSession, scope_ids: list[uuid.UUID] | None = None
+) -> set[uuid.UUID]:
+    """Scopes holding at least one feature that cannot be deleted."""
+    stmt = select(TlFeature.scope_id).where(undeletable_clause()).distinct()
+    if scope_ids is not None:
+        stmt = stmt.where(TlFeature.scope_id.in_(scope_ids))
+    return set((await db.execute(stmt)).scalars())
+
+
+def to_out(
+    scope: TlScope, counts: dict[str, int] | None = None, deletable: bool = True
+) -> TlScopeOut:
     counts = counts or _empty_counts()
     out = TlScopeOut.model_validate(scope)
     out.status_counts = counts
     out.feature_count = sum(counts.values())
+    out.deletable = deletable
     return out
 
 
@@ -53,14 +67,16 @@ async def list_scopes(db: AsyncSession) -> list[TlScopeOut]:
     scopes = list((await db.execute(select(TlScope).order_by(func.lower(TlScope.code)))).scalars())
     counts = await _counts(db)
     rates = await nrt.scope_pass_rates(db)
-    outs = [to_out(s, counts.get(s.id)) for s in scopes]
+    blocked = await _blocked_scope_ids(db)
+    outs = [to_out(s, counts.get(s.id), s.id not in blocked) for s in scopes]
     for out in outs:
         out.nrt_pass_rate = rates.get(out.id)
     return outs
 
 
 async def get_scope_out(db: AsyncSession, scope: TlScope) -> TlScopeOut:
-    return to_out(scope, (await _counts(db, [scope.id])).get(scope.id))
+    blocked = await _blocked_scope_ids(db, [scope.id])
+    return to_out(scope, (await _counts(db, [scope.id])).get(scope.id), scope.id not in blocked)
 
 
 async def _code_taken(db: AsyncSession, code: str, exclude_id: uuid.UUID | None = None) -> bool:

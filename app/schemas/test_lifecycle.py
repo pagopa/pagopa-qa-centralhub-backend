@@ -109,6 +109,7 @@ class TlScopeOut(BaseModel):
     feature_count: int = 0
     status_counts: dict[str, int] = {}
     nrt_pass_rate: float | None = None
+    deletable: bool = True
 
 
 # ── Feature, revisioni, scenari ───────────────────────────────────────────────
@@ -381,6 +382,7 @@ class TlFeatureListItem(BaseModel):
     impl_owner_id: uuid.UUID | None = None
     scenario_count: int = 0
     updated_at: datetime
+    deletable: bool = True
 
 
 class TlJiraLink(BaseModel):
@@ -754,3 +756,52 @@ class TlImportGitResult(BaseModel):
     feature: TlFeatureDetail
     ignored_tags: list[str] = []
     replaced: int = 0
+
+
+# ── Cancellazione ─────────────────────────────────────────────────────────────
+
+
+class TlDeleteJiraIssue(BaseModel):
+    key: str
+    role: Literal["design", "impl", "qa_epic"]
+    summary: str | None = None
+    status: str | None = None
+    url: str | None = None
+    feature_code: str | None = None
+    default_selected: bool
+
+
+class TlDeleteBlocker(BaseModel):
+    feature_id: uuid.UUID
+    code: str
+    reason: Literal["published", "pr_open"]
+
+
+class TlDeleteAffectedFeature(BaseModel):
+    id: uuid.UUID
+    code: str
+    title: str | None = None
+
+
+class TlDeletePreview(BaseModel):
+    deletable: bool
+    blockers: list[TlDeleteBlocker]
+    features: list[TlDeleteAffectedFeature]
+    scenario_count: int
+    jira_issues: list[TlDeleteJiraIssue]
+
+
+class TlDeleteRequest(BaseModel):
+    actor_email: str
+    delete_jira_keys: list[str] = []
+
+
+class TlJiraDeleteResult(BaseModel):
+    key: str
+    status: Literal["deleted", "failed"]
+    reason: str | None = None
+
+
+class TlDeleteResult(BaseModel):
+    deleted_features: int
+    jira_results: list[TlJiraDeleteResult]

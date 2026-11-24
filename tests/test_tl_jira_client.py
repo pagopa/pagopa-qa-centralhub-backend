@@ -206,3 +206,31 @@ async def test_get_issue_accepts_issue_keys(key):
     c, seen = _client(lambda req: httpx.Response(200, json=_issue(key=key)))
     assert (await c.get_issue(key)).key == key
     assert seen[0].url.path == f"/rest/api/3/issue/{key}"
+
+
+async def test_delete_issue_sends_delete_without_subtasks():
+    client, seen = _client(lambda r: httpx.Response(204))
+    await client.delete_issue("PQ-12")
+    assert seen[0].method == "DELETE"
+    assert seen[0].url.path == "/rest/api/3/issue/PQ-12"
+    assert seen[0].url.params["deleteSubtasks"] == "false"
+
+
+async def test_delete_issue_treats_404_as_success():
+    client, _ = _client(lambda r: httpx.Response(404, json={"errorMessages": ["gone"]}))
+    await client.delete_issue("PQ-12")
+
+
+async def test_delete_issue_raises_on_403():
+    client, _ = _client(lambda r: httpx.Response(403, json={"errorMessages": ["forbidden"]}))
+    with pytest.raises(TlJiraError) as exc:
+        await client.delete_issue("PQ-12")
+    assert exc.value.status == 403
+
+
+async def test_delete_issue_rejects_invalid_key():
+    client, seen = _client(lambda r: httpx.Response(204))
+    with pytest.raises(TlJiraError) as exc:
+        await client.delete_issue("not a key")
+    assert exc.value.status == 400
+    assert seen == []

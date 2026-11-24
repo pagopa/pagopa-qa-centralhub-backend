@@ -131,6 +131,17 @@ class TlJiraClient:
             return None
         return self._issue(resp.json())
 
+    async def delete_issue(self, key: str) -> None:
+        """Delete an issue (never its subtasks). A missing issue counts as already deleted."""
+        if len(key) > 32 or not _ISSUE_KEY_RE.fullmatch(key):
+            raise TlJiraError(400, "chiave Jira non valida")
+        await self._request(
+            "DELETE",
+            f"/rest/api/3/issue/{quote(key)}",
+            params={"deleteSubtasks": "false"},
+            ok_statuses=(404,),
+        )
+
     async def find_account_id(self, email: str) -> str | None:
         resp = await self._request("GET", "/rest/api/3/user/search", params={"query": email})
         users = [u for u in resp.json() or [] if u.get("active", True)]
