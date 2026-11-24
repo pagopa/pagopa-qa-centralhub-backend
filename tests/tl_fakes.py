@@ -269,6 +269,10 @@ class FakeJiraClient:
         await self._enter("get_issue", key)
         return self.issues.get(key)
 
+    async def delete_issue(self, key: str) -> None:
+        await self._enter("delete_issue", key)
+        self.issues.pop(key, None)
+
     async def find_account_id(self, email: str) -> str | None:
         await self._enter("find_account_id", email)
         return self.users.get(email.lower())

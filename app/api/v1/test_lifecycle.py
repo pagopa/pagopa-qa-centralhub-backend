@@ -21,6 +21,9 @@ from app.schemas.test_lifecycle import (
     TlCommentCreate,
     TlCommentOut,
     TlCommentResolve,
+    TlDeletePreview,
+    TlDeleteRequest,
+    TlDeleteResult,
     TlFeatureCreate,
     TlFeatureDetail,
     TlFeatureListItem,
@@ -54,6 +57,7 @@ from app.schemas.test_lifecycle import (
     TlTransitionRequest,
     TlVersionOut,
 )
+from app.services.test_lifecycle import deletion as deletion_svc
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_client as git_client_mod
 from app.services.test_lifecycle import git_import_file
@@ -73,8 +77,6 @@ from app.services.test_lifecycle.category_tags import UnknownExtraTagError, cate
 from app.services.test_lifecycle.git_client import TlGitError, TlGitNotConfigured
 
 router = APIRouter()
-
-# Nessun endpoint di cancellazione per gli ambiti: le FK delle feature sono ON DELETE CASCADE.
 
 
 @router.get("/scopes", response_model=list[TlScopeOut])
@@ -126,6 +128,22 @@ async def update_scope(scope_id: uuid.UUID, body: TlScopeUpdate, db: DbDep) -> T
     return await scopes_svc.get_scope_out(db, scope)
 
 
+@router.get("/scopes/{scope_id}/delete-preview", response_model=TlDeletePreview)
+async def scope_delete_preview(scope_id: uuid.UUID, db: DbDep) -> TlDeletePreview:
+    try:
+        return await deletion_svc.preview_scope(db, scope_id)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.delete("/scopes/{scope_id}", response_model=TlDeleteResult)
+async def delete_scope(scope_id: uuid.UUID, body: TlDeleteRequest, db: DbDep) -> TlDeleteResult:
+    try:
+        return await deletion_svc.delete_scope(db, scope_id, body)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
 # ── Feature, revisioni, scenari ───────────────────────────────────────────────
 
 def _translate(exc: Exception) -> HTTPException:
@@ -167,6 +185,32 @@ def _translate(exc: Exception) -> HTTPException:
                 "code": "unknown_extra_tag",
                 "message": f"Tag non ammessi: {', '.join(exc.tags)}. "
                 f"Ammessi: {', '.join(exc.allowed)}",
+            },
+        )
+    if isinstance(exc, deletion_svc.FeatureNotDeletableError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "feature_not_deletable",
+                "message": "La feature non può essere eliminata",
+                "blockers": [b.model_dump(mode="json") for b in exc.blockers],
+            },
+        )
+    if isinstance(exc, deletion_svc.ScopeNotDeletableError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "scope_not_deletable",
+                "message": "L'ambito non può essere eliminato",
+                "blockers": [b.model_dump(mode="json") for b in exc.blockers],
+            },
+        )
+    if isinstance(exc, deletion_svc.JiraKeyNotLinkedError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "jira_key_not_linked",
+                "message": f"Issue Jira non collegate: {', '.join(exc.keys)}",
             },
         )
     if isinstance(exc, features_svc.FeatureNotFoundError):
@@ -355,6 +399,22 @@ async def create_feature(body: TlFeatureCreate, db: DbDep) -> TlFeatureDetail:
     try:
         feature_id = await features_svc.create_feature(db, body)
         return await features_svc.get_feature_detail(db, feature_id)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/features/{feature_id}/delete-preview", response_model=TlDeletePreview)
+async def feature_delete_preview(feature_id: uuid.UUID, db: DbDep) -> TlDeletePreview:
+    try:
+        return await deletion_svc.preview_feature(db, feature_id)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.delete("/features/{feature_id}", response_model=TlDeleteResult)
+async def delete_feature(feature_id: uuid.UUID, body: TlDeleteRequest, db: DbDep) -> TlDeleteResult:
+    try:
+        return await deletion_svc.delete_feature(db, feature_id, body)
     except Exception as exc:
         raise _translate(exc) from exc
 

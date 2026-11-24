@@ -34,6 +34,7 @@ from app.schemas.test_lifecycle import (
 from app.services.test_lifecycle import history, jira_tasks
 from app.services.test_lifecycle.actors import UnknownActorError, resolve_actor
 from app.services.test_lifecycle.category_tags import check_extra_tags
+from app.services.test_lifecycle.deletable import undeletable_clause
 from app.services.test_lifecycle.gherkin import (
     feature_code,
     scenario_tag,
@@ -414,7 +415,7 @@ async def list_features(
     owner_id: uuid.UUID | None = None,
 ) -> list[TlFeatureListItem]:
     stmt = (
-        select(TlFeature, TlScope.code)
+        select(TlFeature, TlScope.code, undeletable_clause())
         .join(TlScope, TlScope.id == TlFeature.scope_id)
         .order_by(func.lower(TlScope.code), TlFeature.number)
     )
@@ -433,7 +434,7 @@ async def list_features(
     rows = (await db.execute(stmt)).all()
     shown = {
         f.id: f.working_revision_id or f.published_revision_id
-        for f, _ in rows
+        for f, _, _ in rows
         if f.working_revision_id or f.published_revision_id
     }
     rev_ids = list(set(shown.values()))
@@ -459,7 +460,7 @@ async def list_features(
             ).all()
         )
     out: list[TlFeatureListItem] = []
-    for f, scope_code in rows:
+    for f, scope_code, blocked in rows:
         rev_id = shown.get(f.id)
         out.append(
             TlFeatureListItem(
@@ -475,6 +476,7 @@ async def list_features(
                 impl_owner_id=f.impl_owner_id,
                 scenario_count=counts.get(rev_id, 0) if rev_id else 0,
                 updated_at=f.updated_at,
+                deletable=not blocked,
             )
         )
     return out
