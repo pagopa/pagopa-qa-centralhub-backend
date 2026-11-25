@@ -8024,7 +8024,7 @@
           "test-lifecycle"
         ],
         "summary": "Transition Revision",
-        "description": "Transizione di workflow. Bloccata -> 409 con `reasons`; non reviewer -> 403.\n\n`request_changes` senza nota è bloccata con 409 `transition_not_allowed` (nessuna\nvalidazione di schema: la nota è obbligatoria solo per quell'azione). Una nota oltre\n5000 caratteri (come i commenti) è rifiutata con 422 dallo schema.",
+        "description": "Transizione di workflow. Bloccata -> 409 con `reasons`.\n\nAttore non abilitato -> 403: `not_reviewer` (approva, richiedi modifiche, riporta in review)\noppure `not_owner` (ritira in bozza). `withdraw_approval` è 409 se la PR è già mergiata o se\nla pubblicazione della PR è in corso.\n\n`request_changes` senza nota è bloccata con 409 `transition_not_allowed` (nessuna\nvalidazione di schema: la nota è obbligatoria solo per quell'azione). Una nota oltre\n5000 caratteri (come i commenti) è rifiutata con 422 dallo schema.",
         "operationId": "transition_revision_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__transitions_post",
         "parameters": [
           {
@@ -19662,7 +19662,9 @@
           "submit",
           "approve",
           "request_changes",
-          "reopen"
+          "reopen",
+          "withdraw_approval",
+          "withdraw"
         ],
         "title": "TlTransitionAction"
       },

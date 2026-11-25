@@ -433,6 +433,8 @@ class TlTransitionAction(str, enum.Enum):
     APPROVE = "approve"
     REQUEST_CHANGES = "request_changes"
     REOPEN = "reopen"
+    WITHDRAW_APPROVAL = "withdraw_approval"
+    WITHDRAW = "withdraw"
 
 
 class TlTransitionRequest(BaseModel):
