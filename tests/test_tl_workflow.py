@@ -6,16 +6,20 @@ import uuid
 import pytest
 from sqlalchemy import delete, select, update
 
+from app.config import settings
 from app.models.audit_log import AuditLog
 from app.models.test_lifecycle import (
     TlFeature,
+    TlFeatureRevision,
     TlFeatureStatus,
     TlFeatureVersion,
     TlPolarity,
     TlReviewComment,
+    TlRevisionStatus,
     TlScenarioKind,
 )
 from app.models.user import User
+from app.services.test_lifecycle.advisory_lock import try_advisory_lock
 from app.services.test_lifecycle.gherkin import (
     RenderFeature,
     RenderScenario,
@@ -31,6 +35,7 @@ from tests.test_tl_features import (  # noqa: F401  (fixture riusate)
     actor,
     scope,
 )
+from tests.tl_fakes import FakeGitClient, install_fake_git
 
 REASON_REOPEN = "Disponibile dopo il merge del feature file (fase Git)"
 VALID_STEPS = "Dato un utente registrato\nQuando paga\nAllora il pagamento è confermato"
@@ -105,7 +110,7 @@ async def test_submit_blocked_reasons_listed(client, scope, actor):
     feat = await _new_feature(client, scope, actor)
     detail = await _get(client, feat["id"], actor["email"])
     assert [t["action"] for t in detail["transitions"]] == [
-        "submit", "approve", "request_changes", "reopen",
+        "submit", "approve", "request_changes", "reopen", "withdraw_approval", "withdraw",
     ]
     submit = _transition(detail, "submit")
     assert submit["allowed"] is False
@@ -398,3 +403,341 @@ async def test_transition_with_unknown_actor_returns_403(client, scope, actor, r
     resp = await _do(client, detail, "submit", "nessuno@example.test")
     assert resp.status_code == 403
     assert resp.json()["detail"]["code"] == "unknown_actor"
+
+
+# ── ritorno indietro: withdraw_approval (approved -> in_review) e withdraw (in_review -> draft) ──
+
+NOT_APPROVED = "La revisione non è approvata"
+NOT_IN_REVIEW = "La revisione non è in revisione"
+NOT_REVIEWER = "Solo il reviewer assegnato può eseguire questa azione"
+NOT_OWNER = "Solo l'owner di progettazione può eseguire questa azione"
+PR_MERGED = "La PR è già stata mergiata: usa Riapri"
+
+
+@pytest.fixture
+def fake_git(monkeypatch):
+    monkeypatch.setattr(settings, "tl_hub_base_url", "https://hub.test")
+    monkeypatch.setattr(settings, "tl_base_branch", "main")
+    return install_fake_git(monkeypatch, FakeGitClient())
+
+
+async def _post_transition(client, feature_id, revision_id, action, email, note=None):
+    body = {"action": action, "actor_email": email}
+    if note is not None:
+        body["note"] = note
+    return await client.post(
+        f"{BASE}/features/{feature_id}/revisions/{revision_id}/transitions", json=body
+    )
+
+
+async def _approved_feature(client, scope, actor, reviewer):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    out = (await _do(client, detail, "submit", actor["email"])).json()
+    resp = await _do(client, out, "approve", reviewer["email"])
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+async def _version_count(feature_id):
+    async with TestSession() as s:
+        rows = (
+            await s.execute(
+                select(TlFeatureVersion).where(TlFeatureVersion.feature_id == uuid.UUID(feature_id))
+            )
+        ).scalars().all()
+    return len(rows)
+
+
+async def _event_actions(client, feature_id):
+    hist = (await client.get(f"{BASE}/features/{feature_id}/history")).json()
+    return [i.get("action") for i in hist if i["kind"] == "event"]
+
+
+async def test_transitions_append_the_two_withdraw_actions(client, scope, actor, reviewer):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    assert [t["action"] for t in detail["transitions"]] == [
+        "submit", "approve", "request_changes", "reopen", "withdraw_approval", "withdraw",
+    ]
+
+
+async def test_withdraw_approval_returns_revision_to_review(
+    client, scope, actor, reviewer, fake_git
+):
+    done = await _approved_feature(client, scope, actor, reviewer)
+    assert done["working_revision"]["pr_number"] == 101
+    resp = await _do(client, done, "withdraw_approval", reviewer["email"])
+    assert resp.status_code == 200, resp.text
+    out = resp.json()
+    assert out["status"] == "in_review"
+    rev = out["working_revision"]
+    assert rev["status"] == "in_review"
+    assert rev["approved_by"] is None and rev["approved_at"] is None
+    # PR, Jira keys and the approval snapshot are untouched
+    assert rev["pr_number"] == 101 and rev["pr_state"] == "open"
+    assert out["jira_impl_key"] == done["jira_impl_key"]
+    assert await _version_count(done["id"]) == 1
+    assert "tl.revision.approval_withdrawn" in await _event_actions(client, done["id"])
+
+
+async def test_withdraw_approval_by_non_reviewer_is_forbidden(
+    client, scope, actor, reviewer, fake_git
+):
+    done = await _approved_feature(client, scope, actor, reviewer)
+    owner_view = await _get(client, done["id"], actor["email"])
+    check = _transition(owner_view, "withdraw_approval")
+    assert check["allowed"] is False and check["reasons"] == [NOT_REVIEWER]
+    reviewer_view = await _get(client, done["id"], reviewer["email"])
+    assert _transition(reviewer_view, "withdraw_approval")["allowed"] is True
+    resp = await _do(client, done, "withdraw_approval", actor["email"])
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "not_reviewer"
+    assert (await _get(client, done["id"]))["working_revision"]["status"] == "approved"
+
+
+async def test_withdraw_approval_blocked_when_pr_merged(client, scope, actor, reviewer, fake_git):
+    done = await _approved_feature(client, scope, actor, reviewer)
+    rev_id = done["working_revision"]["id"]
+    async with TestSession() as s:
+        await s.execute(
+            update(TlFeatureRevision)
+            .where(TlFeatureRevision.id == uuid.UUID(rev_id))
+            .values(status=TlRevisionStatus.MERGED, pr_state="merged")
+        )
+        await s.commit()
+    resp = await _post_transition(
+        client, done["id"], rev_id, "withdraw_approval", reviewer["email"]
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "transition_not_allowed"
+    assert PR_MERGED in resp.json()["detail"]["reasons"]
+
+
+async def test_withdraw_approval_requires_an_approved_revision(client, scope, actor, reviewer):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    out = (await _do(client, detail, "submit", actor["email"])).json()
+    resp = await _do(client, out, "withdraw_approval", reviewer["email"])
+    assert resp.status_code == 409
+    assert NOT_APPROVED in resp.json()["detail"]["reasons"]
+
+
+async def test_withdraw_approval_keeps_feature_status_when_already_published(
+    client, scope, actor, reviewer
+):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    rev_id = uuid.UUID(detail["working_revision"]["id"])
+    async with TestSession() as s:
+        await s.execute(
+            update(TlFeature)
+            .where(TlFeature.id == uuid.UUID(detail["id"]))
+            .values(published_revision_id=rev_id, status=TlFeatureStatus.IMPLEMENTED)
+        )
+        await s.commit()
+    out = (await _do(client, detail, "submit", actor["email"])).json()
+    out = (await _do(client, out, "approve", reviewer["email"])).json()
+    assert out["status"] == "implemented"
+    out = (await _do(client, out, "withdraw_approval", reviewer["email"])).json()
+    assert out["working_revision"]["status"] == "in_review"
+    assert out["status"] == "implemented"
+
+
+async def test_withdraw_returns_in_review_to_draft_by_owner_without_note(
+    client, scope, actor, reviewer
+):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    out = (await _do(client, detail, "submit", actor["email"])).json()
+    resp = await _do(client, out, "withdraw", actor["email"])
+    assert resp.status_code == 200, resp.text
+    back = resp.json()
+    assert back["status"] == "draft"
+    assert back["working_revision"]["status"] == "draft"
+    async with TestSession() as s:
+        comments = (
+            await s.execute(
+                select(TlReviewComment).where(
+                    TlReviewComment.revision_id == uuid.UUID(back["working_revision"]["id"])
+                )
+            )
+        ).scalars().all()
+    assert comments == []
+    assert "tl.revision.withdrawn" in await _event_actions(client, detail["id"])
+
+
+async def test_withdraw_by_non_owner_is_forbidden(client, scope, actor, reviewer):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    out = (await _do(client, detail, "submit", actor["email"])).json()
+    reviewer_view = await _get(client, out["id"], reviewer["email"])
+    check = _transition(reviewer_view, "withdraw")
+    assert check["allowed"] is False and check["reasons"] == [NOT_OWNER]
+    assert _transition(await _get(client, out["id"], actor["email"]), "withdraw")["allowed"] is True
+    resp = await _do(client, out, "withdraw", reviewer["email"])
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "not_owner"
+    assert (await _get(client, out["id"]))["working_revision"]["status"] == "in_review"
+
+
+async def test_withdraw_requires_an_in_review_revision(client, scope, actor, reviewer, fake_git):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    resp = await _do(client, detail, "withdraw", actor["email"])
+    assert resp.status_code == 409
+    assert NOT_IN_REVIEW in resp.json()["detail"]["reasons"]
+    out = (await _do(client, detail, "submit", actor["email"])).json()
+    approved = (await _do(client, out, "approve", reviewer["email"])).json()
+    resp = await _do(client, approved, "withdraw", actor["email"])
+    assert resp.status_code == 409
+    assert NOT_IN_REVIEW in resp.json()["detail"]["reasons"]
+
+
+async def test_second_withdraw_call_returns_409_not_500(client, scope, actor, reviewer):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    out = (await _do(client, detail, "submit", actor["email"])).json()
+    assert (await _do(client, out, "withdraw", actor["email"])).status_code == 200
+    resp = await _do(client, out, "withdraw", actor["email"])
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "transition_not_allowed"
+
+
+async def test_reapproval_after_withdrawal_creates_second_snapshot_and_reuses_the_pr(
+    client, scope, actor, reviewer, fake_git
+):
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    async with TestSession() as s:
+        await s.execute(
+            update(TlFeature)
+            .where(TlFeature.id == uuid.UUID(detail["id"]))
+            .values(jira_impl_key="PQ-77")
+        )
+        await s.commit()
+    out = (await _do(client, detail, "submit", actor["email"])).json()
+    done = (await _do(client, out, "approve", reviewer["email"])).json()
+    out = (await _do(client, done, "withdraw_approval", reviewer["email"])).json()
+    again = await _do(client, out, "approve", reviewer["email"])
+    assert again.status_code == 200, again.text
+    final = again.json()
+    assert final["working_revision"]["status"] == "approved"
+    assert final["working_revision"]["pr_number"] == 101
+    assert len(fake_git.calls_of("create_pull")) == 1
+    assert await _version_count(done["id"]) == 2
+    # the implementation task exists already: no new creation attempt (and so no Jira error)
+    assert final["jira_impl_key"] == "PQ-77"
+    assert final["jira_error"] is None
+
+
+async def test_reapproval_does_not_open_a_second_pr_when_the_first_was_merged_before_the_sync(
+    client, scope, actor, reviewer, fake_git
+):
+    done = await _approved_feature(client, scope, actor, reviewer)
+    assert done["working_revision"]["pr_number"] == 101
+    out = (await _do(client, done, "withdraw_approval", reviewer["email"])).json()
+    # merged on GitHub, but the sync has not run yet: the hub still thinks the PR is open
+    fake_git.set_pull_state(101, "merged", "abc123")
+    pushes = len(fake_git.calls_of("put_file"))
+
+    again = await _do(client, out, "approve", reviewer["email"])
+    assert again.status_code == 200, again.text
+    rev = again.json()["working_revision"]
+    assert rev["pr_number"] == 101
+    assert rev["pr_error"] is None
+    assert len(fake_git.calls_of("create_pull")) == 1
+    assert len(fake_git.calls_of("put_file")) == pushes
+    assert "tl.pr.updated" not in await _event_actions(client, done["id"])
+
+
+async def test_withdraw_approval_is_refused_while_the_pr_is_being_published(
+    client, scope, actor, reviewer, fake_git
+):
+    done = await _approved_feature(client, scope, actor, reviewer)
+    rev_id = done["working_revision"]["id"]
+    async with TestSession() as s, try_advisory_lock(s, f"tl_pr:{rev_id}") as got:
+        assert got
+        resp = await _do(client, done, "withdraw_approval", reviewer["email"])
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "transition_not_allowed"
+        reasons = resp.json()["detail"]["reasons"]
+        assert "Pubblicazione della PR in corso: riprova tra poco" in reasons
+    # the revision is untouched and the same call works once the publication is over
+    assert (await _get(client, done["id"]))["working_revision"]["status"] == "approved"
+    assert (await _do(client, done, "withdraw_approval", reviewer["email"])).status_code == 200
+
+
+async def test_withdraw_approval_with_a_merged_pr_is_a_409_even_for_the_wrong_actor(
+    client, scope, actor, reviewer, fake_git
+):
+    done = await _approved_feature(client, scope, actor, reviewer)
+    rev_id = done["working_revision"]["id"]
+    async with TestSession() as s:  # status still approved, only the PR state says merged
+        await s.execute(
+            update(TlFeatureRevision)
+            .where(TlFeatureRevision.id == uuid.UUID(rev_id))
+            .values(pr_state="merged")
+        )
+        await s.commit()
+    resp = await _post_transition(client, done["id"], rev_id, "withdraw_approval", actor["email"])
+    assert resp.status_code == 409
+    assert PR_MERGED in resp.json()["detail"]["reasons"]
+
+
+async def test_reapproval_after_edits_updates_the_same_pr(client, scope, actor, reviewer, fake_git):
+    done = await _approved_feature(client, scope, actor, reviewer)
+    out = (await _do(client, done, "withdraw_approval", reviewer["email"])).json()
+    out = (await _do(client, out, "withdraw", actor["email"])).json()
+    rev = out["working_revision"]
+    resp = await client.patch(
+        f"{BASE}/features/{out['id']}/revisions/{rev['id']}",
+        json={
+            "lock_version": rev["lock_version"],
+            "title": "Titolo corretto",
+            "actor_email": actor["email"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    pushes = len(fake_git.calls_of("put_file"))
+
+    ready = await _get(client, out["id"], actor["email"])
+    out = (await _do(client, ready, "submit", actor["email"])).json()
+    final = (await _do(client, out, "approve", reviewer["email"])).json()
+    assert final["working_revision"]["pr_number"] == 101
+    assert len(fake_git.calls_of("create_pull")) == 1
+    assert len(fake_git.calls_of("put_file")) > pushes
+    assert "Titolo corretto" in fake_git.calls_of("put_file")[-1][2]
+    assert "tl.pr.updated" in await _event_actions(client, done["id"])
+
+
+async def test_withdraw_approval_on_a_reopened_feature_keeps_the_published_revision(
+    client, scope, actor, reviewer, fake_git
+):
+    done = await _approved_feature(client, scope, actor, reviewer)
+    first_id = uuid.UUID(done["working_revision"]["id"])
+    # simulate the merge: first revision published, nothing in progress
+    async with TestSession() as s:
+        await s.execute(
+            update(TlFeatureRevision)
+            .where(TlFeatureRevision.id == first_id)
+            .values(status=TlRevisionStatus.MERGED, pr_state="merged")
+        )
+        await s.execute(
+            update(TlFeature)
+            .where(TlFeature.id == uuid.UUID(done["id"]))
+            .values(
+                published_revision_id=first_id,
+                working_revision_id=None,
+                status=TlFeatureStatus.IMPLEMENTED,
+            )
+        )
+        await s.commit()
+    detail = await _get(client, done["id"], actor["email"])
+    resp = await client.post(
+        f"{BASE}/features/{done['id']}/revisions/{first_id}/transitions",
+        json={"action": "reopen", "actor_email": actor["email"]},
+    )
+    assert resp.status_code == 200, resp.text
+    reopened = resp.json()
+    second = reopened["working_revision"]
+    assert second["id"] != str(first_id) and second["status"] == "draft"
+    assert detail["published_revision"]["id"] == str(first_id)
+
+    out = (await _do(client, reopened, "submit", actor["email"])).json()
+    out = (await _do(client, out, "approve", reviewer["email"])).json()
+    out = (await _do(client, out, "withdraw_approval", reviewer["email"])).json()
+    assert out["working_revision"]["status"] == "in_review"
+    assert out["status"] == "implemented"
+    assert out["published_revision"]["id"] == str(first_id)

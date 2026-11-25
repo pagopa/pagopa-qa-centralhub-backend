@@ -506,3 +506,22 @@ async def test_reapproval_does_not_create_second_impl_task(client, scope, actor,
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "jira_task_exists"
     assert len([c for c in jira.created if c["issue_type"] == "Implementazione suite di TA"]) == count
+
+
+async def test_withdraw_and_reapproval_do_not_create_a_second_impl_task(client, scope, actor, jira):
+    from tests.test_tl_workflow import _do, _ready_feature
+
+    await _jira_scope(client, scope, jira)
+    reviewer = await _make_user("rev")
+    detail = await _ready_feature(client, scope, actor, reviewer)
+    detail = (await _do(client, detail, "submit", actor["email"])).json()
+    done = (await _do(client, detail, "approve", reviewer["email"])).json()
+    impl = [c for c in jira.created if c["issue_type"] == "Implementazione suite di TA"]
+    assert len(impl) == 1
+
+    out = (await _do(client, done, "withdraw_approval", reviewer["email"])).json()
+    again = await _do(client, out, "approve", reviewer["email"])
+    assert again.status_code == 200, again.text
+    impl = [c for c in jira.created if c["issue_type"] == "Implementazione suite di TA"]
+    assert len(impl) == 1
+    assert again.json()["jira_impl_key"] == impl[0]["key"]

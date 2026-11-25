@@ -32,6 +32,7 @@ from app.services.test_lifecycle import jira_client as jira_mod
 from app.services.test_lifecycle import rebase as rebase_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle.actors import resolve_actor
+from app.services.test_lifecycle.advisory_lock import try_advisory_lock
 from app.services.test_lifecycle.git_client import TlGitError, TlGitNotConfigured
 from app.services.test_lifecycle.log_safe import log_safe
 
@@ -43,8 +44,15 @@ NOT_REVIEWER_REASON = "Solo il reviewer assegnato può eseguire questa azione"
 NOTE_REQUIRED_REASON = "Serve una nota per richiedere modifiche"
 REPO_FOLDER_REQUIRED_REASON = "L'ambito non ha una cartella del repository configurata"
 REVIEWER_IS_OWNER_REASON = "Il reviewer coincide con l'owner di progettazione"
+OWNER_REQUIRED_REASON = "Accesso come owner di progettazione richiesto"
+NOT_OWNER_REASON = "Solo l'owner di progettazione può eseguire questa azione"
+NOT_APPROVED_REASON = "La revisione non è approvata"
+NOT_IN_REVIEW_REASON = "La revisione non è in revisione"
+PR_ALREADY_MERGED_REASON = "La PR è già stata mergiata: usa Riapri"
 # Motivi che identificano un attore non abilitato (403) invece di una guardia bloccante (409).
-_ACTOR_REASONS = (REVIEWER_REQUIRED_REASON, NOT_REVIEWER_REASON)
+_REVIEWER_ACTOR_REASONS = (REVIEWER_REQUIRED_REASON, NOT_REVIEWER_REASON)
+_OWNER_ACTOR_REASONS = (OWNER_REQUIRED_REASON, NOT_OWNER_REASON)
+PUBLISH_IN_PROGRESS_REASON = "Pubblicazione della PR in corso: riprova tra poco"
 
 
 @dataclass
@@ -61,6 +69,10 @@ class TransitionNotAllowedError(Exception):
 
 
 class NotReviewerError(Exception):
+    pass
+
+
+class NotOwnerError(Exception):
     pass
 
 
@@ -109,6 +121,34 @@ def _review_reasons(
     return []
 
 
+def _withdraw_approval_reasons(
+    feature: TlFeature, revision: TlFeatureRevision, actor: User | None
+) -> list[str]:
+    """Approved -> in_review: only the assigned reviewer, and never once the PR is merged."""
+    if revision.status == TlRevisionStatus.MERGED or revision.pr_state == "merged":
+        return [PR_ALREADY_MERGED_REASON]
+    if revision.status != TlRevisionStatus.APPROVED:
+        return [NOT_APPROVED_REASON]
+    if actor is None:
+        return [REVIEWER_REQUIRED_REASON]
+    if feature.reviewer_id != actor.id:
+        return [NOT_REVIEWER_REASON]
+    return []
+
+
+def _withdraw_reasons(
+    feature: TlFeature, revision: TlFeatureRevision, actor: User | None
+) -> list[str]:
+    """In review -> draft: only the design owner, no note needed."""
+    if revision.status != TlRevisionStatus.IN_REVIEW:
+        return [NOT_IN_REVIEW_REASON]
+    if actor is None:
+        return [OWNER_REQUIRED_REASON]
+    if feature.design_owner_id != actor.id:
+        return [NOT_OWNER_REASON]
+    return []
+
+
 def available_transitions(
     feature: TlFeature,
     revision: TlFeatureRevision | None,
@@ -116,7 +156,7 @@ def available_transitions(
     view: TlRevisionOut | None = None,
     scope: TlScope | None = None,
 ) -> list[TlTransitionOut]:
-    """Le 4 azioni, sempre nello stesso ordine, con `allowed` e motivi in italiano.
+    """Le 6 azioni, sempre nello stesso ordine, con `allowed` e motivi in italiano.
 
     `view` è la revisione serializzata (scenari con errori di validazione); serve a `submit`,
     insieme a `scope` (cartella del repository obbligatoria).
@@ -127,6 +167,10 @@ def available_transitions(
             TransitionCheck(TlTransitionAction.SUBMIT.value, False, list(no_rev)),
             TransitionCheck(TlTransitionAction.APPROVE.value, False, list(no_rev)),
             TransitionCheck(TlTransitionAction.REQUEST_CHANGES.value, False, list(no_rev)),
+        ]
+        withdraw_checks = [
+            TransitionCheck(TlTransitionAction.WITHDRAW_APPROVAL.value, False, list(no_rev)),
+            TransitionCheck(TlTransitionAction.WITHDRAW.value, False, list(no_rev)),
         ]
     else:
         submit = _submit_reasons(feature, revision, view, scope)
@@ -142,8 +186,17 @@ def available_transitions(
             TransitionCheck(TlTransitionAction.APPROVE.value, not approve, approve),
             TransitionCheck(TlTransitionAction.REQUEST_CHANGES.value, not review, list(review)),
         ]
+        withdraw_approval = _withdraw_approval_reasons(feature, revision, actor)
+        withdraw = _withdraw_reasons(feature, revision, actor)
+        withdraw_checks = [
+            TransitionCheck(
+                TlTransitionAction.WITHDRAW_APPROVAL.value, not withdraw_approval, withdraw_approval
+            ),
+            TransitionCheck(TlTransitionAction.WITHDRAW.value, not withdraw, withdraw),
+        ]
     reopen = rebase_svc.reopen_reasons(feature)
     checks.append(TransitionCheck(TlTransitionAction.REOPEN.value, not reopen, reopen))
+    checks.extend(withdraw_checks)
     return [
         TlTransitionOut(action=TlTransitionAction(c.action), allowed=c.allowed, reasons=c.reasons)
         for c in checks
@@ -151,6 +204,24 @@ def available_transitions(
 
 
 async def apply_transition(
+    db: AsyncSession,
+    feature_id: uuid.UUID,
+    revision_id: uuid.UUID,
+    action: TlTransitionAction,
+    actor_email: str,
+    note: str | None,
+) -> TlFeatureDetail:
+    if action != TlTransitionAction.WITHDRAW_APPROVAL:
+        return await _apply_transition(db, feature_id, revision_id, action, actor_email, note)
+    # The PR is published right after an approval without row locks, under this advisory lock:
+    # withdrawing the approval meanwhile would make that step fail in a confusing way.
+    async with try_advisory_lock(db, f"tl_pr:{revision_id}") as got:
+        if not got:
+            raise TransitionNotAllowedError([PUBLISH_IN_PROGRESS_REASON])
+        return await _apply_transition(db, feature_id, revision_id, action, actor_email, note)
+
+
+async def _apply_transition(
     db: AsyncSession,
     feature_id: uuid.UUID,
     revision_id: uuid.UUID,
@@ -176,13 +247,26 @@ async def apply_transition(
         c for c in available_transitions(feature, rev, actor, view, scope) if c.action == action
     )
     if not check.allowed:
-        # Revisione nello stato giusto ma attore non reviewer: 403, non 409.
+        # Revisione nello stato giusto ma attore non abilitato: 403, non 409.
+        wrong_reviewer = any(r in _REVIEWER_ACTOR_REASONS for r in check.reasons)
         if (
             action in (TlTransitionAction.APPROVE, TlTransitionAction.REQUEST_CHANGES)
             and rev.status == TlRevisionStatus.IN_REVIEW
-            and any(r in _ACTOR_REASONS for r in check.reasons)
+            and wrong_reviewer
         ):
             raise NotReviewerError(actor.email)
+        if (
+            action == TlTransitionAction.WITHDRAW_APPROVAL
+            and rev.status == TlRevisionStatus.APPROVED
+            and wrong_reviewer
+        ):
+            raise NotReviewerError(actor.email)
+        if (
+            action == TlTransitionAction.WITHDRAW
+            and rev.status == TlRevisionStatus.IN_REVIEW
+            and any(r in _OWNER_ACTOR_REASONS for r in check.reasons)
+        ):
+            raise NotOwnerError(actor.email)
         raise TransitionNotAllowedError(check.reasons)
 
     first_publication = feature.published_revision_id is None
@@ -211,6 +295,31 @@ async def apply_transition(
             "tl.revision.changes_requested",
             actor,
             {"revision_id": str(rev.id), "revision_number": rev.number, "note": text},
+        )
+    elif action == TlTransitionAction.WITHDRAW_APPROVAL:
+        # The PR (if any), the Jira keys and the snapshot of the approval stay as they are.
+        rev.status = TlRevisionStatus.IN_REVIEW
+        rev.approved_by = None
+        rev.approved_at = None
+        if first_publication:
+            feature.status = TlFeatureStatus.IN_REVIEW
+        history.record_event(
+            db,
+            feature.id,
+            "tl.revision.approval_withdrawn",
+            actor,
+            {"revision_id": str(rev.id), "revision_number": rev.number},
+        )
+    elif action == TlTransitionAction.WITHDRAW:
+        rev.status = TlRevisionStatus.DRAFT
+        if first_publication:
+            feature.status = TlFeatureStatus.DRAFT
+        history.record_event(
+            db,
+            feature.id,
+            "tl.revision.withdrawn",
+            actor,
+            {"revision_id": str(rev.id), "revision_number": rev.number},
         )
     else:  # APPROVE
         rev.status = TlRevisionStatus.APPROVED

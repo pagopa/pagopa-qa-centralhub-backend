@@ -27,6 +27,7 @@ from app.services.test_lifecycle import issues as issues_svc
 from app.services.test_lifecycle.advisory_lock import try_advisory_lock
 from app.services.test_lifecycle.gherkin import render_feature_file
 from app.services.test_lifecycle.git_client import TlGitClient, TlGitError
+from app.services.test_lifecycle.log_safe import log_safe
 
 SLUG_MAX = 60
 UNEXPECTED_ERROR = "Errore imprevisto nella creazione della PR"
@@ -201,11 +202,22 @@ async def publish_revision(
         body = pr_body(feature, rev, [sc.tag for sc, _ in rows])
         known_base_sha = rev.base_commit_sha
         republish = rev.pr_state == "open"
+        known_pr_number = rev.pr_number
         await db.commit()  # rilascia i lock di riga prima della rete
 
         # (c) GitHub, senza lock di riga
         base = settings.tl_base_branch
         try:
+            if republish and known_pr_number is not None:
+                # The PR may have been merged on GitHub before the sync noticed it: do not touch
+                # the branch or open a second PR. The sync will record the merge.
+                if (await client.get_pull(known_pr_number)).state == "merged":
+                    logger.info(
+                        "La PR %s della revisione %s è già stata mergiata: nessuna ripubblicazione",
+                        known_pr_number,
+                        log_safe(revision_id),
+                    )
+                    return await features_svc.get_feature_detail(db, feature_id, actor.email)
             base_sha = await client.head_sha(base)
             branch_existed = await client.branch_exists(branch)
             if republish and branch_existed:

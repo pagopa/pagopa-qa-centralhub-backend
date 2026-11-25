@@ -324,6 +324,14 @@ def _translate(exc: Exception) -> HTTPException:
                 "message": "Solo il reviewer assegnato può approvare o richiedere modifiche",
             },
         )
+    if isinstance(exc, workflow_svc.NotOwnerError):
+        return HTTPException(
+            status_code=403,
+            detail={
+                "code": "not_owner",
+                "message": "Solo l'owner di progettazione può ritirare la revisione",
+            },
+        )
     if isinstance(exc, reviews_svc.CommentNotFoundError):
         return HTTPException(status_code=404, detail="Commento non trovato")
     if isinstance(exc, reviews_svc.RevisionNotCommentableError):
@@ -560,7 +568,11 @@ async def remove_scenario(
 async def transition_revision(
     feature_id: uuid.UUID, revision_id: uuid.UUID, body: TlTransitionRequest, db: DbDep
 ) -> TlFeatureDetail:
-    """Transizione di workflow. Bloccata -> 409 con `reasons`; non reviewer -> 403.
+    """Transizione di workflow. Bloccata -> 409 con `reasons`.
+
+    Attore non abilitato -> 403: `not_reviewer` (approva, richiedi modifiche, riporta in review)
+    oppure `not_owner` (ritira in bozza). `withdraw_approval` è 409 se la PR è già mergiata o se
+    la pubblicazione della PR è in corso.
 
     `request_changes` senza nota è bloccata con 409 `transition_not_allowed` (nessuna
     validazione di schema: la nota è obbligatoria solo per quell'azione). Una nota oltre
