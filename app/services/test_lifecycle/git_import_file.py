@@ -1,16 +1,21 @@
 """Importa da Git: un feature file (qualsiasi branch) nella bozza di una feature.
 
-Il file è solo il punto di partenza: la PR dell'hub lo porterà su `main` nello stesso percorso e,
-se il branch di partenza non è `main`, una PR di pulizia lo toglierà da quel branch.
+Il file è solo il punto di partenza: l'hub apre un branch di lavoro dal branch base con il file
+nello stesso percorso e, all'approvazione, la PR dell'hub lo porta su `main`. Il branch di
+partenza non viene mai toccato (nessuna PR di pulizia).
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 from urllib.parse import unquote, urlparse
 
 from app.config import settings
+from app.services.test_lifecycle.branch_sync_rules import default_branch_name
+
+logger = logging.getLogger(__name__)
 
 _BLOB = re.compile(r"^/([^/]+/[^/]+)/blob/(.+)$")
 
@@ -213,14 +218,10 @@ async def import_from_git(
         "path": path,
         "blob_sha": file.blob_sha,
         "imported_at": datetime.now(UTC).isoformat(),
-        "cleanup": {
-            "state": "pending",
-            "pr_number": None,
-            "pr_url": None,
-            "error": None,
-            "note": None,
-        },
     }
+    # the working branch of the draft: opened below, after the commit, with the imported file
+    if rev.work_branch is None:
+        rev.work_branch = default_branch_name(feature.code, rev.number)
     history.record_event(
         db,
         feature.id,
@@ -235,86 +236,47 @@ async def import_from_git(
         },
     )
     await db.commit()
+    await _open_working_branch(db, feature_id, revision_id, actor_email, client)
     db.expunge_all()  # oggetti scaduti dal commit: il dettaglio li rilegge da zero
     detail = await features_svc.get_feature_detail(db, feature_id, actor_email)
     return TlImportGitResult(feature=detail, ignored_tags=ignored, replaced=replaced)
 
 
-# ── PR di pulizia sul branch di partenza ──────────────────────────────────────
+# ── branch di lavoro ──────────────────────────────────────────────────────────
 
 
-def cleanup_branch(code: str) -> str:
-    return f"qa-hub/cleanup-{code.lower()}"
+async def _open_working_branch(
+    db: Any, feature_id: Any, revision_id: Any, actor_email: str, client: Any
+) -> None:
+    """Opens the working branch from the base branch and writes the imported file on it.
 
-
-async def open_cleanup_pr(db: Any, feature_id: Any, client: Any, *, force: bool = False) -> None:
-    """Dopo la PR dell'hub: PR verso il branch di partenza che rimuove il file importato.
-
-    Niente da fare senza provenienza, con branch di partenza = `main`, o se la pulizia è già
-    aperta / non necessaria. Senza `force` serve una PR dell'hub aperta (il test non sparisce
-    mai prima che la sua nuova versione sia pronta). Esito ed errori in `import_source.cleanup`.
+    Best effort: the import is already committed, a Git problem is only logged and the branch is
+    created at the first push. The file is written over what is on the branch only when the
+    branch was created just now: a branch that already exists (a name chosen at Riapri, an
+    earlier import) may hold someone's work, and then the sync state asks the person.
     """
     from sqlalchemy import select
 
     from app.models.test_lifecycle import TlFeatureRevision
-    from app.services.test_lifecycle import features as features_svc
-    from app.services.test_lifecycle.git_client import TlGitError
+    from app.services.test_lifecycle import branch_sync
+    from app.services.test_lifecycle.actors import resolve_actor
+    from app.services.test_lifecycle.git_client import TlGitError, TlGitNotConfigured
 
-    feature = await features_svc._lock_feature(db, feature_id)
-    source = dict(feature.import_source or {})
-    state = (source.get("cleanup") or {}).get("state")
-    code = feature.code
-    if not source or state in ("open", "not_needed"):
-        await db.rollback()
-        return
-    if not force:
-        hub_pr = (
+    try:
+        branch = (
             await db.execute(
-                select(TlFeatureRevision.id).where(
-                    TlFeatureRevision.feature_id == feature.id,
-                    TlFeatureRevision.pr_state == "open",
-                )
+                select(TlFeatureRevision.work_branch).where(TlFeatureRevision.id == revision_id)
             )
-        ).first()
-        if hub_pr is None:
-            await db.rollback()
-            return
-    branch, path = source["branch"], source["path"]
-    await db.rollback()  # nessuna transazione aperta durante la rete
-
-    outcome: dict[str, Any] = {"pr_number": None, "pr_url": None, "error": None, "note": None}
-    if branch == settings.tl_base_branch:
-        note = "Il file viene da main: la PR dell'hub lo sostituisce"
-        outcome.update(state="not_needed", note=note)
-    else:
-        try:
-            if not await client.branch_exists(branch):
-                outcome.update(state="not_needed", note=f"Il branch {branch} non esiste più")
-            elif await client.get_file(path, branch) is None:
-                outcome.update(state="not_needed", note=f"Il file non è più sul branch {branch}")
-            else:
-                clean = cleanup_branch(code)
-                await client.create_branch(clean, await client.head_sha(branch))
-                current = await client.get_file(path, clean)
-                if current is not None:
-                    await client.delete_file(
-                        path, clean, f"chore(qa-hub): rimuovi {code}, ora gestito da QA Hub",
-                        current.blob_sha,
-                    )
-                pull = await client.find_open_pull(clean)
-                if pull is None:
-                    pull = await client.create_pull(
-                        clean, branch, f"Rimuovi {code}: ora gestito da QA Hub",
-                        f"Il feature file `{path}` è stato importato in QA Hub come **{code}**.\n"
-                        "La versione gestita dall'hub arriva su main con la PR dell'hub: questa PR "
-                        "lo toglie dal branch, così le due PR non vanno in conflitto.\n",
-                    )
-                outcome.update(state="open", pr_number=pull.number, pr_url=pull.url)
-        except TlGitError as exc:
-            outcome.update(state="error", error=exc.message[:1000])
-
-    feature = await features_svc._lock_feature(db, feature_id)
-    source = dict(feature.import_source or {})
-    source["cleanup"] = outcome
-    feature.import_source = source
-    await db.commit()
+        ).scalar_one()
+        await db.rollback()  # no transaction open during the network (and no expired objects)
+        actor = await resolve_actor(db, actor_email)
+        created = await branch_sync.ensure_branch(client, branch, settings.tl_base_branch)
+        await branch_sync.push(db, feature_id, revision_id, actor, client, overwrite=created)
+    except (
+        TlGitError,
+        TlGitNotConfigured,
+        branch_sync.SyncNotAllowedError,
+        branch_sync.RepoChangedError,
+    ):
+        logger.warning("working branch not opened for the import of %s", feature_id, exc_info=True)
+        await db.rollback()

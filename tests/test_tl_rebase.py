@@ -247,7 +247,7 @@ async def test_reapproval_updates_same_pr_branch(client, scope, actor, reviewer,
     assert len([c for c in fake.calls_of("create_pull") if c[1] == branch]) == 1
     assert fake.files(branch)[done["git_path"]][0].count("con la carta") == 1
     assert fake.branches[branch] != fake.branches["main"]
-    assert fake.calls_of("reset_branch")
+    assert fake.calls_of("reset_branch") == []  # a working branch is never reset
     async with TestSession() as s:
         rows = (
             await s.execute(

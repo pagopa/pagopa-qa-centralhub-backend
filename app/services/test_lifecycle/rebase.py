@@ -35,6 +35,8 @@ from app.schemas.test_lifecycle import (
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import history
 from app.services.test_lifecycle.actors import resolve_actor
+from app.services.test_lifecycle.branch_sync_rules import blob_sha, default_branch_name
+from app.services.test_lifecycle.gherkin import render_feature_file
 
 REOPEN_PHASE1_REASON = "Disponibile dopo il merge del feature file (fase Git)"
 REOPEN_OPEN_REVISION_REASON = "Esiste già una revisione in corso"
@@ -76,7 +78,9 @@ def reopen_reasons(feature: TlFeature) -> list[str]:
     return []
 
 
-async def reopen(db: AsyncSession, feature: TlFeature, actor: User) -> TlFeatureRevision:
+async def reopen(
+    db: AsyncSession, feature: TlFeature, actor: User, branch_name: str | None = None
+) -> TlFeatureRevision:
     """Nuova revisione `draft` copiata dalla pubblicata. Il chiamante tiene il lock sulla
     feature, ha verificato `reopen_reasons` e committa."""
     published = await db.get(TlFeatureRevision, feature.published_revision_id)
@@ -96,8 +100,14 @@ async def reopen(db: AsyncSession, feature: TlFeature, actor: User) -> TlFeature
         created_by=actor.email,
         # a change needs its own Jira tasks: design and implementation start empty, the epic carries over
         jira_qa_epic_key=feature.jira_qa_epic_key,
+        # the working branch of the changes; the hub baseline is the render as published (the
+        # repository baseline is noted when the branch is opened), so a branch that already
+        # holds other work shows up as "repo ahead" at the next check
+        work_branch=branch_name or default_branch_name(feature.code, number),
         **{f: getattr(published, f) for f in _COPIED_REVISION_FIELDS},
     )
+    published_render, _ = await history.build_render(db, feature, published)
+    rev.work_hub_sha = blob_sha(render_feature_file(published_render))
     db.add(rev)
     await db.flush()
     for content in await _contents(db, published.id):

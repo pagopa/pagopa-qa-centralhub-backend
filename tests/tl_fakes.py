@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import Any
 
 from app.services.test_lifecycle import git_client as git_client_mod
+from app.services.test_lifecycle.branch_sync_rules import blob_sha as git_blob_sha
 from app.services.test_lifecycle.git_client import ChangedFile, GitFile, PullInfo, TlGitError
 
 REPO_URL = "https://github.test/org/repo"
@@ -69,7 +70,7 @@ class FakeGitClient:
         """Commit `text` at `path` on `branch` (default base) directly, bypassing call records."""
         branch = branch or self.base
         files = dict(self.commits[self.branches[branch]])
-        files[path] = (text, self._sha("blob"))
+        files[path] = (text, git_blob_sha(text))  # like git: the id of a file is its content's hash
         self.branches[branch] = self._commit(files)
         return self.branches[branch]
 
@@ -133,7 +134,7 @@ class FakeGitClient:
         current = files.get(path)
         if current is not None and blob_sha != current[1]:
             raise TlGitError(409, f"{path} does not match")
-        files[path] = (text, self._sha("blob"))
+        files[path] = (text, git_blob_sha(text))
         self.branches[branch] = self._commit(files)
         self.put_messages.append(message)
         return self.branches[branch]

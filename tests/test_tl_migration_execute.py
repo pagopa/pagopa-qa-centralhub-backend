@@ -314,3 +314,62 @@ def test_lost_comments():
 def test_no_items_for_unknown_scope_is_blocked():
     assert issubclass(migration.MigrationBlocked, Exception)
     assert uuid.uuid4()
+
+
+async def test_a_migrated_draft_with_git_content_gets_a_working_branch(env):
+    s, conf, git, _ = env
+    legacy = LEGACY.format(s=s).replace("FEAT_001", "FEAT_003")
+    git.seed_file(f"src/{s}/wip.feature", legacy)
+    conf.add_page(
+        "p3",
+        f"FEAT_003_{s} - Bozza",
+        page(f"FEAT_003_{s}", "Bozza", "WIP", file_url=REPO + f"src/{s}/wip.feature"),
+    )
+    await _analyze_confirm(conf, git, s)
+    await _execute(env)
+    async with TestSession() as db:
+        scope = (await db.execute(select(TlScope).where(TlScope.code == s))).scalar_one()
+        feats = {
+            f.number: f
+            for f in (
+                await db.execute(select(TlFeature).where(TlFeature.scope_id == scope.id))
+            ).scalars()
+        }
+        draft = await db.get(TlFeatureRevision, feats[3].working_revision_id)
+        published = await db.get(TlFeatureRevision, feats[1].published_revision_id)
+        hub_born = await db.get(TlFeatureRevision, feats[2].working_revision_id)
+        assert draft.origin == "git" and draft.work_branch == f"qa-hub/{feats[3].code}-r1"
+        assert published.work_branch is None  # already on main: nothing to work on
+        assert hub_born.work_branch is None  # no Git content: stays in the hub until approval
+
+
+async def test_a_migrated_draft_pushes_to_its_legacy_path_not_to_a_second_file(env):
+    from app.services.test_lifecycle import branch_sync
+    from app.services.test_lifecycle.actors import resolve_actor
+
+    s, conf, git, actor = env
+    legacy_path = f"src/{s}/wip.feature"
+    git.seed_file(legacy_path, LEGACY.format(s=s).replace("FEAT_001", "FEAT_003"))
+    conf.add_page(
+        "p3",
+        f"FEAT_003_{s} - Bozza",
+        page(f"FEAT_003_{s}", "Bozza", "WIP", file_url=REPO + legacy_path),
+    )
+    await _analyze_confirm(conf, git, s)
+    await _execute(env)
+    async with TestSession() as db:
+        scope = (await db.execute(select(TlScope).where(TlScope.code == s))).scalar_one()
+        feature = (
+            await db.execute(
+                select(TlFeature).where(TlFeature.scope_id == scope.id, TlFeature.number == 3)
+            )
+        ).scalar_one()
+        rev = await db.get(TlFeatureRevision, feature.working_revision_id)
+        assert feature.import_source["path"] == legacy_path
+        assert rev.work_file_sha == git.files("main")[legacy_path][1]
+        user = await resolve_actor(db, actor["email"])
+        await branch_sync.push(db, feature.id, rev.id, user, git)
+        files = git.files(rev.work_branch)
+        assert f"# qa-hub: {feature.code}" in files[legacy_path][0]
+        generated = [p for p in files if p.endswith(".feature") and "Bozza" in p]
+        assert generated == []  # no second copy under a generated name

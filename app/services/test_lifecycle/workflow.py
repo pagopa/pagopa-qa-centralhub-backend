@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.test_lifecycle import (
     TlFeature,
     TlFeatureRevision,
@@ -24,9 +25,16 @@ from app.schemas.test_lifecycle import (
     TlTransitionAction,
     TlTransitionOut,
 )
+from app.services.test_lifecycle import (
+    branch_sync,
+    branch_sync_rules,
+    git_publish,
+    history,
+    jira_tasks,
+    tags,
+)
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_client as git_client_mod
-from app.services.test_lifecycle import git_publish, history, jira_tasks, tags
 from app.services.test_lifecycle import issues as issues_svc
 from app.services.test_lifecycle import jira_client as jira_mod
 from app.services.test_lifecycle import rebase as rebase_svc
@@ -53,6 +61,8 @@ PR_ALREADY_MERGED_REASON = "La PR è già stata mergiata: usa Riapri"
 _REVIEWER_ACTOR_REASONS = (REVIEWER_REQUIRED_REASON, NOT_REVIEWER_REASON)
 _OWNER_ACTOR_REASONS = (OWNER_REQUIRED_REASON, NOT_OWNER_REASON)
 PUBLISH_IN_PROGRESS_REASON = "Pubblicazione della PR in corso: riprova tra poco"
+REPO_CHANGED_REASON = "Il repo è cambiato: accetta o sovrascrivi"
+SYNC_BUSY_REASON = "Sincronizzazione con Git in corso: riprova tra poco"
 
 
 @dataclass
@@ -218,7 +228,31 @@ async def apply_transition(
     action: TlTransitionAction,
     actor_email: str,
     note: str | None,
+    branch_name: str | None = None,
 ) -> TlFeatureDetail:
+    if action == TlTransitionAction.SUBMIT:
+        # the branch must hold what is reviewed; a repository that changed blocks the submit
+        try:
+            await branch_sync.push_for_submit(db, feature_id, revision_id, actor_email)
+        except branch_sync.RepoChangedError as exc:
+            raise TransitionNotAllowedError([REPO_CHANGED_REASON]) from exc
+        except branch_sync.SyncBusyError as exc:
+            raise TransitionNotAllowedError([SYNC_BUSY_REASON]) from exc
+    if action == TlTransitionAction.REOPEN and branch_name is not None:
+        problem = branch_sync_rules.check_branch_name(branch_name, settings.tl_base_branch)
+        if problem:
+            raise branch_sync.InvalidBranchNameError(problem)
+        if await branch_sync.branch_in_use(db, branch_name):
+            raise branch_sync.InvalidBranchNameError(
+                "Il branch è già usato da un'altra revisione ancora aperta"
+            )
+    if action == TlTransitionAction.REOPEN:
+        detail = await _apply_transition(
+            db, feature_id, revision_id, action, actor_email, note, branch_name
+        )
+        if detail.working_revision and detail.working_revision.work_branch:
+            await branch_sync.open_branch_best_effort(db, feature_id, detail.working_revision.id)
+        return detail
     if action != TlTransitionAction.WITHDRAW_APPROVAL:
         return await _apply_transition(db, feature_id, revision_id, action, actor_email, note)
     # The PR is published right after an approval without row locks, under this advisory lock:
@@ -236,6 +270,7 @@ async def _apply_transition(
     action: TlTransitionAction,
     actor_email: str,
     note: str | None,
+    branch_name: str | None = None,
 ) -> TlFeatureDetail:
     actor = await resolve_actor(db, actor_email)
     feature = await features_svc._lock_feature(db, feature_id)
@@ -245,7 +280,7 @@ async def _apply_transition(
         reasons = rebase_svc.reopen_reasons(feature)
         if reasons:
             raise TransitionNotAllowedError(reasons)
-        await rebase_svc.reopen(db, feature, actor)
+        await rebase_svc.reopen(db, feature, actor, branch_name)
         await db.commit()
         return await features_svc.get_feature_detail(db, feature_id, actor.email)
 
@@ -357,7 +392,6 @@ async def _apply_transition(
     actor_email = actor.email  # gli step successivi fanno rollback: l'oggetto scade
     if action == TlTransitionAction.APPROVE:
         await _publish_best_effort(db, feature_id, revision_id, actor)
-        await _import_cleanup_best_effort(db, feature_id)
         await _jira_impl_best_effort(db, feature_id, actor_email)
     return await features_svc.get_feature_detail(db, feature_id, actor_email)
 
@@ -384,20 +418,6 @@ async def _publish_best_effort(
         # l'approvazione è già committata: mai trasformarla in un 500
         logger.exception("Creazione PR fallita per la revisione %s", log_safe(revision_id))
         await git_publish.record_unexpected_error(db, revision_id)
-
-
-async def _import_cleanup_best_effort(db: AsyncSession, feature_id: uuid.UUID) -> None:
-    """Feature importata da un branch: PR di pulizia dopo la PR dell'hub. Mai propagato."""
-    from app.services.test_lifecycle import git_import_file
-
-    try:
-        client = git_client_mod.get_git_client()
-        await git_import_file.open_cleanup_pr(db, feature_id, client)
-    except TlGitNotConfigured:
-        return
-    except Exception:
-        logger.exception("PR di pulizia non creata per la feature %s", log_safe(feature_id))
-        await db.rollback()
 
 
 async def _jira_impl_best_effort(db: AsyncSession, feature_id: uuid.UUID, actor_email: str) -> None:

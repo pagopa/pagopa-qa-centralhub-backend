@@ -193,6 +193,7 @@ async def _revision_out(db: AsyncSession, rev: TlFeatureRevision) -> TlRevisionO
         pr_url=rev.pr_url,
         pr_state=rev.pr_state,
         pr_error=rev.pr_error,
+        work_branch=rev.work_branch,
         base_stale=rev.base_stale,
         merged_commit_sha=rev.merged_commit_sha,
         created_at=rev.created_at,

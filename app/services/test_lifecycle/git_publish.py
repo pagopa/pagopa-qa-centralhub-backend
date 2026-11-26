@@ -25,6 +25,7 @@ from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import history
 from app.services.test_lifecycle import issues as issues_svc
 from app.services.test_lifecycle.advisory_lock import try_advisory_lock
+from app.services.test_lifecycle.branch_sync_rules import blob_sha
 from app.services.test_lifecycle.gherkin import render_feature_file
 from app.services.test_lifecycle.git_client import TlGitClient, TlGitError
 from app.services.test_lifecycle.log_safe import log_safe
@@ -61,6 +62,12 @@ def feature_path(scope: TlScope, feature: TlFeature, title: str) -> str:
     return f"{folder}/{name}" if folder else name
 
 
+def revision_file_path(scope: TlScope, feature: TlFeature, revision: TlFeatureRevision) -> str:
+    """Where the feature file lives: its published path, the imported one, or a generated one."""
+    imported = (feature.import_source or {}).get("path")
+    return feature.git_path or imported or feature_path(scope, feature, revision.title)
+
+
 def branch_name(feature: TlFeature, revision: TlFeatureRevision) -> str:
     return f"qa-hub/{feature.code}-r{revision.number}"
 
@@ -93,10 +100,7 @@ def pr_body(feature: TlFeature, revision: TlFeatureRevision, scenario_tags: list
         lines.append("")
         lines.append(f"Importata da `{source['branch']}`: `{source['path']}`.")
         if source["branch"] != settings.tl_base_branch:
-            lines.append(
-                "Una PR di pulizia toglie il file dal branch di partenza: non unire quel file "
-                "a main da lì."
-            )
+            lines.append("Il file originale resta sul branch di partenza, che l'hub non tocca.")
     return "\n".join(lines) + "\n"
 
 
@@ -124,10 +128,17 @@ async def _record_failure(
     revision_id: uuid.UUID,
     message: str,
     branch: str,
+    synced: tuple[str, str] | None = None,
 ) -> None:
+    """Records the failure. `synced` = (repository sha, hub sha) of a branch and file that the
+    attempt did create: they are kept, or the next attempt would take the hub's own file for a
+    developer's and not write the new content over it."""
     feature = await features_svc._lock_feature(db, feature_id)
     rev = await features_svc._lock_revision(db, feature_id, revision_id)
     rev.pr_error = message
+    if synced is not None:
+        rev.work_branch = branch
+        rev.work_file_sha, rev.work_hub_sha = synced
     await issues_svc.open_issue(
         db,
         kind=TlIssueKind.PR_CREATION_FAILED,
@@ -188,25 +199,28 @@ async def publish_revision(
             raise PublishNotAllowedError(str(revision_id))
         scope = await db.get(TlScope, feature.scope_id)
         assert scope is not None  # noqa: S101 - FK guarantees it
-        branch = branch_name(feature, rev)
+        # a revision with a working branch (import, reopen, migration) publishes on it
+        branch = rev.work_branch or branch_name(feature, rev)
         if not (scope.repo_folder or "").strip():
             message = "L'ambito non ha una cartella del repository configurata"
             await _record_failure(db, feature_id, revision_id, message, branch)
             raise RepoFolderMissingError(str(scope.id))
-        imported = (feature.import_source or {}).get("path")
-        path = feature.git_path or imported or feature_path(scope, feature, rev.title)
+        path = revision_file_path(scope, feature, rev)
         render, rows = await history.build_render(db, feature, rev)
         text_ = render_feature_file(render)
         message_ = commit_message(scope, feature, rev)
         title = pr_title(feature, rev)
         body = pr_body(feature, rev, [sc.tag for sc, _ in rows])
         known_base_sha = rev.base_commit_sha
+        saved_file_sha = rev.work_file_sha
         republish = rev.pr_state == "open"
         known_pr_number = rev.pr_number
         await db.commit()  # rilascia i lock di riga prima della rete
 
         # (c) GitHub, senza lock di riga
         base = settings.tl_base_branch
+        new_saved_sha: str | None = None  # repository sha when the file on the branch is the hub's
+        hub_sha = blob_sha(text_)
         try:
             if republish and known_pr_number is not None:
                 # The PR may have been merged on GitHub before the sync noticed it: do not touch
@@ -220,21 +234,28 @@ async def publish_revision(
                     return await features_svc.get_feature_detail(db, feature_id, actor.email)
             base_sha = await client.head_sha(base)
             branch_existed = await client.branch_exists(branch)
-            if republish and branch_existed:
-                # PR già aperta: il branch riparte da main con il solo file riallineato
-                await client.reset_branch(branch, base_sha)
-            else:
+            if not branch_existed:
                 await client.create_branch(branch, base_sha)
+            # Never reset the branch: it also holds the developers' step code. Only the feature
+            # file is written, and not over an edit a developer made since the last sync (the
+            # merge import records it as a `git` revision, like any edit after approval).
             existing = await client.get_file(path, branch)
-            if existing is None or existing.text != text_:
+            if existing is None or (
+                existing.text != text_
+                and (saved_file_sha is not None and existing.blob_sha == saved_file_sha)
+            ):
                 await client.put_file(
                     path, text_, branch, message_, existing.blob_sha if existing else None
                 )
+                new_saved_sha = hub_sha
+            elif existing.text == text_:
+                new_saved_sha = existing.blob_sha
             pull = await client.find_open_pull(branch)
             if pull is None:
                 pull = await client.create_pull(branch, base, title, body)
         except TlGitError as exc:
-            await _record_failure(db, feature_id, revision_id, exc.message, branch)
+            synced = (new_saved_sha, hub_sha) if new_saved_sha is not None else None
+            await _record_failure(db, feature_id, revision_id, exc.message, branch, synced)
             raise
 
         # (d) esito, righe rilockate e stato ricontrollato
@@ -245,9 +266,13 @@ async def publish_revision(
         rev.pr_number = pull.number
         rev.pr_url = pull.url
         rev.pr_branch = branch
+        rev.work_branch = branch
+        if new_saved_sha is not None:
+            rev.work_file_sha = new_saved_sha
+            rev.work_hub_sha = hub_sha
         rev.pr_state = "open"
         rev.pr_error = None
-        if republish or not (branch_existed and known_base_sha):
+        if not (branch_existed and known_base_sha):
             rev.base_commit_sha = base_sha
         if feature.git_path is None:
             feature.git_path = path

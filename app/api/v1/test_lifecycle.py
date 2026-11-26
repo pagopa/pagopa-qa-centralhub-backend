@@ -18,6 +18,9 @@ from app.models.test_lifecycle import (
     TlStepPhrase,
 )
 from app.schemas.test_lifecycle import (
+    TlBranchPull,
+    TlBranchPush,
+    TlBranchSync,
     TlCommentCreate,
     TlCommentOut,
     TlCommentResolve,
@@ -59,6 +62,7 @@ from app.schemas.test_lifecycle import (
     TlTransitionRequest,
     TlVersionOut,
 )
+from app.services.test_lifecycle import branch_sync as branch_sync_svc
 from app.services.test_lifecycle import deletion as deletion_svc
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_client as git_client_mod
@@ -355,6 +359,27 @@ def _translate(exc: Exception) -> HTTPException:
         return HTTPException(
             status_code=502, detail={"code": "github_error", "message": exc.message}
         )
+    if isinstance(exc, branch_sync_svc.RepoChangedError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "repo_changed",
+                "message": "Il file sul branch è cambiato dall'ultima sincronizzazione",
+            },
+        )
+    if isinstance(exc, branch_sync_svc.InvalidBranchNameError):
+        return HTTPException(
+            status_code=422, detail={"code": "invalid_branch_name", "message": exc.message}
+        )
+    if isinstance(exc, branch_sync_svc.SyncNotAllowedError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "sync_not_allowed",
+                "message": "La sincronizzazione serve una bozza con un branch di lavoro "
+                "e non può girare due volte insieme",
+            },
+        )
     if isinstance(exc, git_publish_svc.PublishNotAllowedError):
         return HTTPException(
             status_code=409,
@@ -448,21 +473,6 @@ async def import_git(
         return await git_import_file.import_from_git(
             db, feature_id, revision_id, body.url, body.lock_version, body.actor_email, client
         )
-    except Exception as exc:
-        raise _translate(exc) from exc
-
-
-@router.post("/features/{feature_id}/import-cleanup", response_model=TlFeatureDetail)
-async def retry_import_cleanup(
-    feature_id: uuid.UUID, body: TlJiraActorRequest, db: DbDep
-) -> TlFeatureDetail:
-    """Riprova la PR che toglie il file importato dal branch di partenza."""
-    try:
-        await resolve_actor(db, body.actor_email)
-        client = git_client_mod.get_git_client()
-        await git_import_file.open_cleanup_pr(db, feature_id, client, force=True)
-        db.expunge_all()
-        return await features_svc.get_feature_detail(db, feature_id, body.actor_email)
     except Exception as exc:
         raise _translate(exc) from exc
 
@@ -598,7 +608,7 @@ async def transition_revision(
     """
     try:
         return await workflow_svc.apply_transition(
-            db, feature_id, revision_id, body.action, body.actor_email, body.note
+            db, feature_id, revision_id, body.action, body.actor_email, body.note, body.branch_name
         )
     except Exception as exc:
         raise _translate(exc) from exc
@@ -723,6 +733,62 @@ async def publish_revision_pr(
         actor = await resolve_actor(db, body.actor_email)
         client = git_client_mod.get_git_client()
         return await git_publish_svc.publish_revision(db, feature_id, revision_id, actor, client)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get(
+    "/features/{feature_id}/revisions/{revision_id}/git-sync", response_model=TlBranchSync
+)
+async def get_branch_sync(
+    feature_id: uuid.UUID, revision_id: uuid.UUID, db: DbDep
+) -> TlBranchSync:
+    """Confronto della bozza con il suo branch di lavoro. Non scrive mai; un guasto di Git è
+    uno stato (`unreachable`, `not_configured`), mai un errore."""
+    try:
+        try:
+            client = git_client_mod.get_git_client()
+        except TlGitNotConfigured:
+            client = branch_sync_svc.NoGitClient()
+        out = await branch_sync_svc.get_status(db, feature_id, revision_id, client)
+        return TlBranchSync(**asdict(out))
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post(
+    "/features/{feature_id}/revisions/{revision_id}/git-sync/push",
+    response_model=TlBranchSync,
+)
+async def push_branch_sync(
+    feature_id: uuid.UUID, revision_id: uuid.UUID, body: TlBranchPush, db: DbDep
+) -> TlBranchSync:
+    """"Salva tutti": un commit del feature file sul branch di lavoro (solo bozze). Se il file
+    sul branch è cambiato: 409 `repo_changed`, salvo `overwrite`. Senza token 503."""
+    try:
+        actor = await resolve_actor(db, body.actor_email)
+        client = git_client_mod.get_git_client()
+        out = await branch_sync_svc.push(
+            db, feature_id, revision_id, actor, client, overwrite=body.overwrite
+        )
+        return TlBranchSync(**asdict(out))
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post(
+    "/features/{feature_id}/revisions/{revision_id}/git-sync/pull",
+    response_model=TlFeatureDetail,
+)
+async def pull_branch_sync(
+    feature_id: uuid.UUID, revision_id: uuid.UUID, body: TlBranchPull, db: DbDep
+) -> TlFeatureDetail:
+    """"Accetta dal repo": sostituisce il contenuto della bozza con il file del branch (solo
+    bozze). File non leggibile 422 `import_parse_error`; file assente 404."""
+    try:
+        actor = await resolve_actor(db, body.actor_email)
+        client = git_client_mod.get_git_client()
+        return await branch_sync_svc.pull(db, feature_id, revision_id, actor, client)
     except Exception as exc:
         raise _translate(exc) from exc
 
