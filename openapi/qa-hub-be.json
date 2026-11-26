@@ -8913,6 +8913,60 @@
         }
       }
     },
+    "/api/v1/test-lifecycle/features/{feature_id}/revisions/{revision_id}/synopsis": {
+      "post": {
+        "tags": [
+          "test-lifecycle"
+        ],
+        "summary": "Generate Synopsis",
+        "description": "Sinossi generata con Gemini dal testo dell'anteprima file; non salva nulla.",
+        "operationId": "generate_synopsis_api_v1_test_lifecycle_features__feature_id__revisions__revision_id__synopsis_post",
+        "parameters": [
+          {
+            "name": "feature_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Feature Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlSynopsisOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/test-lifecycle/gherkin/validate": {
       "post": {
         "tags": [
@@ -19698,6 +19752,29 @@
           "implemented"
         ],
         "title": "TlStepPhraseOut"
+      },
+      "TlSynopsisOut": {
+        "properties": {
+          "synopsis": {
+            "type": "string",
+            "title": "Synopsis"
+          },
+          "max_words": {
+            "type": "integer",
+            "title": "Max Words"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "synopsis",
+          "max_words",
+          "model"
+        ],
+        "title": "TlSynopsisOut"
       },
       "TlTransitionAction": {
         "type": "string",

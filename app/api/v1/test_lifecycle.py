@@ -54,6 +54,7 @@ from app.schemas.test_lifecycle import (
     TlScopeOut,
     TlScopeUpdate,
     TlStepPhraseOut,
+    TlSynopsisOut,
     TlTransitionRequest,
     TlVersionOut,
 )
@@ -71,6 +72,7 @@ from app.services.test_lifecycle import nrt as nrt_svc
 from app.services.test_lifecycle import rebase as rebase_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle import scopes as scopes_svc
+from app.services.test_lifecycle import synopsis as synopsis_svc
 from app.services.test_lifecycle import workflow as workflow_svc
 from app.services.test_lifecycle.actors import UnknownActorError, resolve_actor
 from app.services.test_lifecycle.category_tags import UnknownExtraTagError, category_tags
@@ -805,6 +807,23 @@ async def preview_revision(
 ) -> TlPreviewOut:
     try:
         return await reviews_svc.preview(db, feature_id, revision_id)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post(
+    "/features/{feature_id}/revisions/{revision_id}/synopsis", response_model=TlSynopsisOut
+)
+async def generate_synopsis(
+    feature_id: uuid.UUID, revision_id: uuid.UUID, db: DbDep
+) -> TlSynopsisOut:
+    """Sinossi generata con Gemini dal testo dell'anteprima file; non salva nulla."""
+    try:
+        return await synopsis_svc.generate(db, feature_id, revision_id)
+    except synopsis_svc.SynopsisError as exc:
+        raise HTTPException(
+            status_code=exc.status, detail={"code": exc.code, "message": exc.message}
+        ) from exc
     except Exception as exc:
         raise _translate(exc) from exc
 

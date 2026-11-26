@@ -574,6 +574,12 @@ class TlPreviewOut(BaseModel):
     errors: list[TlPreviewError] = []
 
 
+class TlSynopsisOut(BaseModel):
+    synopsis: str
+    max_words: int
+    model: str
+
+
 class TlGherkinValidateRequest(BaseModel):
     steps: str
     kind: TlScenarioKind = TlScenarioKind.SCENARIO

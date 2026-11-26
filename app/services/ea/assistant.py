@@ -458,6 +458,24 @@ class GeminiModel:
             retryable=True,
         ) from last
 
+    async def generate_text(self, prompt: str, *, max_output_tokens: int = 2048) -> str:
+        """Plain one-shot text generation (no tools), with the same retry and fallback as ``step``.
+
+        An answer cut at the token limit is returned empty: it would be an incomplete text."""
+        from google.genai import types
+
+        config = types.GenerateContentConfig(temperature=0.2, max_output_tokens=max_output_tokens)
+        resp = await self._generate(
+            [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])], config
+        )
+        candidate = resp.candidates[0] if resp.candidates else None
+        if candidate is None or "MAX_TOKENS" in str(candidate.finish_reason or ""):
+            return ""
+        try:
+            return resp.text or ""
+        except ValueError:
+            return ""
+
     @staticmethod
     def _contents(history: list[Msg]) -> list[Any]:
         from google.genai import types

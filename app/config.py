@@ -107,6 +107,12 @@ class Settings(BaseSettings):
     # comma-separated models tried, in order, when the main one stays overloaded
     gemini_fallback_models: str = ""
 
+    # Test Lifecycle: sinossi della feature generata con Gemini (chiave: gemini_api_key). Un
+    # modello "flash" basta per un paragrafo di al più 80 parole: veloce ed economico. Stesso
+    # modello già distribuito per l'assistente (helm GEMINI_MODEL); in caso di sovraccarico si
+    # usano i modelli di gemini_fallback_models.
+    tl_synopsis_model: str = "gemini-3.5-flash"
+
     # Jira integration
     jira_base_url: str = ""
     jira_email: str = ""
