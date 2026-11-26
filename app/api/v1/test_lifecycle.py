@@ -54,6 +54,8 @@ from app.schemas.test_lifecycle import (
     TlScopeOut,
     TlScopeUpdate,
     TlStepPhraseOut,
+    TlTagCleanup,
+    TlTagCleanupApply,
     TlTransitionRequest,
     TlVersionOut,
 )
@@ -71,9 +73,10 @@ from app.services.test_lifecycle import nrt as nrt_svc
 from app.services.test_lifecycle import rebase as rebase_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle import scopes as scopes_svc
+from app.services.test_lifecycle import tag_cleanup as tag_cleanup_svc
 from app.services.test_lifecycle import workflow as workflow_svc
 from app.services.test_lifecycle.actors import UnknownActorError, resolve_actor
-from app.services.test_lifecycle.category_tags import UnknownExtraTagError, category_tags
+from app.services.test_lifecycle.category_tags import category_tags
 from app.services.test_lifecycle.git_client import TlGitError, TlGitNotConfigured
 
 router = APIRouter()
@@ -178,15 +181,6 @@ def _translate(exc: Exception) -> HTTPException:
                 "reasons": exc.reasons,
             },
         )
-    if isinstance(exc, UnknownExtraTagError):
-        return HTTPException(
-            status_code=422,
-            detail={
-                "code": "unknown_extra_tag",
-                "message": f"Tag non ammessi: {', '.join(exc.tags)}. "
-                f"Ammessi: {', '.join(exc.allowed)}",
-            },
-        )
     if isinstance(exc, deletion_svc.FeatureNotDeletableError):
         return HTTPException(
             status_code=409,
@@ -240,6 +234,10 @@ def _translate(exc: Exception) -> HTTPException:
                 "code": "stale_lock",
                 "message": "La revisione è stata modificata da qualcun altro: ricarica e riprova",
             },
+        )
+    if isinstance(exc, tag_cleanup_svc.TagCleanupConflictError):
+        return HTTPException(
+            status_code=409, detail={"code": "tag_cleanup_conflict", "message": exc.message}
         )
     if isinstance(exc, features_svc.RevisionLockedError):
         return HTTPException(
@@ -471,7 +469,7 @@ async def retry_import_cleanup(
 
 @router.get("/category-tags", response_model=list[str])
 async def list_category_tags(db: DbDep) -> list[str]:
-    """Tag di categoria ammessi sugli scenari."""
+    """Tag suggeriti per gli scenari (catalogo, tag base e tag in uso)."""
     return list(await category_tags(db))
 
 
@@ -557,6 +555,26 @@ async def remove_scenario(
         return await features_svc.remove_scenario(
             db, feature_id, revision_id, scenario_id, actor_email
         )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/features/{feature_id}/tag-cleanup", response_model=TlTagCleanup)
+async def get_tag_cleanup(feature_id: uuid.UUID, db: DbDep) -> TlTagCleanup:
+    """Scenari che portano tag di test-type (@e2e, @integration, @api) e cosa si propone."""
+    try:
+        return await tag_cleanup_svc.preview(db, feature_id)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/features/{feature_id}/tag-cleanup", response_model=TlFeatureDetail)
+async def apply_tag_cleanup(
+    feature_id: uuid.UUID, body: TlTagCleanupApply, db: DbDep
+) -> TlFeatureDetail:
+    """Toglie i tag di test-type dagli scenari della bozza e imposta quello del file."""
+    try:
+        return await tag_cleanup_svc.apply(db, feature_id, body.actor_email)
     except Exception as exc:
         raise _translate(exc) from exc
 

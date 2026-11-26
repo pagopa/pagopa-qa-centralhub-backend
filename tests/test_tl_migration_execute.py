@@ -150,8 +150,10 @@ async def test_execute_creates_features_aliases_and_pr(env):
             )
         ).all()
         assert [sc.tag for sc, _ in rows] == [f"@{s.upper()}_001_01", f"@{s.upper()}_001_02"]
-        assert rows[0][1].extra_tags == ["e2e", "regression"]  # tag di feature portato giù
-        assert rows[1][1].extra_tags == ["e2e", "skip"]
+        # the feature-level @e2e is the test type of the file, not a scenario tag
+        assert pay.test_type == "e2e"
+        assert rows[0][1].extra_tags == ["regression"]
+        assert rows[1][1].extra_tags == ["skip"]
         aliases = set(
             (
                 await db.execute(
@@ -298,7 +300,7 @@ async def test_confluence_panel_when_enabled_and_dropped_tag(env, monkeypatch):
             .scalars()
             .all()
         )
-        assert sorted(map(tuple, tags)) == [("e2e",), ("e2e", "skip")]
+        assert sorted(map(tuple, tags)) == [(), ("skip",)]
         scope_row = await db.get(TlMigrationScope, s)
         assert scope_row.executed_at is not None
 

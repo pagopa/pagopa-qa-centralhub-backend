@@ -33,7 +33,6 @@ from app.schemas.test_lifecycle import (
 )
 from app.services.test_lifecycle import history, jira_tasks
 from app.services.test_lifecycle.actors import UnknownActorError, resolve_actor
-from app.services.test_lifecycle.category_tags import check_extra_tags
 from app.services.test_lifecycle.deletable import undeletable_clause
 from app.services.test_lifecycle.gherkin import (
     feature_code,
@@ -41,6 +40,7 @@ from app.services.test_lifecycle.gherkin import (
     validate_steps,
 )
 from app.services.test_lifecycle.scopes import ScopeNotFoundError
+from app.services.test_lifecycle.tags import DEFAULT_STATUS, default_test_type
 
 
 class FeatureNotFoundError(Exception):
@@ -251,6 +251,7 @@ async def create_feature(db: AsyncSession, data: TlFeatureCreate) -> uuid.UUID:
         code=feature_code(scope.code, number),
         status=TlFeatureStatus.DRAFT,
         design_owner_id=data.design_owner_id,
+        test_type=data.test_type or default_test_type(scope.repo_folder),
         created_by=actor.email,
         jira_cache=epic_entries,
     )
@@ -308,7 +309,7 @@ async def set_current_keys(db: AsyncSession, feature: TlFeature, **keys: str | N
 
 
 # Campi che sono guardie del submit: modificabili solo con la revisione di lavoro in bozza.
-_DRAFT_ONLY_FIELDS = ("design_owner_id", "jira_design_key")
+_DRAFT_ONLY_FIELDS = ("design_owner_id", "jira_design_key", "test_type")
 # Il reviewer può essere riassegnato anche durante la review (R17).
 _REVIEWER_STATUSES = (TlRevisionStatus.DRAFT, TlRevisionStatus.IN_REVIEW)
 
@@ -435,6 +436,7 @@ async def get_feature_detail(
         design_owner_id=feature.design_owner_id,
         reviewer_id=feature.reviewer_id,
         impl_owner_id=feature.impl_owner_id,
+        test_type=feature.test_type,
         jira_design_key=feature.jira_design_key,
         jira_impl_key=feature.jira_impl_key,
         created_by=feature.created_by,
@@ -527,6 +529,7 @@ async def list_features(
                 design_owner_id=f.design_owner_id,
                 reviewer_id=f.reviewer_id,
                 impl_owner_id=f.impl_owner_id,
+                test_type=f.test_type,
                 scenario_count=counts.get(rev_id, 0) if rev_id else 0,
                 updated_at=f.updated_at,
                 deletable=not blocked,
@@ -593,7 +596,7 @@ async def add_scenario(
         title=data.title,
         kind=data.kind,
         polarity=data.polarity,
-        extra_tags=[],
+        extra_tags=[DEFAULT_STATUS],
         steps="",
     )
     db.add(content)
@@ -632,7 +635,6 @@ async def update_scenario(
     scenario, content = await _load_content(db, rev.id, scenario_id)
     _require_draft(rev)
     _require_lock(rev, data.lock_version)
-    await check_extra_tags(db, data.extra_tags)
     changes = data.model_dump(
         exclude_unset=True, exclude={"actor_email", "lock_version", "position"}
     )

@@ -102,14 +102,14 @@ def test_classify_wrong_prefix_is_structural():
 
 
 def test_classify_removed_scenario_is_structural():
-    head = GOLDEN.split("  @negativo")[0].rstrip("\n") + "\n"
+    head = GOLDEN.split("  @negative")[0].rstrip("\n") + "\n"
     r = classify(_expected(), _parsed(head), **KW)
     assert [c.kind for c in r.structural] == ["removed_scenario"]
     assert r.structural[0].scenario_tag == "@FDR3_001_02"
 
 
 def test_classify_new_valid_tag_is_new_scenario():
-    extra = "\n  @positivo\n  @FDR3_001_03\n  Scenario: Nuovo\n    Dato x\n    Allora y\n"
+    extra = "\n  @positive\n  @FDR3_001_03\n  Scenario: Nuovo\n    Dato x\n    Allora y\n"
     r = classify(_expected(), _parsed(GOLDEN + extra), **KW)
     assert r.structural == []
     assert [s.identity_tag for s in r.new_scenarios] == ["@FDR3_001_03"]
@@ -127,7 +127,7 @@ def test_classify_missing_header_is_structural():
 def test_classify_unknown_extra_tag_is_textual():
     r = classify(
         _expected(),
-        _parsed(GOLDEN.replace("@runnable @positivo", "@runnable @e2e @positivo")),
+        _parsed(GOLDEN.replace("@runnable @positive", "@runnable @e2e @positive")),
         **KW,
     )
     assert r.textual
@@ -192,3 +192,64 @@ def test_two_identity_tags_is_structural():
 def test_detail_link_is_stripped():
     p = _parsed(GOLDEN.replace("#link:req-1|Requisito", "#link:req-1|Requisito  "))
     assert p.scenarios[0].detail_link == "req-1|Requisito"
+
+
+# ── tag standard (design 2026-11-26) ─────────────────────────────────────────
+
+
+def test_parse_reads_the_test_type_from_the_feature_tags():
+    p = _parsed(GOLDEN.replace("@FDR3_001\n", "@FDR3_001 @api\n", 1))
+    assert (p.feature_tag, p.test_type) == ("@FDR3_001", "api")
+    assert _parsed().test_type is None
+
+
+def test_parse_finds_the_identity_tag_wherever_the_test_type_is():
+    p = _parsed(GOLDEN.replace("@FDR3_001\n", "@e2e @FDR3_001\n", 1))
+    assert (p.feature_tag, p.test_type) == ("@FDR3_001", "e2e")
+
+
+def test_parse_without_identity_tag_does_not_take_the_test_type_for_it():
+    p = _parsed(GOLDEN.replace("@FDR3_001\n", "@integration\n", 1))
+    assert p.feature_tag is None
+    assert p.test_type == "integration"
+
+
+def test_parse_reads_both_polarity_spellings_and_keeps_them_out_of_extra_tags():
+    for pos, neg in (("positive", "negative"), ("positivo", "negativo")):
+        text = GOLDEN.replace("@positive", f"@{pos}").replace("@negative", f"@{neg}")
+        first, second = _parsed(text).scenarios
+        assert (first.polarity, second.polarity) == (TlPolarity.POSITIVO, TlPolarity.NEGATIVO)
+        assert first.extra_tags == ["runnable"] and second.extra_tags == []
+
+
+def test_parse_keeps_every_other_tag_by_default():
+    text = GOLDEN.replace("@runnable @positive", "@smoke @runnable @flaky @custom_x @positive")
+    assert _parsed(text).scenarios[0].extra_tags == ["smoke", "runnable", "flaky", "custom_x"]
+
+
+def test_parse_with_an_explicit_list_still_filters():
+    text = GOLDEN.replace("@runnable @positive", "@smoke @runnable @positive")
+    p = parse_feature_file(text, allowed_extra=("runnable",))
+    assert p.scenarios[0].extra_tags == ["runnable"]
+
+
+def test_classify_ignores_the_test_type_tag():
+    with_type = GOLDEN.replace("@FDR3_001\n", "@FDR3_001 @integration\n", 1)
+    r = classify(_expected(), _parsed(with_type), **KW)
+    assert r.structural == [] and r.textual == []
+
+
+def test_roundtrip_keeps_the_test_type_and_custom_tags():
+    exp = _expected()
+    exp.test_type = "e2e"
+    exp.scenarios[0].extra_tags = ["smoke", "runnable", "flaky", "checkout"]
+    p = parse_feature_file(render_feature_file(exp))
+    assert p.test_type == "e2e"
+    assert p.scenarios[0].extra_tags == ["smoke", "runnable", "flaky", "checkout"]
+    assert classify(exp, p, **KW).textual == []
+
+
+def test_parse_does_not_keep_identity_shaped_tags_as_extra_tags():
+    # the API rejects these names on a scenario, so keeping them would block every later edit
+    text = GOLDEN.replace("@runnable @positive", "@runnable @FDR3_001 @CHK_012 @smoke @positive")
+    assert _parsed(text).scenarios[0].extra_tags == ["runnable", "smoke"]

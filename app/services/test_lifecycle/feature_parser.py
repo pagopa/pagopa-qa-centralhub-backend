@@ -12,12 +12,18 @@ from gherkin.parser import Parser
 
 from app.models.test_lifecycle import TlPolarity, TlScenarioKind
 from app.services.test_lifecycle.gherkin import (
-    ALLOWED_EXTRA_TAGS,
+    POLARITY_BY_TAG,
     RenderFeature,
     render_feature_file,
 )
+from app.services.test_lifecycle.tags import TEST_TYPES
 
 _IDENTITY_RE = re.compile(r"^@[A-Z0-9]+_\d{3}_\d{2}$")
+_FEATURE_TAG_RE = re.compile(r"^@[A-Z0-9]+_\d{3}$")
+# Names the API refuses on a scenario (identity-shaped): keeping them would block every later edit.
+_RESERVED_NAME_RE = re.compile(r"^[A-Z0-9]+_\d{3}(_\d{2})?$")
+# Same format the API accepts for an extra tag: anything else cannot be saved later.
+_EXTRA_TAG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,49}$")
 _CODE_RE = re.compile(r"^#\s*qa-hub:\s*(\S+)\s*$")
 _LINK_PREFIX = "#link:"
 
@@ -50,6 +56,7 @@ class ParsedFeature:
     title: str = ""
     description: str | None = None
     background_steps: str | None = None
+    test_type: str | None = None
     scenarios: list[ParsedScenario] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -115,9 +122,9 @@ def _description(text: str | None) -> str | None:
 
 
 def parse_feature_file(
-    text: str, allowed_extra: Iterable[str] = ALLOWED_EXTRA_TAGS
+    text: str, allowed_extra: Iterable[str] | None = None
 ) -> ParsedFeature:
-    allowed = frozenset(allowed_extra)
+    allowed = frozenset(allowed_extra) if allowed_extra is not None else None
     text = normalize_text(text)
     code = _read_code(text)
     try:
@@ -138,9 +145,14 @@ def parse_feature_file(
         if c["text"].strip().startswith(_LINK_PREFIX)
     }
     ftags = [t["name"] for t in feature.get("tags", [])]
+    test_type = next((t.lstrip("@") for t in ftags if t.lstrip("@") in TEST_TYPES), None)
+    feature_tag = next((t for t in ftags if _FEATURE_TAG_RE.match(t)), None) or next(
+        (t for t in ftags if t.lstrip("@") not in TEST_TYPES), None
+    )
     parsed = ParsedFeature(
         code=code,
-        feature_tag=ftags[0] if ftags else None,
+        feature_tag=feature_tag,
+        test_type=test_type,
         title=feature["name"],
         description=_description(feature.get("description")),
     )
@@ -168,7 +180,7 @@ def parse_feature_file(
 
 
 def _parse_scenario(
-    sc: dict[str, Any], links: dict[int, str], allowed: frozenset[str]
+    sc: dict[str, Any], links: dict[int, str], allowed: frozenset[str] | None
 ) -> ParsedScenario:
     tags = [t["name"] for t in sc.get("tags", [])]
     identity = next((t for t in tags if _IDENTITY_RE.match(t)), None)
@@ -176,9 +188,13 @@ def _parse_scenario(
     extra: list[str] = []
     for t in tags:
         name = t.lstrip("@")
-        if name in (TlPolarity.POSITIVO.value, TlPolarity.NEGATIVO.value):
-            polarity = TlPolarity(name)
-        elif name in allowed:
+        if name in POLARITY_BY_TAG:
+            polarity = POLARITY_BY_TAG[name]
+        elif _IDENTITY_RE.match(t) or _RESERVED_NAME_RE.match(name):
+            continue
+        elif (allowed is None and _EXTRA_TAG_RE.match(name)) or (
+            allowed is not None and name in allowed
+        ):
             extra.append(name)
     line = sc["location"]["line"]
     tag_lines = [t["location"]["line"] for t in sc.get("tags", [])]
@@ -228,7 +244,7 @@ def _diff_scenario(exp: ParsedScenario, got: ParsedScenario) -> list[str]:
 
 
 def _canonical(
-    expected: RenderFeature, allowed_extra: Iterable[str] = ALLOWED_EXTRA_TAGS
+    expected: RenderFeature, allowed_extra: Iterable[str] | None = None
 ) -> ParsedFeature:
     """Il lato atteso passa dallo stesso render + parse del file reale: stessa normalizzazione."""
     canon = parse_feature_file(render_feature_file(expected), allowed_extra)
@@ -268,7 +284,7 @@ def classify(
     *,
     scope_prefix: str,
     feature_number: int,
-    allowed_extra: Iterable[str] = ALLOWED_EXTRA_TAGS,
+    allowed_extra: Iterable[str] | None = None,
 ) -> DiffResult:
     result = DiffResult()
     structural = result.structural

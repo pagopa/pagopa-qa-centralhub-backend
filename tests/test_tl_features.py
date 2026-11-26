@@ -342,7 +342,7 @@ async def test_revision_description_hygiene(client, scope, actor, payload):
     "payload",
     [
         {"extra_tags": ["@ui"]},
-        {"extra_tags": ["boh"]},
+        {"extra_tags": ["positive"]},
         {"examples": {"headers": [], "rows": []}},
         {"examples": {"headers": ["a", "a"], "rows": []}},
         {"examples": {"headers": ["a", "b"], "rows": [["1"]]}},

@@ -108,7 +108,7 @@ Funzionalità: Pagamento
   Contesto:
     Dati un utente autenticato
 
-  @runnable @positivo
+  @runnable @positive
   @FDR3_001_01
   #link:req-1|Requisito
   Scenario: Paga con successo
@@ -116,7 +116,7 @@ Funzionalità: Pagamento
     Quando paga
     Allora vede la conferma
 
-  @negativo
+  @negative
   @FDR3_001_02
   Schema dello scenario: Paga con errore
     Dato un flusso <flowid>
@@ -171,3 +171,17 @@ def test_render_feature_file_matches_golden():
 def test_rendered_file_parses_with_gherkin_parser():
     doc = Parser().parse(render_feature_file(_feature()))
     assert len(doc["feature"]["children"]) == 3
+
+
+def test_render_writes_the_test_type_after_the_feature_tag():
+    feature = _feature()
+    feature.test_type = "integration"
+    assert render_feature_file(feature) == GOLDEN.replace(
+        "@FDR3_001\n", "@FDR3_001 @integration\n", 1
+    )
+
+
+def test_render_without_test_type_is_unchanged():
+    feature = _feature()
+    assert feature.test_type is None
+    assert render_feature_file(feature) == GOLDEN

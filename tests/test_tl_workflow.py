@@ -78,6 +78,7 @@ async def _ready_feature(client, scope, actor, reviewer):
         json={
             "reviewer_id": reviewer["id"],
             "jira_design_key": "PQ-12",
+            "test_type": "integration",
             "actor_email": actor["email"],
         },
     )
@@ -119,6 +120,7 @@ async def test_submit_blocked_reasons_listed(client, scope, actor):
         "Manca il reviewer",
         "Manca la chiave Jira di progettazione",
         "Manca l'Epic/Story prodotto (o il flag reverse engineering)",
+        "Manca il test-type del file",
         "Serve almeno uno scenario",
     ]
     resp = await _do(client, detail, "submit", actor["email"])
@@ -278,6 +280,7 @@ async def test_approve_sets_designed_and_creates_snapshot(client, scope, actor, 
             title=rev["title"],
             description=rev["description"],
             background_steps=rev["background_steps"],
+            test_type=done["test_type"],
             scenarios=[
                 RenderScenario(
                     tag=sc["tag"],

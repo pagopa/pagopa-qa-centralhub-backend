@@ -37,9 +37,10 @@ from app.schemas.test_lifecycle import (
     TlMigrationTagOut,
 )
 from app.services.test_lifecycle.advisory_lock import try_advisory_lock
-from app.services.test_lifecycle.category_tags import category_tags
+from app.services.test_lifecycle.category_tags import known_tags
 from app.services.test_lifecycle.confluence_page import FeatPage, map_status, parse_feat_page
 from app.services.test_lifecycle.feature_parser import ParsedFeature, parse_feature_file
+from app.services.test_lifecycle.tags import TEST_TYPES, default_test_type
 
 LOCK_KEY = "tl_migration"
 _CODE = re.compile(r"FEAT_(\d{3})_([A-Za-z][A-Za-z0-9]*)")
@@ -47,7 +48,7 @@ _TITLE_PREFIX = re.compile(r"^\s*FEAT_\d{3}_[A-Za-z][A-Za-z0-9]*\s*[-–—_:]?\
 _HUB_IDENTITY = re.compile(
     r"^[A-Za-z0-9]+_\d{2,3}$|^[A-Za-z0-9_]*_\d{3}_\d{2}$|^[A-Za-z][A-Za-z0-9]*_\d{3}(_.*)?$"
 )
-_POLARITY = {"positivo", "negativo"}
+_POLARITY = {"positivo", "negativo", "positive", "negative"}
 TITLE_THRESHOLD = 0.6
 OVERRIDABLE = ("scope_code", "number", "title", "status", "owner_id", "reviewer_id", "file_path")
 
@@ -100,6 +101,14 @@ class _File:
 def code_parts(code: str | None) -> tuple[str, int] | None:
     m = _CODE.search(code or "")
     return (m.group(2), int(m.group(1))) if m else None
+
+
+_KEEPABLE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,49}$")
+
+
+def is_keepable(name: str) -> bool:
+    """A tag name the API accepts on a scenario (anything else could never be saved again)."""
+    return bool(_KEEPABLE.match(name))
 
 
 def is_identity_tag(tag: str) -> bool:
@@ -620,7 +629,7 @@ async def summary(db: AsyncSession) -> TlMigrationSummary:
             s.pr_error,
             s.confluence_errors,
         )
-    allowed = set(await category_tags(db))
+    allowed = await known_tags(db)
     tags = [
         TlMigrationTagOut(
             name=t.name, occurrences=t.occurrences, decision=t.decision, category=t.name in allowed
@@ -676,6 +685,11 @@ class _Work:
     jira_entries: dict[str, Any] = field(default_factory=dict)
 
 
+def test_type_of(feature_tags: list[str]) -> str | None:
+    """The file's test type, if one of its feature-level tags is one (`@integration`...)."""
+    return next((n for n in (t.lstrip("@") for t in feature_tags) if n in TEST_TYPES), None)
+
+
 def _scenarios_from_file(
     parsed: ParsedFeature,
     feature_tags: list[str],
@@ -683,15 +697,30 @@ def _scenarios_from_file(
     scope_code: str,
     number: int,
     start: int = 1,
+    *,
+    keep_all: bool = False,
 ) -> list[dict[str, Any]]:
+    """Scenario specs from a parsed file.
+
+    Feature-level tags are pushed onto every scenario when they are in `keep` (test types never
+    are: they belong to the file). A scenario's own tags are kept when in `keep`, or all of them
+    with `keep_all` (as long as they can be saved: `is_keepable`).
+    """
     from app.models.test_lifecycle import TlPolarity
     from app.services.test_lifecycle.gherkin import scenario_tag
 
-    pushed = [t.lstrip("@") for t in feature_tags if not is_identity_tag(t)]
+    pushed = [
+        n
+        for n in (t.lstrip("@") for t in feature_tags if not is_identity_tag(t))
+        if n not in TEST_TYPES
+    ]
     out = []
     for i, sc in enumerate(parsed.scenarios, start=start):
-        names = pushed + [t.lstrip("@") for t in sc.all_tags if not is_identity_tag(t)]
-        extra = [n for n in dict.fromkeys(names) if n in keep and n.lower() not in _POLARITY]
+        own = [t.lstrip("@") for t in sc.all_tags if not is_identity_tag(t)]
+        names = [n for n in pushed if n in keep] + [
+            n for n in own if (is_keepable(n) if keep_all else n in keep)
+        ]
+        extra = [n for n in dict.fromkeys(names) if n.lower() not in _POLARITY]
         old = next((t.lstrip("@") for t in sc.all_tags if is_identity_tag(t)), None)
         out.append(
             {
@@ -764,7 +793,7 @@ async def execute_scope(
             await db.rollback()
             raise MigrationBlocked(reasons)
         tag_rows = list((await db.execute(select(TlMigrationTag))).scalars())
-        keep = {t.name for t in tag_rows if t.decision == "keep"} | set(await category_tags(db))
+        keep = {t.name for t in tag_rows if t.decision == "keep"} | await known_tags(db)
         await db.rollback()
 
         # rete: pagine e file riletti, chiavi Jira verificate
@@ -886,6 +915,8 @@ async def _create_feature(
         status=status if published else TlFeatureStatus.DRAFT,
         design_owner_id=owner,
         reviewer_id=reviewer,
+        test_type=test_type_of(prop.get("feature_tags") or [])
+        or default_test_type(scope.repo_folder),
         jira_design_key=prop.get("jira_design_key"),
         jira_impl_key=prop.get("jira_impl_key"),
         jira_cache=w.jira_entries,

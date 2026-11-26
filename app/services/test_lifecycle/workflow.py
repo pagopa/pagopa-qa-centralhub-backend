@@ -26,7 +26,7 @@ from app.schemas.test_lifecycle import (
 )
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_client as git_client_mod
-from app.services.test_lifecycle import git_publish, history, jira_tasks
+from app.services.test_lifecycle import git_publish, history, jira_tasks, tags
 from app.services.test_lifecycle import issues as issues_svc
 from app.services.test_lifecycle import jira_client as jira_mod
 from app.services.test_lifecycle import rebase as rebase_svc
@@ -102,11 +102,15 @@ def _submit_reasons(
         reasons.append("Manca l'Epic/Story prodotto (o il flag reverse engineering)")
     if scope is not None and not (scope.repo_folder or "").strip():
         reasons.append(REPO_FOLDER_REQUIRED_REASON)
+    if feature.test_type is None:
+        reasons.append(tags.TEST_TYPE_MISSING_REASON)
     if not view.scenarios:
         reasons.append("Serve almeno uno scenario")
     for sc in view.scenarios:
         if sc.errors:
             reasons.append(f"Lo scenario {sc.tag} ha step non validi")
+        if tags.status_count(sc.extra_tags) != 1:
+            reasons.append(tags.status_reason(sc.tag))
     if view.background_errors:
         reasons.append("Il Contesto contiene errori")
     return reasons

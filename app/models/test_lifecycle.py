@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -130,6 +131,9 @@ class TlFeature(Base):
     __table_args__ = (
         UniqueConstraint("scope_id", "number", name="uq_tl_features_scope_number"),
         Index("ix_tl_features_scope_status", "scope_id", "status"),
+        CheckConstraint(
+            "test_type IN ('integration', 'e2e', 'api')", name="ck_tl_features_test_type"
+        ),
         {"schema": SCHEMA},
     )
 
@@ -145,6 +149,8 @@ class TlFeature(Base):
     design_owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     reviewer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     impl_owner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    # file-level test type tag: integration | e2e | api (see services/test_lifecycle/tags.py)
+    test_type: Mapped[str | None] = mapped_column(String(16))
     jira_design_key: Mapped[str | None] = mapped_column(String(32))
     jira_impl_key: Mapped[str | None] = mapped_column(String(32))
     jira_qa_epic_key: Mapped[str | None] = mapped_column(String(32))
