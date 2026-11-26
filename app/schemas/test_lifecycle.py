@@ -394,6 +394,7 @@ class TlRevisionOut(BaseModel):
     pr_url: str | None = None
     pr_state: Literal["open", "merged", "closed"] | None = None
     pr_error: str | None = None
+    work_branch: str | None = None
     base_stale: bool = False
     merged_commit_sha: str | None = None
     created_at: datetime
@@ -505,6 +506,8 @@ class TlTransitionRequest(BaseModel):
     action: TlTransitionAction
     actor_email: str
     note: str | None = None
+    # only for `reopen`: name of the working branch opened for the changes (default generated)
+    branch_name: str | None = None
 
     @field_validator("note")
     @classmethod
@@ -516,6 +519,38 @@ class TlTransitionRequest(BaseModel):
 
 
 class TlPrRequest(BaseModel):
+    actor_email: str
+
+
+BranchSyncState = Literal[
+    "no_branch",
+    "branch_missing",
+    "file_missing",
+    "in_sync",
+    "hub_ahead",
+    "repo_ahead",
+    "diverged",
+    "unreachable",
+    "not_configured",
+]
+
+
+class TlBranchSync(BaseModel):
+    """Comparison of a draft with its working branch in the central repository."""
+
+    branch: str | None = None
+    state: BranchSyncState
+    hub_unsynced: bool = False
+    repo_changed: bool = False
+    compare_url: str | None = None
+
+
+class TlBranchPush(BaseModel):
+    actor_email: str
+    overwrite: bool = False
+
+
+class TlBranchPull(BaseModel):
     actor_email: str
 
 

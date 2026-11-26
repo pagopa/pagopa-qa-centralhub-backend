@@ -37,6 +37,7 @@ from app.schemas.test_lifecycle import (
     TlMigrationTagOut,
 )
 from app.services.test_lifecycle.advisory_lock import try_advisory_lock
+from app.services.test_lifecycle.branch_sync_rules import default_branch_name
 from app.services.test_lifecycle.category_tags import known_tags
 from app.services.test_lifecycle.confluence_page import FeatPage, map_status, parse_feat_page
 from app.services.test_lifecycle.feature_parser import ParsedFeature, parse_feature_file
@@ -931,6 +932,18 @@ async def _create_feature(
         alignment_pending=published,
         git_path=w.file_path if published else None,
         git_blob_sha=w.blob_sha if published else None,
+        # a draft made from Git content keeps working on the file where it lives
+        import_source=(
+            {
+                "url": "",
+                "branch": settings.tl_base_branch,
+                "path": w.file_path,
+                "blob_sha": w.blob_sha,
+                "imported_at": datetime.now(UTC).isoformat(),
+            }
+            if parsed is not None and not published
+            else None
+        ),
     )
     db.add(feature)
     await db.flush()
@@ -939,6 +952,11 @@ async def _create_feature(
         feature_id=feature.id,
         number=1,
         status=TlRevisionStatus.MERGED if published else TlRevisionStatus.DRAFT,
+        # a draft made from Git content gets a working branch (created at its first push)
+        work_branch=(
+            default_branch_name(feature.code, 1) if parsed is not None and not published else None
+        ),
+        work_file_sha=w.blob_sha if parsed is not None and not published else None,
         title=(eff.get("title") or (parsed.title if parsed else "") or feature.code)[:255],
         description=prop.get("description") or (parsed.description if parsed else None),
         background_steps=(parsed.background_steps if parsed else None)

@@ -237,6 +237,11 @@ class TlFeatureRevision(Base):
     pr_state: Mapped[str | None] = mapped_column(String(10))  # open | merged | closed
     pr_error: Mapped[str | None] = mapped_column(Text)
     base_commit_sha: Mapped[str | None] = mapped_column(String(64))
+    # working branch in the central repository and the two blob shas of the feature file as of
+    # the last sync (see services/test_lifecycle/branch_sync_rules.py)
+    work_branch: Mapped[str | None] = mapped_column(String(255))
+    work_file_sha: Mapped[str | None] = mapped_column(String(64))  # repository side of the sync
+    work_hub_sha: Mapped[str | None] = mapped_column(String(64))  # hub side: blob of the render
     merged_commit_sha: Mapped[str | None] = mapped_column(String(64))
     base_stale: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")

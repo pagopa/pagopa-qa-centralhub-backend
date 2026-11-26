@@ -103,7 +103,7 @@ async def test_import_fills_the_draft(client, scope, actor, git):
     assert rev["background_steps"] == "Dato che i sistemi sono operativi"
     src = detail["import_source"]
     assert (src["branch"], src["path"], src["url"]) == (BRANCH, PATH, URL)
-    assert src["cleanup"]["state"] == "pending"
+    assert "cleanup" not in src  # the cleanup PR is gone: the source branch is never touched
     assert detail["git_path"] is None
     rows = await _contents(rev["id"])
     code = scope["code"].upper()
