@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.test_lifecycle import TlFeature, TlFeatureRevision, TlScope
 from app.models.user import User
-from app.schemas.test_lifecycle import TlJiraLink
+from app.schemas.test_lifecycle import TlJiraHistoryRow, TlJiraLink
 from app.services.test_lifecycle import history
 from app.services.test_lifecycle import jira_client as jira_mod
 from app.services.test_lifecycle.actors import resolve_actor
@@ -106,6 +106,22 @@ def effective_epic(feature: TlFeature, scope: TlScope) -> str | None:
     return feature.jira_qa_epic_key or scope.jira_qa_epic_key
 
 
+def _make_link(role: str, key: str, cache: dict[str, Any]) -> TlJiraLink:
+    entry = cache.get(key) or {}
+    return TlJiraLink(
+        role=role,
+        key=key,
+        summary=entry.get("summary"),
+        status=entry.get("status"),
+        category=entry.get("category"),
+        url=entry.get("url")
+        or (
+            f"{settings.jira_base_url.rstrip('/')}/browse/{key}" if settings.jira_base_url else None
+        ),
+        verified=bool(entry.get("verified")),
+    )
+
+
 def jira_links(feature: TlFeature, scope: TlScope, product_key: str | None) -> list[TlJiraLink]:
     cache = feature.jira_cache or {}
     roles = [
@@ -114,28 +130,43 @@ def jira_links(feature: TlFeature, scope: TlScope, product_key: str | None) -> l
         ("qa_epic", effective_epic(feature, scope)),
         ("product", product_key),
     ]
-    links: list[TlJiraLink] = []
-    for role, key in roles:
-        if not key:
-            continue
-        entry = cache.get(key) or {}
-        links.append(
-            TlJiraLink(
-                role=role,
-                key=key,
-                summary=entry.get("summary"),
-                status=entry.get("status"),
-                category=entry.get("category"),
-                url=entry.get("url")
-                or (
-                    f"{settings.jira_base_url.rstrip('/')}/browse/{key}"
-                    if settings.jira_base_url
-                    else None
-                ),
-                verified=bool(entry.get("verified")),
+    return [_make_link(role, key, cache) for role, key in roles if key]
+
+
+async def revisions_of(db: AsyncSession, feature_id: uuid.UUID) -> list[TlFeatureRevision]:
+    """All revisions of a feature, newest first."""
+    return list(
+        (
+            await db.execute(
+                select(TlFeatureRevision)
+                .where(TlFeatureRevision.feature_id == feature_id)
+                .order_by(TlFeatureRevision.number.desc())
             )
+        ).scalars()
+    )
+
+
+def jira_history(
+    feature: TlFeature, scope: TlScope, revisions: list[TlFeatureRevision]
+) -> list[TlJiraHistoryRow]:
+    """One row per revision (newest first) with the Jira keys that revision used."""
+    cache = feature.jira_cache or {}
+    current_id = feature.working_revision_id or feature.published_revision_id
+
+    def link(role: str, key: str | None) -> TlJiraLink | None:
+        return _make_link(role, key, cache) if key else None
+
+    return [
+        TlJiraHistoryRow(
+            revision_number=rev.number,
+            revision_status=rev.status,
+            is_current=rev.id == current_id,
+            design=link("design", rev.jira_design_key),
+            impl=link("impl", rev.jira_impl_key),
+            qa_epic=link("qa_epic", rev.jira_qa_epic_key or scope.jira_qa_epic_key),
         )
-    return links
+        for rev in revisions
+    ]
 
 
 async def _product_key(db: AsyncSession, feature: TlFeature) -> str | None:
@@ -160,6 +191,8 @@ async def linked_keys(db: AsyncSession, feature: TlFeature) -> list[str]:
         effective_epic(feature, scope) if scope else feature.jira_qa_epic_key,
         await _product_key(db, feature),
     ]
+    for rev in await revisions_of(db, feature.id):  # older revisions keep their status fresh too
+        keys += [rev.jira_design_key, rev.jira_impl_key, rev.jira_qa_epic_key]
     return list(dict.fromkeys(k for k in keys if k))
 
 
@@ -308,8 +341,40 @@ def _issue_type(kind: str) -> str:
     )
 
 
-def task_summary(code: str, kind: str, title: str) -> str:
-    return f"[{code}] {_KIND_LABEL[kind]} — {title}"[:255]
+DESIGN_KEY_REUSED_REASON = (
+    "Il task di progettazione è già stato usato da un'altra revisione: serve un nuovo task"
+)
+
+
+async def design_key_reused(
+    db: AsyncSession, feature_id: uuid.UUID, revision_id: uuid.UUID, key: str
+) -> bool:
+    """True when another revision of the feature already used `key` as its design task."""
+    found = (
+        await db.execute(
+            select(TlFeatureRevision.id)
+            .where(
+                TlFeatureRevision.feature_id == feature_id,
+                TlFeatureRevision.id != revision_id,
+                TlFeatureRevision.jira_design_key == key,
+            )
+            .limit(1)
+        )
+    ).first()
+    return found is not None
+
+
+def is_current_revision(feature: TlFeature, revision_id: uuid.UUID | None) -> bool:
+    """True when `revision_id` is still the revision the feature columns mirror."""
+    return revision_id is not None and revision_id == (
+        feature.working_revision_id or feature.published_revision_id
+    )
+
+
+def task_summary(code: str, kind: str, title: str, revision_number: int = 1) -> str:
+    """Revisions after the first carry their number, so a search never reuses an older task."""
+    suffix = f" (Rev. {revision_number})" if revision_number > 1 else ""
+    return f"[{code}] {_KIND_LABEL[kind]} — {title}"[: 255 - len(suffix)] + suffix
 
 
 def _description(feature_id: uuid.UUID, tags: list[str]) -> dict[str, Any]:
@@ -384,6 +449,8 @@ async def create_task(
         params = {
             "code": feature.code,
             "title": rev.title if rev else feature.code,
+            "revision_number": rev.number if rev else 1,
+            "revision_id": rev.id if rev else None,
             "epic": effective_epic(feature, scope) if scope else feature.jira_qa_epic_key,
             "component": scope.jira_component if scope else None,
             "product": rev.product_issue_key if rev else None,
@@ -392,7 +459,7 @@ async def create_task(
         await db.commit()  # rilascia i lock di riga prima della rete
 
         warnings: list[str] = []
-        summary = task_summary(params["code"], kind, params["title"])
+        summary = task_summary(params["code"], kind, params["title"], params["revision_number"])
         try:
             issue = await client.search_summary(settings.tl_jira_project, summary)
             reused = issue is not None
@@ -429,8 +496,9 @@ async def create_task(
         # esito, riga rilockata
         actor = await resolve_actor(db, actor_email)
         feature = await features_svc._lock_feature(db, feature_id)
-        if getattr(feature, field) is None:
-            setattr(feature, field, issue.key)
+        # the lock was released during the Jira call: a reopen in between moves the current revision
+        if getattr(feature, field) is None and is_current_revision(feature, params["revision_id"]):
+            await features_svc.set_current_keys(db, feature, **{field: issue.key})
         merge_cache(feature, {issue.key: _entry(issue)})
         feature.jira_error = None
         if kind == "impl":

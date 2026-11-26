@@ -17636,6 +17636,14 @@
             "title": "Jira",
             "default": []
           },
+          "jira_history": {
+            "items": {
+              "$ref": "#/components/schemas/TlJiraHistoryRow"
+            },
+            "type": "array",
+            "title": "Jira History",
+            "default": []
+          },
           "jira_error": {
             "title": "Jira Error",
             "type": "string",
@@ -18240,6 +18248,41 @@
           "status"
         ],
         "title": "TlJiraDeleteResult"
+      },
+      "TlJiraHistoryRow": {
+        "properties": {
+          "revision_number": {
+            "type": "integer",
+            "title": "Revision Number"
+          },
+          "revision_status": {
+            "$ref": "#/components/schemas/TlRevisionStatus"
+          },
+          "is_current": {
+            "type": "boolean",
+            "title": "Is Current"
+          },
+          "design": {
+            "$ref": "#/components/schemas/TlJiraLink",
+            "nullable": true
+          },
+          "impl": {
+            "$ref": "#/components/schemas/TlJiraLink",
+            "nullable": true
+          },
+          "qa_epic": {
+            "$ref": "#/components/schemas/TlJiraLink",
+            "nullable": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision_number",
+          "revision_status",
+          "is_current"
+        ],
+        "title": "TlJiraHistoryRow",
+        "description": "Jira tasks and epic used by one revision of a feature."
       },
       "TlJiraLink": {
         "properties": {

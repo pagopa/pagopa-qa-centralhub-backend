@@ -274,6 +274,39 @@ async def create_feature(db: AsyncSession, data: TlFeatureCreate) -> uuid.UUID:
     return feature.id
 
 
+JIRA_KEY_FIELDS = ("jira_design_key", "jira_impl_key", "jira_qa_epic_key")
+
+
+async def current_revision(db: AsyncSession, feature: TlFeature) -> TlFeatureRevision | None:
+    """The revision whose Jira keys the feature columns mirror: working, else published."""
+    rev_id = feature.working_revision_id or feature.published_revision_id
+    return await db.get(TlFeatureRevision, rev_id) if rev_id else None
+
+
+def sync_current_keys(feature: TlFeature, revision: TlFeatureRevision | None) -> None:
+    """Copy the revision's Jira keys onto the feature (the feature mirrors the current revision)."""
+    if revision is None:
+        return
+    for field in JIRA_KEY_FIELDS:
+        setattr(feature, field, getattr(revision, field))
+
+
+async def set_current_keys(db: AsyncSession, feature: TlFeature, **keys: str | None) -> None:
+    """Write Jira keys on the current revision and on the feature mirror, together."""
+    if not keys:
+        return
+    revision = await current_revision(db, feature)
+    for field, value in keys.items():
+        assert field in JIRA_KEY_FIELDS  # noqa: S101 - programming error, not user input
+        if revision is not None:
+            setattr(revision, field, value)
+        setattr(feature, field, value)
+    if revision is not None:
+        # `updated_at` is server-generated: reload now so later sync reads never lazy-load
+        await db.flush()
+        await db.refresh(revision)
+
+
 # Campi che sono guardie del submit: modificabili solo con la revisione di lavoro in bozza.
 _DRAFT_ONLY_FIELDS = ("design_owner_id", "jira_design_key")
 # Il reviewer può essere riassegnato anche durante la review (R17).
@@ -323,8 +356,18 @@ async def update_feature(
                 "reviewer_is_owner",
                 "Il reviewer non può coincidere con l'owner di progettazione",
             )
+    new_design = changes.get("jira_design_key")
+    if new_design and feature.working_revision_id is not None:
+        if await jira_tasks.design_key_reused(
+            db, feature.id, feature.working_revision_id, new_design
+        ):
+            raise InvalidAssignmentError(
+                "jira_design_key_reused", jira_tasks.DESIGN_KEY_REUSED_REASON
+            )
     for key, value in changes.items():
-        setattr(feature, key, value)
+        if key not in JIRA_KEY_FIELDS:
+            setattr(feature, key, value)
+    await set_current_keys(db, feature, **{k: v for k, v in changes.items() if k in JIRA_KEY_FIELDS})
     jira_tasks.merge_cache(feature, jira_entries)
     if changes:
         history.record_event(
@@ -375,6 +418,13 @@ async def get_feature_detail(
             actor = None
     current = working or published
     product_key = current.product_issue_key if current else None
+    design_reused = bool(
+        working_rev is not None
+        and feature.jira_design_key
+        and await jira_tasks.design_key_reused(
+            db, feature.id, working_rev.id, feature.jira_design_key
+        )
+    )
     return TlFeatureDetail(
         id=feature.id,
         code=feature.code,
@@ -393,11 +443,14 @@ async def get_feature_detail(
         working_revision=working,
         published_revision=published,
         transitions=workflow.available_transitions(
-            feature, working_rev, actor, working, scope
+            feature, working_rev, actor, working, scope, design_reused
         ),
         git_path=feature.git_path,
         open_issues=open_issues,
         jira=jira_tasks.jira_links(feature, scope, product_key),
+        jira_history=jira_tasks.jira_history(
+            feature, scope, await jira_tasks.revisions_of(db, feature.id)
+        ),
         jira_error=feature.jira_error,
         jira_qa_epic_key=feature.jira_qa_epic_key,
         jira_qa_epic_effective=jira_tasks.effective_epic(feature, scope),

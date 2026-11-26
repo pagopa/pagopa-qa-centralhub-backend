@@ -734,6 +734,12 @@ async def test_withdraw_approval_on_a_reopened_feature_keeps_the_published_revis
     second = reopened["working_revision"]
     assert second["id"] != str(first_id) and second["status"] == "draft"
     assert detail["published_revision"]["id"] == str(first_id)
+    resp = await client.patch(  # a reopened revision needs its own design task
+        f"{BASE}/features/{done['id']}",
+        json={"jira_design_key": "PQ-20", "actor_email": actor["email"]},
+    )
+    assert resp.status_code == 200, resp.text
+    reopened = await _get(client, done["id"], actor["email"])
 
     out = (await _do(client, reopened, "submit", actor["email"])).json()
     out = (await _do(client, out, "approve", reviewer["email"])).json()

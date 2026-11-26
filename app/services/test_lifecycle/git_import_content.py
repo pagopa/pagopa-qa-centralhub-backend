@@ -104,6 +104,11 @@ async def new_git_revision(
         rev.reverse_engineering = published.reverse_engineering
         rev.design_estimate_days = published.design_estimate_days
         rev.impl_estimate_days = published.impl_estimate_days
+        # a Git-side change has no Jira task of its own: it inherits the published revision's keys
+        # (never the feature's, which mirror an open draft when there is one)
+        rev.jira_design_key = published.jira_design_key
+        rev.jira_impl_key = published.jira_impl_key
+        rev.jira_qa_epic_key = published.jira_qa_epic_key
     db.add(rev)
     await db.flush()
     return rev

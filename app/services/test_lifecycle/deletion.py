@@ -130,10 +130,26 @@ async def _build_preview(
     cache: dict[str, dict] = {}
     for f in features:
         cache.update(f.jira_cache or {})
+    older: dict[uuid.UUID, list[tuple[str | None, str | None]]] = {}
+    if feature_ids:  # keys of every revision, not only the current one
+        for fid, design, impl in (
+            await db.execute(
+                select(
+                    TlFeatureRevision.feature_id,
+                    TlFeatureRevision.jira_design_key,
+                    TlFeatureRevision.jira_impl_key,
+                )
+                .where(TlFeatureRevision.feature_id.in_(feature_ids))
+                .order_by(TlFeatureRevision.number)
+            )
+        ).all():
+            older.setdefault(fid, []).append((design, impl))
     for f in features:
-        for key, role in ((f.jira_design_key, "design"), (f.jira_impl_key, "impl")):
-            if key and key not in issues:
-                issues[key] = _issue(key, role, f.jira_cache or {}, f.code)
+        pairs = [(f.jira_design_key, f.jira_impl_key), *older.get(f.id, [])]
+        for design, impl in pairs:
+            for key, role in ((design, "design"), (impl, "impl")):
+                if key and key not in issues:
+                    issues[key] = _issue(key, role, f.jira_cache or {}, f.code)
     if epic_key and epic_key not in issues:
         issues[epic_key] = _issue(epic_key, "qa_epic", cache, None)
 

@@ -94,6 +94,8 @@ async def reopen(db: AsyncSession, feature: TlFeature, actor: User) -> TlFeature
         status=TlRevisionStatus.DRAFT,
         base_revision_id=published.id,
         created_by=actor.email,
+        # a change needs its own Jira tasks: design and implementation start empty, the epic carries over
+        jira_qa_epic_key=feature.jira_qa_epic_key,
         **{f: getattr(published, f) for f in _COPIED_REVISION_FIELDS},
     )
     db.add(rev)
@@ -108,6 +110,8 @@ async def reopen(db: AsyncSession, feature: TlFeature, actor: User) -> TlFeature
             )
         )
     feature.working_revision_id = rev.id
+    feature.jira_design_key = None
+    feature.jira_impl_key = None
     history.record_event(
         db, feature.id, "tl.revision.reopened", actor,
         {
