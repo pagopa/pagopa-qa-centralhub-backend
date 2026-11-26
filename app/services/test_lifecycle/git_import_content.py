@@ -35,6 +35,7 @@ def empty_render(feature: TlFeature, scope_code: str) -> RenderFeature:
         description=None,
         background_steps=None,
         scenarios=[],
+        test_type=feature.test_type,
     )
 
 

@@ -11,7 +11,17 @@ from gherkin.parser import Parser
 
 from app.models.test_lifecycle import TlPolarity, TlScenarioKind
 
-ALLOWED_EXTRA_TAGS: tuple[str, ...] = ("runnable", "e2e", "ui", "skip")
+# Polarity tags: the file standard is English, the Italian spelling is still read.
+POLARITY_TAG: dict[TlPolarity, str] = {
+    TlPolarity.POSITIVO: "positive",
+    TlPolarity.NEGATIVO: "negative",
+}
+POLARITY_BY_TAG: dict[str, TlPolarity] = {
+    "positive": TlPolarity.POSITIVO,
+    "positivo": TlPolarity.POSITIVO,
+    "negative": TlPolarity.NEGATIVO,
+    "negativo": TlPolarity.NEGATIVO,
+}
 
 # Parole chiave di sezione italiane (gherkin-official, lingua "it")
 _SECTION_RE = re.compile(
@@ -207,6 +217,7 @@ class RenderFeature:
     description: str | None
     background_steps: str | None
     scenarios: list[RenderScenario] = field(default_factory=list)
+    test_type: str | None = None
 
 
 def _single_line(value: str | None) -> str:
@@ -226,7 +237,7 @@ def render_feature_file(feature: RenderFeature) -> str:
     out = [
         f"# qa-hub: {feature.code}",
         "# language: it",
-        feature.feature_tag,
+        f"{feature.feature_tag} @{feature.test_type}" if feature.test_type else feature.feature_tag,
         f"Funzionalità: {feature.title}",
     ]
     if feature.description and feature.description.strip():
@@ -236,7 +247,7 @@ def render_feature_file(feature: RenderFeature) -> str:
         out.extend(_indent_block(feature.background_steps, "    "))
     for sc in feature.scenarios:
         out.append("")
-        tags = [f"@{t}" for t in sc.extra_tags] + [f"@{sc.polarity.value}"]
+        tags = [f"@{t}" for t in sc.extra_tags] + [f"@{POLARITY_TAG[sc.polarity]}"]
         out.append("  " + " ".join(tags))
         out.append(f"  {sc.tag}")
         link = _single_line(sc.detail_link)

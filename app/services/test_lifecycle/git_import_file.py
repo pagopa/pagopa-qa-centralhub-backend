@@ -98,17 +98,21 @@ async def import_from_git(
     from app.services.test_lifecycle import features as features_svc
     from app.services.test_lifecycle import history
     from app.services.test_lifecycle.actors import resolve_actor
-    from app.services.test_lifecycle.category_tags import category_tags
+    from app.services.test_lifecycle.category_tags import known_tags
     from app.services.test_lifecycle.feature_parser import normalize_text, parse_feature_file
     from app.services.test_lifecycle.migration import (
         _POLARITY,
         _feature_tags,
         _scenarios_from_file,
         is_identity_tag,
+        is_keepable,
+        test_type_of,
     )
+    from app.services.test_lifecycle.tags import TEST_TYPES
 
     await resolve_actor(db, actor_email)  # 403 prima della rete
-    allowed = await category_tags(db)
+    # feature-level tags are pushed onto the scenarios only when they are catalog, status or flaky
+    allowed = await known_tags(db)
     await db.rollback()
 
     branch, path = await resolve_blob(client, url)
@@ -122,16 +126,24 @@ async def import_from_git(
     if not parsed.scenarios:
         raise ImportParseError(["Il file non contiene scenari"])
     feature_tags = _feature_tags(text)
-    names = [t.lstrip("@") for sc in parsed.scenarios for t in sc.all_tags] + [
-        t.lstrip("@") for t in feature_tags
-    ]
+    scenario_names = [t.lstrip("@") for sc in parsed.scenarios for t in sc.all_tags]
+    feature_names = [t.lstrip("@") for t in feature_tags]
+    # Reported, not imported: feature-level tags outside the catalog, and scenario tags that
+    # could never be saved again (format). Test types and identities are not "ignored".
     ignored = sorted(
         {
             n
-            for n in names
-            if not is_identity_tag(n) and n.lower() not in _POLARITY and n not in allowed
+            for n in scenario_names + feature_names
+            if not is_identity_tag(n)
+            and n.lower() not in _POLARITY
+            and n not in TEST_TYPES
+            and (
+                (n in scenario_names and not is_keepable(n))
+                or (n in feature_names and n not in scenario_names and n not in allowed)
+            )
         }
     )
+    file_test_type = test_type_of(feature_tags)
 
     actor = await resolve_actor(db, actor_email)
     feature = await features_svc._lock_feature(db, feature_id)
@@ -164,8 +176,10 @@ async def import_from_git(
     ).scalar_one()
     start = (used or 0) + 1
     specs = _scenarios_from_file(
-        parsed, feature_tags, set(allowed), scope.code, feature.number, start=start
+        parsed, feature_tags, set(allowed), scope.code, feature.number, start=start, keep_all=True
     )
+    if file_test_type is not None:
+        feature.test_type = file_test_type
     aliases = set((await db.execute(select(TlScenarioAlias.alias))).scalars())
     for position, spec in enumerate(specs, start=1):
         scenario = TlScenario(feature_id=feature.id, number=spec["number"], tag=spec["tag"])

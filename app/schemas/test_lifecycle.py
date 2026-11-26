@@ -207,13 +207,26 @@ def _check_url(value: str | None) -> str | None:
 _EXTRA_TAG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,49}$")
 
 
+_IDENTITY_NAME_RE = re.compile(r"^[A-Z0-9]+_\d{3}(_\d{2})?$")
+_POLARITY_NAMES = ("positive", "negative", "positivo", "negativo")
+TestType = Literal["integration", "e2e", "api"]
+
+
 def _check_extra_tags(value: list[str] | None) -> list[str] | None:
-    """Solo il formato: l'appartenenza ai tag di categoria la verifica il servizio."""
+    """Format only, plus the names that never belong here: polarity has its own field and the
+    identity tags are generated. Status, flaky and custom tags are all accepted (the standard
+    is enforced when the feature is sent to review, not when saving)."""
     if value is None:
         return None
     bad = [t for t in value if not _EXTRA_TAG_RE.match(t)]
     if bad:
         raise ValueError(f"Tag non validi: {', '.join(bad)} (senza @, lettere, numeri, _ e -)")
+    reserved = [t for t in value if t in _POLARITY_NAMES or _IDENTITY_NAME_RE.match(t)]
+    if reserved:
+        raise ValueError(
+            f"Tag riservati: {', '.join(reserved)} "
+            "(la polarità e l'identità non sono tag aggiuntivi)"
+        )
     return list(dict.fromkeys(value))
 
 
@@ -236,6 +249,7 @@ class TlFeatureCreate(BaseModel):
     scope_id: uuid.UUID
     title: str
     design_owner_id: uuid.UUID | None = None
+    test_type: TestType | None = None
     actor_email: str
 
     _v_title = field_validator("title")(_feature_title)
@@ -248,6 +262,7 @@ class TlFeatureUpdate(BaseModel):
     jira_design_key: str | None = None
     jira_impl_key: str | None = None
     jira_qa_epic_key: str | None = None
+    test_type: TestType | None = None
     migration_note: str | None = Field(default=None, max_length=20000)
     actor_email: str
 
@@ -398,6 +413,7 @@ class TlFeatureListItem(BaseModel):
     design_owner_id: uuid.UUID | None = None
     reviewer_id: uuid.UUID | None = None
     impl_owner_id: uuid.UUID | None = None
+    test_type: str | None = None
     scenario_count: int = 0
     updated_at: datetime
     deletable: bool = True
@@ -411,6 +427,23 @@ class TlJiraLink(BaseModel):
     category: Literal["new", "indeterminate", "done"] | None = None
     url: str | None = None
     verified: bool = False
+
+
+class TlTagCleanupRow(BaseModel):
+    """A scenario that carries test-type tags (they belong to the file)."""
+
+    scenario_tag: str
+    tags: list[str]
+
+
+class TlTagCleanup(BaseModel):
+    rows: list[TlTagCleanupRow] = []
+    proposed_test_type: TestType | None = None
+    conflict: str | None = None
+
+
+class TlTagCleanupApply(BaseModel):
+    actor_email: str
 
 
 class TlJiraHistoryRow(BaseModel):
@@ -434,6 +467,7 @@ class TlFeatureDetail(BaseModel):
     design_owner_id: uuid.UUID | None = None
     reviewer_id: uuid.UUID | None = None
     impl_owner_id: uuid.UUID | None = None
+    test_type: str | None = None
     jira_design_key: str | None = None
     jira_impl_key: str | None = None
     created_by: str

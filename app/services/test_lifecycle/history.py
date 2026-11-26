@@ -82,6 +82,7 @@ async def build_render(
         title=revision.title,
         description=revision.description,
         background_steps=revision.background_steps,
+        test_type=feature.test_type,
         scenarios=[
             RenderScenario(
                 tag=s.tag,

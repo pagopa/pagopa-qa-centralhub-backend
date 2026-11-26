@@ -32,7 +32,6 @@ from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_import_content as content
 from app.services.test_lifecycle import history
 from app.services.test_lifecycle import issues as issues_svc
-from app.services.test_lifecycle.category_tags import category_tags
 from app.services.test_lifecycle.feature_parser import (
     DiffResult,
     ParsedFeature,
@@ -41,7 +40,7 @@ from app.services.test_lifecycle.feature_parser import (
     normalize_text,
     parse_feature_file,
 )
-from app.services.test_lifecycle.gherkin import ALLOWED_EXTRA_TAGS, render_feature_file
+from app.services.test_lifecycle.gherkin import render_feature_file
 from app.services.test_lifecycle.git_client import TlGitClient
 
 SYSTEM_ACTOR = history.SYSTEM_ACTOR
@@ -56,7 +55,7 @@ class _Fetched:
     text: str  # normalizzato
     blob_sha: str
     parsed: ParsedFeature
-    allowed_extra: tuple[str, ...] = ALLOWED_EXTRA_TAGS
+    allowed_extra: tuple[str, ...] | None = None  # None: keep every well-formed tag
 
 
 @dataclass
@@ -73,7 +72,7 @@ async def _fetch(
     path: str,
     previous_path: str | None,
     commit_sha: str,
-    allowed_extra: tuple[str, ...] = ALLOWED_EXTRA_TAGS,
+    allowed_extra: tuple[str, ...] | None = None,
 ) -> _Fetched | None:
     file = await client.get_file(path, commit_sha)
     if file is None:
@@ -81,7 +80,13 @@ async def _fetch(
     text = normalize_text(file.text)
     parsed = parse_feature_file(text, allowed_extra)
     return _Fetched(
-        path, previous_path, commit_sha, text, file.blob_sha, parsed, tuple(allowed_extra)
+        path,
+        previous_path,
+        commit_sha,
+        text,
+        file.blob_sha,
+        parsed,
+        tuple(allowed_extra) if allowed_extra is not None else None,
     )
 
 
@@ -209,6 +214,13 @@ async def _import_locked(
     moved_from = feature.git_path if feature.git_path != fetched.path else None
     feature.git_path = fetched.path
     feature.git_blob_sha = fetched.blob_sha
+    if parsed.test_type and parsed.test_type != feature.test_type and locked.working is None:
+        # the test type is declared in the file: Git wins, and the change is traced. Not while a
+        # working revision exists: its test type is the draft's (or the reviewer's) to decide.
+        feature.test_type = parsed.test_type
+        history.record_event(
+            db, feature.id, "tl.feature.updated", None, {"test_type": parsed.test_type}
+        )
     for kind in (TlIssueKind.FILE_DELETED, TlIssueKind.PARSE_ERROR):
         await issues_svc.resolve_feature_issues(db, kind=kind, feature_id=feature.id)
 
@@ -348,9 +360,8 @@ async def import_changed_file(
     `merged_revision` è interno: importa nel contenuto di quella revisione senza marcarla
     mergiata (usarlo solo tramite `mark_revision_merged`).
     """
-    allowed = await category_tags(db)
     await db.rollback()  # nessuna transazione aperta durante la rete
-    fetched = await _fetch(client, path, previous_path, commit_sha, allowed)
+    fetched = await _fetch(client, path, previous_path, commit_sha)
     if fetched is None:
         return  # non più presente a quel commit: ci pensa `handle_removed_file`
     found = await _find_feature(db, fetched)
@@ -422,11 +433,7 @@ async def _mark_merged(
         await db.execute(select(TlFeature.git_path).where(TlFeature.id == feature_id))
     ).scalar_one()
     await db.rollback()  # nessuna transazione aperta durante la rete
-    allowed = await category_tags(db)
-    await db.rollback()
-    fetched = (
-        await _fetch(client, git_path, None, merge_commit_sha, allowed) if git_path else None
-    )
+    fetched = await _fetch(client, git_path, None, merge_commit_sha) if git_path else None
 
     locked = await _lock_all(db, feature_id, rev_id)
     merged = locked.extra

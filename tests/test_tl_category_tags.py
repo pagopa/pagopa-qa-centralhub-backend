@@ -43,14 +43,14 @@ async def regression_tag():
 async def test_category_tags_include_defaults_and_added(regression_tag):
     async with TestSession() as db:
         tags = await category_tags(db)
-    assert {"runnable", "e2e", "ui", "skip", "regression"} <= set(tags)
+    assert {"runnable", "skip", "broken", "flaky", "regression"} <= set(tags)
     assert list(tags) == sorted(tags)
 
 
-def test_parser_accepts_given_extra_tags():
-    assert parse_feature_file(FILE).scenarios[0].extra_tags == ["runnable"]
-    parsed = parse_feature_file(FILE, allowed_extra=("runnable", "regression"))
-    assert parsed.scenarios[0].extra_tags == ["regression", "runnable"]
+def test_parser_keeps_every_tag_unless_given_a_list():
+    assert parse_feature_file(FILE).scenarios[0].extra_tags == ["regression", "runnable"]
+    parsed = parse_feature_file(FILE, allowed_extra=("runnable",))
+    assert parsed.scenarios[0].extra_tags == ["runnable"]
 
 
 async def _patch(client, feat, sc, actor, tags, lock=1):
@@ -61,18 +61,19 @@ async def _patch(client, feat, sc, actor, tags, lock=1):
     )
 
 
-async def test_scenario_accepts_added_tag_and_rejects_unknown(client, scope, actor, regression_tag):
+async def test_scenario_accepts_catalog_and_custom_tags(client, scope, actor, regression_tag):
     feat = await _new_feature(client, scope, actor)
     sc = await _new_scenario(client, feat, actor)
     ok = await _patch(client, feat, sc, actor, ["regression"])
     assert ok.status_code == 200, ok.text
     assert ok.json()["extra_tags"] == ["regression"]
-    bad = await _patch(client, feat, sc, actor, [f"t{uuid.uuid4().hex[:6]}"], lock=2)
-    assert bad.status_code == 422
-    assert bad.json()["detail"]["code"] == "unknown_extra_tag"
+    custom = f"t{uuid.uuid4().hex[:6]}"  # not in the catalog: the catalog is no longer a gate
+    free = await _patch(client, feat, sc, actor, [custom], lock=2)
+    assert free.status_code == 200, free.text
+    assert free.json()["extra_tags"] == [custom]
 
 
 async def test_category_tags_endpoint(client):
     resp = await client.get(f"{BASE}/category-tags")
     assert resp.status_code == 200
-    assert {"runnable", "e2e", "ui", "skip"} <= set(resp.json())
+    assert {"runnable", "skip", "broken", "flaky"} <= set(resp.json())
