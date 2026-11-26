@@ -33,11 +33,28 @@ def _check_scope_code(value: str) -> str:
 
 # ── Ambiti ────────────────────────────────────────────────────────────────────
 
+_JIRA_KEY = r"[A-Z][A-Z0-9]+-\d+"
+_JIRA_URL_KEY_RE = re.compile(
+    rf"(?:/browse/|[?&]selectedIssue=)({_JIRA_KEY})(?=$|[?#&/])", re.IGNORECASE
+)
+
+
+def normalize_jira_key(value: str | None) -> str | None:
+    """Turn a Jira URL into its upper-case key; a bare key is left to the field's own check.
+
+    Anything else is returned unchanged, so the field's own check keeps raising its message.
+    """
+    if value is None:
+        return None
+    match = _JIRA_URL_KEY_RE.search(value.strip())
+    return match.group(1).upper() if match else value
+
+
 def _check_epic_key(value: str | None) -> str | None:
     """Epic QA: chiave del progetto Jira dei task QA (es. PQ-495)."""
     if value is None:
         return None
-    value = value.strip()
+    value = (normalize_jira_key(value) or value).strip()
     project = re.escape(settings.tl_jira_project)
     if not re.fullmatch(rf"{project}-\d+", value):
         raise ValueError(f"Epic QA non valida: atteso {settings.tl_jira_project}-<numero>")
@@ -149,6 +166,7 @@ def _scenario_title(value: str) -> str:
 def _check_pattern(value: str | None, pattern: re.Pattern[str], label: str) -> str | None:
     if value is None:
         return None
+    value = normalize_jira_key(value) or value
     if not pattern.fullmatch(value):
         raise ValueError(f"Chiave Jira non valida per {label}")
     return value
@@ -395,6 +413,17 @@ class TlJiraLink(BaseModel):
     verified: bool = False
 
 
+class TlJiraHistoryRow(BaseModel):
+    """Jira tasks and epic used by one revision of a feature."""
+
+    revision_number: int
+    revision_status: TlRevisionStatus
+    is_current: bool
+    design: TlJiraLink | None = None
+    impl: TlJiraLink | None = None
+    qa_epic: TlJiraLink | None = None
+
+
 class TlFeatureDetail(BaseModel):
     id: uuid.UUID
     code: str
@@ -416,6 +445,7 @@ class TlFeatureDetail(BaseModel):
     git_path: str | None = None
     open_issues: int = 0
     jira: list[TlJiraLink] = []
+    jira_history: list[TlJiraHistoryRow] = []
     jira_error: str | None = None
     jira_qa_epic_key: str | None = None
     jira_qa_epic_effective: str | None = None

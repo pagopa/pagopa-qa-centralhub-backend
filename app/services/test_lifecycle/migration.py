@@ -914,6 +914,8 @@ async def _create_feature(
         or prop.get("background_steps"),
         requirements_url=prop.get("requirements_url"),
         product_issue_key=prop.get("product_issue_key"),
+        jira_design_key=feature.jira_design_key,
+        jira_impl_key=feature.jira_impl_key,
         impl_estimate_days=Decimal(str(estimate)) if estimate is not None else None,
         created_by=actor_email,
         origin="git" if parsed is not None else "hub",

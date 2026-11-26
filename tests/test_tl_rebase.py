@@ -35,7 +35,13 @@ async def _reopened(client, scope, actor, reviewer, fake):
     published = (await _get(client, done["id"], actor["email"]))["published_revision"]
     resp = await _reopen(client, done["id"], published["id"], actor["email"])
     assert resp.status_code == 200, resp.text
-    return done, resp.json()
+    # a reopened revision needs its own design task before it can be submitted again
+    resp = await client.patch(
+        f"{BASE}/features/{done['id']}",
+        json={"jira_design_key": "PQ-20", "actor_email": actor["email"]},
+    )
+    assert resp.status_code == 200, resp.text
+    return done, await _get(client, done["id"], actor["email"])
 
 
 async def _edit_draft_steps(client, detail, steps, email):

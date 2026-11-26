@@ -210,6 +210,10 @@ class TlFeatureRevision(Base):
     background_steps: Mapped[str | None] = mapped_column(Text)
     requirements_url: Mapped[str | None] = mapped_column(String(1024))
     product_issue_key: Mapped[str | None] = mapped_column(String(32))
+    # Jira keys used by this revision; the feature columns mirror the current revision's keys.
+    jira_design_key: Mapped[str | None] = mapped_column(String(32))
+    jira_impl_key: Mapped[str | None] = mapped_column(String(32))
+    jira_qa_epic_key: Mapped[str | None] = mapped_column(String(32))
     reverse_engineering: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )

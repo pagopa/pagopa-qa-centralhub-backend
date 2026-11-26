@@ -81,6 +81,7 @@ def _submit_reasons(
     revision: TlFeatureRevision,
     view: TlRevisionOut,
     scope: TlScope | None = None,
+    design_reused: bool = False,
 ) -> list[str]:
     if revision.status != TlRevisionStatus.DRAFT:
         return ["La revisione non è in bozza"]
@@ -95,6 +96,8 @@ def _submit_reasons(
         reasons.append(REVIEWER_IS_OWNER_REASON)
     if not feature.jira_design_key:
         reasons.append("Manca la chiave Jira di progettazione")
+    elif design_reused:
+        reasons.append(jira_tasks.DESIGN_KEY_REUSED_REASON)
     if not revision.product_issue_key and not revision.reverse_engineering:
         reasons.append("Manca l'Epic/Story prodotto (o il flag reverse engineering)")
     if scope is not None and not (scope.repo_folder or "").strip():
@@ -155,6 +158,7 @@ def available_transitions(
     actor: User | None,
     view: TlRevisionOut | None = None,
     scope: TlScope | None = None,
+    design_reused: bool = False,
 ) -> list[TlTransitionOut]:
     """Le 6 azioni, sempre nello stesso ordine, con `allowed` e motivi in italiano.
 
@@ -173,7 +177,7 @@ def available_transitions(
             TransitionCheck(TlTransitionAction.WITHDRAW.value, False, list(no_rev)),
         ]
     else:
-        submit = _submit_reasons(feature, revision, view, scope)
+        submit = _submit_reasons(feature, revision, view, scope, design_reused)
         review = _review_reasons(feature, revision, actor)
         approve = list(review)
         if not approve and feature.reviewer_id == feature.design_owner_id:
@@ -243,8 +247,13 @@ async def _apply_transition(
 
     view = await features_svc._revision_out(db, rev)
     scope = await db.get(TlScope, feature.scope_id)
+    reused = bool(feature.jira_design_key) and await jira_tasks.design_key_reused(
+        db, feature.id, rev.id, feature.jira_design_key
+    )
     check = next(
-        c for c in available_transitions(feature, rev, actor, view, scope) if c.action == action
+        c
+        for c in available_transitions(feature, rev, actor, view, scope, reused)
+        if c.action == action
     )
     if not check.allowed:
         # Revisione nello stato giusto ma attore non abilitato: 403, non 409.
