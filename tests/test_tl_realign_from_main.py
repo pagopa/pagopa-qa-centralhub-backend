@@ -175,3 +175,67 @@ async def test_a_draft_with_content_is_never_deleted(env):
     assert report.status == "skipped" and "bozza" in report.reason
     async with TestSession() as db:
         assert (await db.get(TlFeature, fid)).published_revision_id == empty
+
+
+# ── features not emptied: Git already holds the content, the file lacks the header ──────────────
+
+
+async def _headerless_on_main(env, edit=lambda t: t):
+    """Main holds the hub file without its header: the import keeps the (valid-tag) scenarios."""
+    from app.services.test_lifecycle import git_import
+
+    s, _, git, _ = env
+    fid = await _migrated(env)
+    path = f"src/{s}/pay.feature"
+    text = git.files("main")[path][0]
+    body = "\n".join(ln for ln in text.splitlines() if not ln.startswith("# qa-hub:")) + "\n"
+    sha = git.seed_file(path, edit(body).replace("Quando pago\n", "Quando pago con carta\n"))
+    async with TestSession() as db:
+        await git_import.import_changed_file(db, path, None, sha, git)
+    return fid, path
+
+
+async def test_a_feature_with_content_but_a_headerless_file_gets_its_alignment_back(env):
+    s, _, git, _ = env
+    fid, path = await _headerless_on_main(env)
+    async with TestSession() as db:
+        before = await db.get(TlFeature, fid)
+        published = before.published_revision_id
+        assert not before.alignment_pending
+    async with TestSession() as db:
+        report = await realign.realign_from_main(db, git, fid, apply=True)
+    assert report.status == "applied", report
+    async with TestSession() as db:
+        feature = await db.get(TlFeature, fid)
+        assert feature.published_revision_id == published and feature.alignment_pending
+        assert (
+            await db.execute(
+                select(func.count()).select_from(TlIssue).where(
+                    TlIssue.feature_id == fid, TlIssue.status == TlIssueStatus.OPEN
+                )
+            )
+        ).scalar_one() == 0
+    assert "Quando pago con carta" in (await _scenario_rows(published))[0].steps
+    async with TestSession() as db:
+        out = await migration_align.open_alignment_pr(db, s, git)
+    assert out.pr_error is None
+    text = git.files(migration_align.branch_for(s))[path][0]
+    assert text.startswith("# qa-hub: FEAT_001_") and "Quando pago con carta" in text
+
+
+async def test_a_file_with_more_scenarios_than_the_hub_is_not_turned_into_a_pr(env):
+    s, _, git, _ = env
+    fid, path = await _headerless_on_main(env, lambda t: t + "\n  Scenario: Senza tag\n    Dato x\n")
+    async with TestSession() as db:
+        report = await realign.realign_from_main(db, git, fid, apply=True)
+    assert report.status == "skipped" and "scenari" in report.reason
+    async with TestSession() as db:
+        assert not (await db.get(TlFeature, fid)).alignment_pending
+
+
+async def test_a_file_that_already_has_the_header_is_left_alone(env):
+    s, _, git, _ = env
+    fid = await _migrated(env)
+    async with TestSession() as db:
+        report = await realign.realign_from_main(db, git, fid, apply=True)
+    assert report.status == "skipped" and "intestazione" in report.reason

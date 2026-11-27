@@ -1,10 +1,11 @@
-"""Recovery: a feature emptied by a legacy file on main is rebuilt from that file.
+"""Recovery: a feature whose file on main lost the hub header is rebuilt from that file.
 
-When a file without the hub header (a legacy version put back on main by an unrelated merge) was
-imported as a new Git revision with no valid scenario, the feature was left empty although its
-last good revision still holds the scenarios. Here main wins: the content of that revision is
-rewritten from the file on main, matching scenarios by position, the feature goes back to waiting
-for its alignment pull request and the emptied revision and the empty draft are put away.
+A file without the hub header (a legacy version put back on main by an unrelated merge) was
+imported as a new Git revision. Two cases: the revision has no scenario (the feature was left
+empty although its last good revision still holds them), or it has the scenarios of the file. In
+both main wins: the content of the revision is rewritten from the file on main, matching scenarios
+by position, and the feature goes back to waiting for its alignment pull request (an emptied
+revision and an empty draft are put away).
 A person decides the cases that are not clear-cut (different number of scenarios, a draft with
 work in it): they are reported and left untouched.
 """
@@ -68,32 +69,33 @@ async def realign_from_main(
         return skip("la feature non ha un file o una revisione pubblicata")
     published = await db.get(TlFeatureRevision, feature.published_revision_id)
     assert published is not None  # noqa: S101 - FK
-    if await _count(db, TlScenarioContent, TlScenarioContent.revision_id == published.id):
-        return skip("la pubblicata ha già degli scenari: nulla da recuperare")
-    baseline = (
-        await db.execute(
-            select(TlFeatureRevision)
-            .where(
-                TlFeatureRevision.feature_id == feature.id,
-                TlFeatureRevision.number < published.number,
-                select(func.count())
-                .select_from(TlScenarioContent)
-                .where(TlScenarioContent.revision_id == TlFeatureRevision.id)
-                .scalar_subquery()
-                > 0,
+    emptied = not await _count(db, TlScenarioContent, TlScenarioContent.revision_id == published.id)
+    baseline: TlFeatureRevision | None = published
+    if emptied:
+        baseline = (
+            await db.execute(
+                select(TlFeatureRevision)
+                .where(
+                    TlFeatureRevision.feature_id == feature.id,
+                    TlFeatureRevision.number < published.number,
+                    select(func.count())
+                    .select_from(TlScenarioContent)
+                    .where(TlScenarioContent.revision_id == TlFeatureRevision.id)
+                    .scalar_subquery()
+                    > 0,
+                )
+                .order_by(TlFeatureRevision.number.desc())
+                .limit(1)
             )
-            .order_by(TlFeatureRevision.number.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if baseline is None:
-        return skip("nessuna revisione precedente con scenari")
+        ).scalar_one_or_none()
+        if baseline is None:
+            return skip("nessuna revisione precedente con scenari")
     working = (
         await db.get(TlFeatureRevision, feature.working_revision_id)
         if feature.working_revision_id
         else None
     )
-    if working is not None and (
+    if emptied and working is not None and (
         await _count(db, TlScenarioContent, TlScenarioContent.revision_id == working.id)
         or working.pr_number is not None
     ):
@@ -106,6 +108,8 @@ async def realign_from_main(
     parsed = parse_feature_file(file.text)
     if parsed.errors:
         return skip("il file su main non è leggibile: " + "; ".join(parsed.errors)[:200])
+    if not emptied and parsed.code == feature.code:
+        return skip("il file su main ha già l'intestazione dell'hub")
     scope = await db.get(TlScope, feature.scope_id)
     assert scope is not None  # noqa: S101 - FK
     from app.models.test_lifecycle import TlMigrationTag
@@ -163,13 +167,14 @@ async def realign_from_main(
     baseline.description = parsed.description
     baseline.background_steps = parsed.background_steps
     baseline.lock_version += 1
-    baseline.status = TlRevisionStatus.MERGED
-    published.status = TlRevisionStatus.SUPERSEDED
-    feature.working_revision_id = None
-    feature.published_revision_id = baseline.id
     feature.alignment_pending = True
+    if emptied:
+        baseline.status = TlRevisionStatus.MERGED
+        published.status = TlRevisionStatus.SUPERSEDED
+        feature.working_revision_id = None
+        feature.published_revision_id = baseline.id
     await db.flush()
-    if working is not None:
+    if emptied and working is not None:
         await db.execute(delete(TlFeatureRevision).where(TlFeatureRevision.id == working.id))
     await issues_svc.resolve_feature_issues(
         db, kind=TlIssueKind.STRUCTURAL_CHANGE, feature_id=feature.id
@@ -184,7 +189,7 @@ async def realign_from_main(
         db, feature.id, "tl.feature.realigned_from_main", None,
         {
             "baseline_revision": baseline.number,
-            "emptied_revision": published.number,
+            "emptied_revision": published.number if emptied else None,
             "commit_sha": head,
             "at": datetime.now(UTC).isoformat(),
         },
