@@ -12,6 +12,11 @@ from app.services.test_lifecycle import history, jira_tasks, nrt
 from app.services.test_lifecycle.advisory_lock import try_advisory_lock
 from app.services.test_lifecycle.alias_guard import code_held_by_aliases
 from app.services.test_lifecycle.deletable import undeletable_clause
+from app.services.test_lifecycle.display_status import (
+    display_status,
+    is_running,
+    working_statuses,
+)
 
 
 class ScopeNotFoundError(Exception):
@@ -30,21 +35,32 @@ class ScopeCodeBlockedError(Exception):
         self.blocked = blocked
 
 
+_SHOWN = (
+    TlFeatureStatus.DRAFT,
+    TlFeatureStatus.IN_REVIEW,
+    TlFeatureStatus.DESIGNED,
+    TlFeatureStatus.IMPLEMENTED,
+)
+
+
 def _empty_counts() -> dict[str, int]:
-    return {s.value: 0 for s in TlFeatureStatus}
+    return {s.value: 0 for s in _SHOWN}
 
 
 async def _counts(
     db: AsyncSession, scope_ids: list[uuid.UUID] | None = None
-) -> dict[uuid.UUID, dict[str, int]]:
-    stmt = select(TlFeature.scope_id, TlFeature.status, func.count()).group_by(
-        TlFeature.scope_id, TlFeature.status
-    )
+) -> dict[uuid.UUID, tuple[dict[str, int], int]]:
+    """Per scope: features by status shown, and how many of them NRT runs (a badge)."""
+    stmt = select(TlFeature)
     if scope_ids is not None:
         stmt = stmt.where(TlFeature.scope_id.in_(scope_ids))
-    out: dict[uuid.UUID, dict[str, int]] = {}
-    for scope_id, status, n in (await db.execute(stmt)).all():
-        out.setdefault(scope_id, _empty_counts())[TlFeatureStatus(status).value] = n
+    features = list((await db.execute(stmt)).scalars())
+    working = await working_statuses(db, features)
+    out: dict[uuid.UUID, tuple[dict[str, int], int]] = {}
+    for f in features:
+        counts, running = out.setdefault(f.scope_id, (_empty_counts(), 0))
+        counts[display_status(f.status, working.get(f.id)).value] += 1
+        out[f.scope_id] = (counts, running + int(is_running(f.status)))
     return out
 
 
@@ -59,11 +75,14 @@ async def _blocked_scope_ids(
 
 
 def to_out(
-    scope: TlScope, counts: dict[str, int] | None = None, deletable: bool = True
+    scope: TlScope,
+    counts: tuple[dict[str, int], int] | None = None,
+    deletable: bool = True,
 ) -> TlScopeOut:
-    counts = counts or _empty_counts()
+    counts, running = counts or (_empty_counts(), 0)
     out = TlScopeOut.model_validate(scope)
     out.status_counts = counts
+    out.running_count = running
     out.feature_count = sum(counts.values())
     out.deletable = deletable
     return out

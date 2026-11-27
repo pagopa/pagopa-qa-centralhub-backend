@@ -35,6 +35,11 @@ from app.services.test_lifecycle import history, jira_tasks
 from app.services.test_lifecycle.actors import UnknownActorError, resolve_actor
 from app.services.test_lifecycle.alias_guard import number_held_by_aliases
 from app.services.test_lifecycle.deletable import undeletable_clause
+from app.services.test_lifecycle.display_status import (
+    display_status,
+    is_running,
+    working_statuses,
+)
 from app.services.test_lifecycle.gherkin import (
     feature_code,
     scenario_tag,
@@ -440,6 +445,10 @@ async def get_feature_detail(
         code=feature.code,
         number=feature.number,
         status=feature.status,
+        display_status=display_status(
+            feature.status, working_rev.status if working_rev is not None else None
+        ),
+        is_running=is_running(feature.status),
         scope_id=feature.scope_id,
         scope_code=scope_code,
         scope_name=scope.name,
@@ -486,8 +495,6 @@ async def list_features(
     )
     if scope_id is not None:
         stmt = stmt.where(TlFeature.scope_id == scope_id)
-    if status is not None:
-        stmt = stmt.where(TlFeature.status == status)
     if owner_id is not None:
         stmt = stmt.where(
             or_(
@@ -497,6 +504,14 @@ async def list_features(
             )
         )
     rows = (await db.execute(stmt)).all()
+    working = await working_statuses(db, [f for f, _, _ in rows])
+    if status is not None:
+        # `running` is the badge; every other status is the one shown
+        rows = [
+            r for r in rows
+            if (is_running(r[0].status) if status == TlFeatureStatus.RUNNING
+                else display_status(r[0].status, working.get(r[0].id)) == status)
+        ]
     scope_names = dict((await db.execute(select(TlScope.id, TlScope.name))).all())
     shown = {
         f.id: f.working_revision_id or f.published_revision_id
@@ -535,6 +550,8 @@ async def list_features(
                 number=f.number,
                 title=titles.get(rev_id) if rev_id else None,
                 status=f.status,
+                display_status=display_status(f.status, working.get(f.id)),
+                is_running=is_running(f.status),
                 scope_id=f.scope_id,
                 scope_code=scope_code,
                 scope_name=scope_names.get(f.scope_id),

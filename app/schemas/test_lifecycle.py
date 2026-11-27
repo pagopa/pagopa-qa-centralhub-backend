@@ -155,7 +155,9 @@ class TlScopeOut(BaseModel):
     # set on a code rename when the migration pull requests could not be refreshed
     alignment_error: str | None = None
     feature_count: int = 0
+    # by status shown (draft, in_review, designed, implemented); `running_count` is a badge
     status_counts: dict[str, int] = {}
+    running_count: int = 0
     nrt_pass_rate: float | None = None
     deletable: bool = True
 
@@ -440,6 +442,9 @@ class TlFeatureListItem(BaseModel):
     number: int
     title: str | None = None
     status: TlFeatureStatus
+    # what the feature is shown as (the open change's phase) and whether NRT runs it (a badge)
+    display_status: TlFeatureStatus
+    is_running: bool = False
     scope_id: uuid.UUID
     scope_code: str
     scope_name: str | None = None
@@ -495,6 +500,8 @@ class TlFeatureDetail(BaseModel):
     code: str
     number: int
     status: TlFeatureStatus
+    display_status: TlFeatureStatus
+    is_running: bool = False
     scope_id: uuid.UUID
     scope_code: str
     scope_name: str | None = None
