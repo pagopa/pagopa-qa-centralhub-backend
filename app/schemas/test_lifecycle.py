@@ -777,6 +777,10 @@ class TlRebaseApply(BaseModel):
 
 class TlJiraActorRequest(BaseModel):
     actor_email: str
+    # Epic QA for a task creation when the feature and its scope have none (saved on the feature)
+    epic_key: str | None = Field(default=None, max_length=32)
+
+    _validate_epic = field_validator("epic_key")(_check_epic_key)
 
 
 

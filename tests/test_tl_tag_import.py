@@ -29,10 +29,12 @@ def _edited(fake, done, scope, *, test_type="", scenario_extra=""):
     feature_tag, _ = _tags(scope)
     text = _main_text(fake, done)
     if test_type:
-        assert f"{feature_tag} @integration\n" in text  # the hub file already carries the type
-        text = text.replace(f"{feature_tag} @integration", f"{feature_tag} {test_type}", 1)
+        assert f"{feature_tag}\n@integration\n" in text  # the hub file already carries the type
+        text = text.replace(f"{feature_tag}\n@integration", f"{feature_tag}\n{test_type}", 1)
     if scenario_extra:
-        text = text.replace("@runnable @positive", f"@runnable {scenario_extra} @positive", 1)
+        text = text.replace(
+            "@runnable\n  @positive", f"@runnable {scenario_extra} @positive", 1
+        )
     return text
 
 

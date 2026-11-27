@@ -293,6 +293,10 @@ def _translate(exc: Exception) -> HTTPException:
                 "key": exc.key,
             },
         )
+    if isinstance(exc, jira_tasks_svc.JiraEpicRequired):
+        return HTTPException(
+            status_code=409, detail={"code": "jira_epic_required", "message": str(exc)}
+        )
     if isinstance(exc, jira_tasks_svc.JiraTaskNotAllowed):
         return HTTPException(
             status_code=409, detail={"code": "jira_task_not_allowed", "message": exc.reason}
@@ -685,11 +689,13 @@ async def transition_revision(
 
 
 async def _jira_task(
-    db: DbDep, feature_id: uuid.UUID, kind: str, actor_email: str
+    db: DbDep, feature_id: uuid.UUID, kind: str, actor_email: str, epic_key: str | None = None
 ) -> TlFeatureDetail:
     await resolve_actor(db, actor_email)  # 403 prima di chiamare Jira
     client = jira_client_mod.get_jira_client()
-    warning = await jira_tasks_svc.create_task(db, feature_id, kind, actor_email, client)
+    warning = await jira_tasks_svc.create_task(
+        db, feature_id, kind, actor_email, client, epic_key
+    )
     detail = await features_svc.get_feature_detail(db, feature_id, actor_email)
     detail.jira_warning = warning
     return detail
@@ -701,7 +707,7 @@ async def create_jira_design_task(
 ) -> TlFeatureDetail:
     """Crea (o ritrova) il task Jira di progettazione: revisione in bozza, chiave vuota."""
     try:
-        return await _jira_task(db, feature_id, "design", body.actor_email)
+        return await _jira_task(db, feature_id, "design", body.actor_email, body.epic_key)
     except Exception as exc:
         raise _translate(exc) from exc
 
@@ -712,7 +718,7 @@ async def create_jira_impl_task(
 ) -> TlFeatureDetail:
     """Crea (o ritrova) il task Jira di implementazione: feature approvata, chiave vuota."""
     try:
-        return await _jira_task(db, feature_id, "impl", body.actor_email)
+        return await _jira_task(db, feature_id, "impl", body.actor_email, body.epic_key)
     except Exception as exc:
         raise _translate(exc) from exc
 

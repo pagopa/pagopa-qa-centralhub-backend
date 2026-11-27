@@ -228,9 +228,10 @@ async def _jira_scope(client, scope_, jira, epic="PQ-495", component="FDR"):
     return resp.json()
 
 
-async def _design(client, feat, actor):
+async def _design(client, feat, actor, **extra):
     return await client.post(
-        f"{BASE}/features/{feat['id']}/jira/design-task", json={"actor_email": actor["email"]}
+        f"{BASE}/features/{feat['id']}/jira/design-task",
+        json={"actor_email": actor["email"], **extra},
     )
 
 
@@ -275,6 +276,7 @@ async def test_feature_epic_overrides_scope(client, scope, actor, jira):
 
 
 async def test_create_reuses_existing_task_found_by_jql(client, scope, actor, jira):
+    await _jira_scope(client, scope, jira)
     feat = await _new_feature(client, scope, actor, title="Pagamento")
     jira.add_issue("PQ-555", f"[{feat['code']}] Progettazione — Pagamento",
                    issue_type="Progettazione Scenari e casi di test")
@@ -285,6 +287,7 @@ async def test_create_reuses_existing_task_found_by_jql(client, scope, actor, ji
 
 
 async def test_unknown_assignee_creates_unassigned_with_warning(client, scope, actor, jira):
+    await _jira_scope(client, scope, jira)
     feat = await _new_feature(client, scope, actor, design_owner_id=actor["id"])
     resp = await _design(client, feat, actor)
     assert resp.status_code == 200, resp.text
@@ -293,6 +296,7 @@ async def test_unknown_assignee_creates_unassigned_with_warning(client, scope, a
 
 
 async def test_jira_400_surfaces_message_and_keeps_feature_unchanged(client, scope, actor, jira):
+    await _jira_scope(client, scope, jira)
     feat = await _new_feature(client, scope, actor)
     jira.fail_once("create_issue", 400, "parent: Issue PQ-495 is not an epic")
     resp = await _design(client, feat, actor)
@@ -305,6 +309,7 @@ async def test_jira_400_surfaces_message_and_keeps_feature_unchanged(client, sco
 
 
 async def test_concurrent_create_second_gets_409(client, scope, actor, jira):
+    await _jira_scope(client, scope, jira)
     import asyncio
 
     feat = await _new_feature(client, scope, actor)
@@ -466,6 +471,7 @@ async def test_approve_creates_impl_task_and_link(client, scope, actor, jira):
 
 
 async def test_approve_jira_failure_keeps_approval_and_opens_issue(client, scope, actor, jira):
+    await _jira_scope(client, scope, jira)
     jira.fail_once("create_issue", 500, "Jira giù")
     done = await _approved_with_jira(client, scope, actor, jira)
     assert done["working_revision"]["status"] == "approved"
@@ -476,6 +482,7 @@ async def test_approve_jira_failure_keeps_approval_and_opens_issue(client, scope
 
 
 async def test_retry_impl_task_resolves_issue(client, scope, actor, jira):
+    await _jira_scope(client, scope, jira)
     jira.fail_once("create_issue", 500, "Jira giù")
     done = await _approved_with_jira(client, scope, actor, jira)
     resp = await client.post(
@@ -498,6 +505,7 @@ async def test_approve_without_jira_config_sets_error_only(client, scope, actor,
 
 
 async def test_reapproval_does_not_create_second_impl_task(client, scope, actor, jira):
+    await _jira_scope(client, scope, jira)
     done = await _approved_with_jira(client, scope, actor, jira)
     count = len([c for c in jira.created if c["issue_type"] == "Implementazione suite di TA"])
     resp = await client.post(
@@ -525,3 +533,48 @@ async def test_withdraw_and_reapproval_do_not_create_a_second_impl_task(client, 
     impl = [c for c in jira.created if c["issue_type"] == "Implementazione suite di TA"]
     assert len(impl) == 1
     assert again.json()["jira_impl_key"] == impl[0]["key"]
+
+
+# ── Epic obbligatoria sui task ────────────────────────────────────────────────
+
+
+async def test_design_task_without_any_epic_is_refused(client, scope, actor, jira):
+    feat = await _new_feature(client, scope, actor)
+    resp = await _design(client, feat, actor)
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "jira_epic_required"
+    assert jira.created == []
+    assert (await _feature_row(feat["id"])).jira_design_key is None
+
+
+async def test_design_task_takes_and_saves_the_epic_entered(client, scope, actor, jira):
+    feat = await _new_feature(client, scope, actor)
+    resp = await _design(client, feat, actor, epic_key="PQ-495")
+    assert resp.status_code == 200, resp.text
+    assert jira.created[0]["parent_key"] == "PQ-495"
+    body = resp.json()
+    assert body["jira_qa_epic_effective"] == "PQ-495"
+    assert (await _feature_row(feat["id"])).jira_qa_epic_key == "PQ-495"
+
+
+async def test_the_epic_entered_must_be_an_epic(client, scope, actor, jira):
+    feat = await _new_feature(client, scope, actor)
+    resp = await _design(client, feat, actor, epic_key="PQ-12")
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "jira_not_an_epic"
+    assert jira.created == []
+    assert (await _feature_row(feat["id"])).jira_qa_epic_key is None
+
+
+async def test_approval_without_epic_keeps_it_and_asks_for_the_epic(client, scope, actor, jira):
+    done = await _approved_with_jira(client, scope, actor, jira)
+    assert done["working_revision"]["status"] == "approved"
+    assert [c for c in jira.created if c["issue_type"] == "Implementazione suite di TA"] == []
+    row = await _feature_row(done["id"])
+    assert row.jira_impl_key is None and "Epic" in row.jira_error
+    resp = await client.post(
+        f"{BASE}/features/{done['id']}/jira/impl-task",
+        json={"actor_email": actor["email"], "epic_key": "PQ-495"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["jira_impl_key"] and resp.json()["jira_error"] is None

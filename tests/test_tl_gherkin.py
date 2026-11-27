@@ -108,7 +108,8 @@ Funzionalità: Pagamento
   Contesto:
     Dati un utente autenticato
 
-  @runnable @positive
+  @runnable
+  @positive
   @FDR3_001_01
   #link:req-1|Requisito
   Scenario: Paga con successo
@@ -177,8 +178,16 @@ def test_render_writes_the_test_type_after_the_feature_tag():
     feature = _feature()
     feature.test_type = "integration"
     assert render_feature_file(feature) == GOLDEN.replace(
-        "@FDR3_001\n", "@FDR3_001 @integration\n", 1
+        "@FDR3_001\n", "@FDR3_001\n@integration\n", 1
     )
+
+
+def test_render_puts_every_tag_on_its_own_line():
+    feature = _feature()
+    feature.test_type = "integration"
+    for line in render_feature_file(feature).splitlines():
+        if line.strip().startswith("@"):
+            assert len(line.split()) == 1, line
 
 
 def test_render_without_test_type_is_unchanged():
