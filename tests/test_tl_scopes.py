@@ -65,7 +65,7 @@ async def test_create_scope_returns_201(client, cleanup):
     assert body["area"] == "Pagamenti"
     assert body["feature_count"] == 0
     assert body["status_counts"] == {
-        "draft": 0, "in_review": 0, "designed": 0, "implemented": 0, "running": 0
+        "draft": 0, "in_review": 0, "designed": 0, "implemented": 0
     }
 
 
@@ -137,7 +137,7 @@ async def test_list_scopes_includes_status_counts(client, cleanup):
     row = next(r for r in resp.json() if r["id"] == scope["id"])
     assert row["feature_count"] == 3
     assert row["status_counts"] == {
-        "draft": 2, "in_review": 0, "designed": 1, "implemented": 0, "running": 0
+        "draft": 2, "in_review": 0, "designed": 1, "implemented": 0
     }
 
 
