@@ -176,9 +176,9 @@ async def realign_from_main(
     await db.flush()
     if emptied and working is not None:
         await db.execute(delete(TlFeatureRevision).where(TlFeatureRevision.id == working.id))
-    await issues_svc.resolve_feature_issues(
-        db, kind=TlIssueKind.STRUCTURAL_CHANGE, feature_id=feature.id
-    )
+    # the alignment pull request brings the header back: both questions are answered by it
+    for kind in (TlIssueKind.STRUCTURAL_CHANGE, TlIssueKind.MISSING_HEADER):
+        await issues_svc.resolve_feature_issues(db, kind=kind, feature_id=feature.id)
     item = (
         await db.execute(select(TlMigrationItem).where(TlMigrationItem.feature_id == feature.id))
     ).scalar_one_or_none()

@@ -5,7 +5,7 @@ import json
 import uuid
 
 import pytest
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from app.config import settings
 from app.models.audit_log import AuditLog
@@ -19,6 +19,7 @@ from app.models.test_lifecycle import (
     TlRevisionStatus,
     TlScenario,
     TlScenarioContent,
+    TlScope,
 )
 from app.services.test_lifecycle import git_import
 from tests._db import TestSession
@@ -456,6 +457,111 @@ async def test_unmanaged_file_without_header_is_ignored(fake):
     sha = fake.seed_file(path, "#123456\nFeature: legacy\n  Scenario: x\n    Given y\n")
     await _import(fake, path, sha)
     assert await _issues(path=path) == []
+
+
+LEGACY_TEXT = "#123456\nFeature: legacy\n  Scenario: x\n    Given y\n"
+
+
+async def _cleanup_issues(path: str) -> None:
+    async with TestSession() as s:
+        await s.execute(delete(TlIssue).where(TlIssue.path == path))
+        await s.commit()
+
+
+async def _own_folder(scope) -> str:
+    """Gives the scope a folder no other scope of the shared test database uses."""
+    folder = f"features/{uuid.uuid4().hex[:10]}"
+    async with TestSession() as s:
+        await s.execute(
+            update(TlScope).where(TlScope.id == uuid.UUID(scope["id"])).values(repo_folder=folder)
+        )
+        await s.commit()
+    return folder
+
+
+async def test_new_file_without_header_in_scope_folder_opens_unmanaged_issue(
+    client, scope, actor, fake
+):
+    folder = await _own_folder(scope)
+    path = f"{folder}/{uuid.uuid4().hex}.feature"
+    sha = fake.seed_file(path, LEGACY_TEXT)
+    try:
+        await _import(fake, path, sha)
+        await _import(fake, path, sha)  # idempotent: the same issue is reused
+        issues = await _issues(path=path)
+        assert len(issues) == 1
+        assert issues[0].kind == TlIssueKind.UNMANAGED_FILE
+        assert issues[0].status == TlIssueStatus.OPEN
+        assert issues[0].feature_id is None
+        assert issues[0].commit_sha == sha
+        assert issues[0].detail["scope_code"] == scope["code"]
+    finally:
+        await _cleanup_issues(path)
+
+
+async def test_unmanaged_file_in_a_shared_folder_has_no_scope_suggestion(
+    client, scope, actor, fake
+):
+    folder = await _own_folder(scope)
+    other_code = "T" + uuid.uuid4().hex[:8]
+    async with TestSession() as s:
+        other = TlScope(code=other_code, name="Altro", repo_folder=folder, next_feature_number=1)
+        s.add(other)
+        await s.commit()
+        other_id = other.id
+    path = f"{folder}/{uuid.uuid4().hex}.feature"
+    sha = fake.seed_file(path, LEGACY_TEXT)
+    try:
+        await _import(fake, path, sha)
+        issues = await _issues(path=path)
+        assert len(issues) == 1
+        assert issues[0].detail["scope_code"] is None  # ambiguous: the user will choose
+    finally:
+        await _cleanup_issues(path)
+        async with TestSession() as s:
+            await s.execute(delete(TlScope).where(TlScope.id == other_id))
+            await s.commit()
+
+
+async def test_scope_folder_match_respects_directory_boundaries(client, scope, actor, fake):
+    # `<folder>2` is not inside `<folder>`
+    folder = await _own_folder(scope)
+    path = f"{folder}2/{uuid.uuid4().hex}.feature"
+    sha = fake.seed_file(path, LEGACY_TEXT)
+    await _import(fake, path, sha)
+    assert await _issues(path=path) == []
+
+
+async def test_unmanaged_issue_is_resolved_when_the_file_is_removed(client, scope, actor, fake):
+    path = f"{await _own_folder(scope)}/{uuid.uuid4().hex}.feature"
+    sha = fake.seed_file(path, LEGACY_TEXT)
+    try:
+        await _import(fake, path, sha)
+        async with TestSession() as s:
+            await git_import.handle_removed_file(s, path, sha)
+        issues = await _issues(path=path)
+        assert [i.status for i in issues] == [TlIssueStatus.RESOLVED]
+    finally:
+        await _cleanup_issues(path)
+
+
+async def test_unmanaged_issue_does_not_touch_existing_features(
+    client, scope, actor, reviewer, fake
+):
+    done, _ = await _merged(client, scope, actor, reviewer, fake)
+    before = await _feature(done["id"])
+    path = f"{await _own_folder(scope)}/{uuid.uuid4().hex}.feature"
+    sha = fake.seed_file(path, LEGACY_TEXT)
+    try:
+        await _import(fake, path, sha)
+        after = await _feature(done["id"])
+        assert (after.status, after.published_revision_id, after.git_path) == (
+            before.status,
+            before.published_revision_id,
+            before.git_path,
+        )
+    finally:
+        await _cleanup_issues(path)
 
 
 async def test_parse_error_opens_issue(client, scope, actor, reviewer, fake):

@@ -128,6 +128,26 @@ async def resolve_issues(
     return rows
 
 
+async def resolve_path_issues(db: AsyncSession, *, kind: TlIssueKind, path: str) -> list[TlIssue]:
+    """Resolves the `open` issues of that kind on that file path, which belong to no feature
+    (system action). No commit."""
+    rows = list(
+        (
+            await db.execute(
+                select(TlIssue).where(
+                    TlIssue.feature_id.is_(None),
+                    TlIssue.kind == kind,
+                    TlIssue.path == path,
+                    TlIssue.status == TlIssueStatus.OPEN,
+                )
+            )
+        ).scalars()
+    )
+    for issue in rows:
+        issue.status = TlIssueStatus.RESOLVED
+    return rows
+
+
 async def resolve_feature_issues(
     db: AsyncSession, *, kind: TlIssueKind, feature_id: uuid.UUID
 ) -> list[TlIssue]:
