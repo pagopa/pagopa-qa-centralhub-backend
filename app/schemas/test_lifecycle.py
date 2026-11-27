@@ -714,6 +714,28 @@ class TlIssueOut(BaseModel):
     feature_title: str | None = None
 
 
+class TlAdoptRequest(BaseModel):
+    actor_email: str
+    scope_code: str | None = None
+
+
+class TlAdoptOut(BaseModel):
+    feature_id: uuid.UUID
+    code: str
+    alignment_pending: bool
+    pr_url: str | None = None
+    pr_error: str | None = None
+
+
+class TlIssueActor(BaseModel):
+    actor_email: str
+
+
+class TlRestoreHeaderOut(BaseModel):
+    pr_url: str | None = None
+    pr_error: str | None = None
+
+
 class TlIssueUpdate(BaseModel):
     status: Literal["acknowledged", "resolved"]
     actor_email: str

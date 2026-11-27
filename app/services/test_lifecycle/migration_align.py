@@ -11,7 +11,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -20,6 +20,7 @@ from app.models.test_lifecycle import (
     TlFeatureRevision,
     TlMigrationItem,
     TlMigrationScope,
+    TlScope,
 )
 from app.schemas.test_lifecycle import TlMigrationScopeOut
 from app.services.test_lifecycle import history
@@ -93,15 +94,31 @@ async def _get_scope_row(db: AsyncSession, scope_code: str) -> TlMigrationScope:
     return row
 
 
+def _scope_of(own_scope: str, item: TlMigrationItem | None) -> str:
+    """The scope a pending feature belongs to for its alignment: the migration's (which a move
+    or a rename may have changed) or, for a feature adopted from a file, its own."""
+    if item is None:
+        return own_scope
+    return str(item.overrides.get("scope_code") or item.scope_code)
+
+
+def _old_tags(feature: TlFeature, item: TlMigrationItem | None) -> list[Any]:
+    if item is not None:
+        return item.proposal.get("old_scenario_tags") or []
+    return (feature.migrated_from or {}).get("old_scenario_tags") or []
+
+
 async def _targets(db: AsyncSession, scope_code: str) -> list[dict[str, Any]]:
-    """Files of the scope's migrated features still waiting for their alignment pull request."""
+    """Files of the scope's features still waiting for their alignment pull request: the migrated
+    ones and the ones adopted from a file."""
     rows = (
         await db.execute(
-            select(TlFeature, TlFeatureRevision, TlMigrationItem)
-            .join(TlMigrationItem, TlMigrationItem.feature_id == TlFeature.id)
+            select(TlFeature, TlFeatureRevision, TlMigrationItem, TlScope.code)
+            .join(TlScope, TlScope.id == TlFeature.scope_id)
+            .outerjoin(TlMigrationItem, TlMigrationItem.feature_id == TlFeature.id)
             .join(TlFeatureRevision, TlFeatureRevision.id == TlFeature.published_revision_id)
             .where(
-                TlMigrationItem.executed_at.is_not(None),
+                or_(TlMigrationItem.id.is_(None), TlMigrationItem.executed_at.is_not(None)),
                 TlFeature.alignment_pending.is_(True),
                 TlFeature.git_path.is_not(None),
             )
@@ -109,11 +126,11 @@ async def _targets(db: AsyncSession, scope_code: str) -> list[dict[str, Any]]:
         )
     ).all()
     targets: list[dict[str, Any]] = []
-    for feature, rev, item in rows:
-        if str(item.overrides.get("scope_code") or item.scope_code).lower() != scope_code.lower():
+    for feature, rev, item, own_scope in rows:
+        if _scope_of(own_scope, item).lower() != scope_code.lower():
             continue
         render, contents = await history.build_render(db, feature, rev)
-        old = item.proposal.get("old_scenario_tags") or []
+        old = _old_tags(feature, item)
         renames = [(o, s.tag) for o, (s, _c) in zip(old, contents, strict=False) if o]
         targets.append(
             {
@@ -172,18 +189,19 @@ async def open_alignment_pr(db: AsyncSession, scope_code: str, git: Any) -> TlMi
 
 
 async def _pending_of_scope(db: AsyncSession, scope_code: str) -> list[tuple[Any, str, str | None]]:
-    """`(feature id, code, git path)` of the pending features whose migration scope is this one."""
+    """`(feature id, code, git path)` of the pending features whose alignment scope is this one."""
     rows = (
         await db.execute(
-            select(TlFeature.id, TlFeature.code, TlFeature.git_path, TlMigrationItem)
-            .join(TlMigrationItem, TlMigrationItem.feature_id == TlFeature.id)
+            select(TlFeature.id, TlFeature.code, TlFeature.git_path, TlMigrationItem, TlScope.code)
+            .join(TlScope, TlScope.id == TlFeature.scope_id)
+            .outerjoin(TlMigrationItem, TlMigrationItem.feature_id == TlFeature.id)
             .where(TlFeature.alignment_pending.is_(True))
         )
     ).all()
     return [
         (fid, code, path)
-        for fid, code, path, item in rows
-        if str(item.overrides.get("scope_code") or item.scope_code).lower() == scope_code.lower()
+        for fid, code, path, item, own_scope in rows
+        if _scope_of(own_scope, item).lower() == scope_code.lower()
     ]
 
 

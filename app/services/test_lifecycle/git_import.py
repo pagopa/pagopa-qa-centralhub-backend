@@ -102,6 +102,50 @@ async def _find_feature(db: AsyncSession, fetched: _Fetched) -> tuple[Any, ...] 
     return tuple(row) if row is not None else None
 
 
+async def _scopes_of_path(db: AsyncSession, path: str) -> list[str]:
+    """Codes of the scopes whose `repo_folder` contains `path` (directory boundaries respected).
+
+    Only the deepest matching folder counts; more than one code means the folder is ambiguous.
+    """
+    rows = (
+        await db.execute(
+            select(TlScope.code, TlScope.repo_folder).where(TlScope.repo_folder.is_not(None))
+        )
+    ).all()
+    matches: list[tuple[int, str]] = []
+    for code, folder in rows:
+        prefix = (folder or "").strip().strip("/")
+        if prefix and path.startswith(prefix + "/"):
+            matches.append((len(prefix), code))
+    if not matches:
+        return []
+    deepest = max(depth for depth, _ in matches)
+    return sorted(code for depth, code in matches if depth == deepest)
+
+
+async def _open_unmanaged(db: AsyncSession, fetched: _Fetched) -> None:
+    """A `.feature` file without header that no feature manages, inside a scope folder: the hub
+    does not ignore it silently, it asks the user whether to import it. No other effect."""
+    scopes = await _scopes_of_path(db, fetched.path)
+    if not scopes:
+        await db.rollback()
+        return  # outside every scope folder: not ours
+    await issues_svc.open_issue(
+        db,
+        kind=TlIssueKind.UNMANAGED_FILE,
+        path=fetched.path,
+        commit_sha=fetched.commit_sha,
+        detail={
+            "key": "unmanaged",
+            "scope_code": scopes[0] if len(scopes) == 1 else None,
+            "title": fetched.parsed.title,
+            "scenarios": len(fetched.parsed.scenarios),
+            "parse_errors": list(fetched.parsed.errors),
+        },
+    )
+    await db.commit()
+
+
 async def _is_copy(
     client: TlGitClient, code: str, git_path: str | None, fetched: _Fetched
 ) -> bool:
@@ -315,6 +359,25 @@ async def _import_locked(
         )
 
 
+async def _track_header(db: AsyncSession, feature: TlFeature, fetched: _Fetched) -> None:
+    """A managed file without header is a question for the user (the hub can restore it); with
+    the feature's own header again the question is answered. The row lock of the feature is held."""
+    if fetched.parsed.code is None:
+        await issues_svc.open_issue(
+            db,
+            kind=TlIssueKind.MISSING_HEADER,
+            feature_id=feature.id,
+            revision_id=feature.published_revision_id,
+            path=fetched.path,
+            commit_sha=fetched.commit_sha,
+            detail={"key": "missing_header", "code": feature.code},
+        )
+    elif fetched.parsed.code == feature.code:
+        await issues_svc.resolve_feature_issues(
+            db, kind=TlIssueKind.MISSING_HEADER, feature_id=feature.id
+        )
+
+
 async def _finalize(db: AsyncSession, locked: _Locked) -> None:
     """Passi 11-12: `implemented` se pubblicata e nessuna anomalia bloccante (regola unica in
     `issues.maybe_promote_feature`, rivalutata a ogni import), poi base superata."""
@@ -381,7 +444,9 @@ async def import_changed_file(
                 detail={"key": fetched.parsed.code, "code": fetched.parsed.code},
             )
             await db.commit()
-        return  # file non gestito (senza header): ignorato fino alla migrazione
+        else:
+            await _open_unmanaged(db, fetched)
+        return  # file non gestito (senza header): resta fuori finché l'utente non lo importa
     feature_id, code, git_path = found
     pending = (
         await db.execute(select(TlFeature.alignment_pending).where(TlFeature.id == feature_id))
@@ -415,6 +480,10 @@ async def import_changed_file(
         merged = locked.published  # la mergiata è già la pubblicata
     await _import_locked(db, locked, fetched, merged, copy)
     await _finalize(db, locked)
+    if not fetched.parsed.errors and not copy:
+        await _track_header(db, locked.feature, fetched)
+    # the file is managed now: a pending "unmanaged file" question on it is answered
+    await issues_svc.resolve_path_issues(db, kind=TlIssueKind.UNMANAGED_FILE, path=fetched.path)
     await db.commit()
 
 
@@ -500,6 +569,8 @@ async def handle_removed_file(
     nulla (l'import di quel file aggiorna `git_path`), in qualunque ordine li tratti il sync.
     Se il file nuovo è già stato importato, `git_path` punta già altrove e qui non succede nulla.
     """
+    if await issues_svc.resolve_path_issues(db, kind=TlIssueKind.UNMANAGED_FILE, path=path):
+        await db.commit()  # the unmanaged file is gone: nothing left to ask
     row = (
         await db.execute(
             select(TlFeature.id, TlFeature.code).where(TlFeature.git_path == path).limit(1)

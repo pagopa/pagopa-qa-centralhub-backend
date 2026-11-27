@@ -19,6 +19,8 @@ from app.models.test_lifecycle import (
     TlStepPhrase,
 )
 from app.schemas.test_lifecycle import (
+    TlAdoptOut,
+    TlAdoptRequest,
     TlBranchPull,
     TlBranchPush,
     TlBranchSync,
@@ -40,6 +42,7 @@ from app.schemas.test_lifecycle import (
     TlHistoryItem,
     TlImportGitRequest,
     TlImportGitResult,
+    TlIssueActor,
     TlIssueOut,
     TlIssueUpdate,
     TlJiraActorRequest,
@@ -51,6 +54,7 @@ from app.schemas.test_lifecycle import (
     TlPrRequest,
     TlRebaseApply,
     TlRebaseView,
+    TlRestoreHeaderOut,
     TlRevisionOut,
     TlRevisionUpdate,
     TlScenarioCreate,
@@ -65,6 +69,7 @@ from app.schemas.test_lifecycle import (
     TlTransitionRequest,
     TlVersionOut,
 )
+from app.services.test_lifecycle import adopt as adopt_svc
 from app.services.test_lifecycle import branch_sync as branch_sync_svc
 from app.services.test_lifecycle import deletion as deletion_svc
 from app.services.test_lifecycle import features as features_svc
@@ -79,6 +84,7 @@ from app.services.test_lifecycle import jira_tasks as jira_tasks_svc
 from app.services.test_lifecycle import nrt as nrt_svc
 from app.services.test_lifecycle import rebase as rebase_svc
 from app.services.test_lifecycle import rekey as rekey_svc
+from app.services.test_lifecycle import restore_header as restore_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle import scopes as scopes_svc
 from app.services.test_lifecycle import tag_cleanup as tag_cleanup_svc
@@ -175,6 +181,43 @@ def _translate(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, issues_svc.IssueNotFoundError):
         return HTTPException(status_code=404, detail="Anomalia non trovata")
+    if isinstance(exc, adopt_svc.AdoptParseError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "code": "adopt_parse_error",
+                "message": "Il feature file non è leggibile",
+                "reasons": exc.reasons,
+            },
+        )
+    if isinstance(exc, adopt_svc.AdoptScopeRequired):
+        return HTTPException(
+            status_code=422, detail={"code": "adopt_scope_required", "message": exc.message}
+        )
+    if isinstance(exc, adopt_svc.AdoptFileMissing):
+        return HTTPException(
+            status_code=404, detail={"code": "adopt_file_missing", "message": exc.message}
+        )
+    if isinstance(exc, adopt_svc.AdoptConflict):
+        return HTTPException(
+            status_code=409, detail={"code": "adopt_conflict", "message": exc.message}
+        )
+    if isinstance(exc, adopt_svc.AdoptNotApplicable):
+        return HTTPException(
+            status_code=409, detail={"code": "adopt_not_applicable", "message": exc.message}
+        )
+    if isinstance(exc, restore_svc.RestoreFileMissing):
+        return HTTPException(
+            status_code=404, detail={"code": "restore_file_missing", "message": exc.message}
+        )
+    if isinstance(exc, restore_svc.RestoreConflict):
+        return HTTPException(
+            status_code=409, detail={"code": "restore_conflict", "message": exc.message}
+        )
+    if isinstance(exc, restore_svc.RestoreNotApplicable):
+        return HTTPException(
+            status_code=409, detail={"code": "restore_not_applicable", "message": exc.message}
+        )
     if isinstance(exc, git_import_file.ImportUrlInvalid):
         return HTTPException(
             status_code=422, detail={"code": "import_url_invalid", "message": exc.message}
@@ -990,6 +1033,35 @@ async def update_issue(issue_id: uuid.UUID, body: TlIssueUpdate, db: DbDep) -> T
     try:
         return await issues_svc.update_issue(
             db, issue_id, TlIssueStatus(body.status), body.actor_email
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/issues/{issue_id}/import", response_model=TlAdoptOut)
+async def import_issue_file(issue_id: uuid.UUID, body: TlAdoptRequest, db: DbDep) -> TlAdoptOut:
+    """Imports the feature file of an `unmanaged_file` / `unknown_feature_code` issue into the
+    hub; a file without the hub's header gets an alignment pull request."""
+    try:
+        return await adopt_svc.adopt_file(
+            db,
+            issue_id,
+            body.actor_email,
+            git=git_client_mod.get_git_client(),
+            scope_code=body.scope_code,
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/issues/{issue_id}/restore-header", response_model=TlRestoreHeaderOut)
+async def restore_issue_header(
+    issue_id: uuid.UUID, body: TlIssueActor, db: DbDep
+) -> TlRestoreHeaderOut:
+    """Opens the pull request that gives a managed file its `# qa-hub:` header back."""
+    try:
+        return await restore_svc.restore_header(
+            db, issue_id, body.actor_email, git=git_client_mod.get_git_client()
         )
     except Exception as exc:
         raise _translate(exc) from exc

@@ -60,6 +60,8 @@ class TlIssueKind(str, enum.Enum):
     NEW_SCENARIO_FROM_GIT = "new_scenario_from_git"
     FILE_DELETED = "file_deleted"
     UNKNOWN_FEATURE_CODE = "unknown_feature_code"
+    UNMANAGED_FILE = "unmanaged_file"
+    MISSING_HEADER = "missing_header"
     PARSE_ERROR = "parse_error"
     PR_CLOSED_UNMERGED = "pr_closed_unmerged"
     PR_CREATION_FAILED = "pr_creation_failed"
