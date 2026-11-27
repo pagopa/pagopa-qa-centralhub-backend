@@ -109,6 +109,35 @@ class TlScopeUpdate(BaseModel):
         return value
 
 
+class TlMoveRequest(BaseModel):
+    """Move features to another scope; they take its code, number and scenario tags."""
+
+    feature_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+    target_scope_id: uuid.UUID
+    actor_email: str
+
+
+class TlMoveItem(BaseModel):
+    feature_id: uuid.UUID
+    old_code: str
+    new_code: str
+    old_scope_code: str
+    new_scope_code: str
+
+
+class TlMoveResult(BaseModel):
+    moved: list[TlMoveItem] = []
+    skipped: list[uuid.UUID] = []
+    # set when the migration pull requests could not be refreshed (the move itself is done)
+    alignment_error: str | None = None
+
+
+class TlBlockedFeature(BaseModel):
+    feature_id: uuid.UUID
+    code: str
+    reasons: list[str]
+
+
 class TlScopeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -123,6 +152,8 @@ class TlScopeOut(BaseModel):
     next_feature_number: int
     created_at: datetime
     updated_at: datetime
+    # set on a code rename when the migration pull requests could not be refreshed
+    alignment_error: str | None = None
     feature_count: int = 0
     status_counts: dict[str, int] = {}
     nrt_pass_rate: float | None = None
@@ -411,6 +442,7 @@ class TlFeatureListItem(BaseModel):
     status: TlFeatureStatus
     scope_id: uuid.UUID
     scope_code: str
+    scope_name: str | None = None
     design_owner_id: uuid.UUID | None = None
     reviewer_id: uuid.UUID | None = None
     impl_owner_id: uuid.UUID | None = None
@@ -465,6 +497,7 @@ class TlFeatureDetail(BaseModel):
     status: TlFeatureStatus
     scope_id: uuid.UUID
     scope_code: str
+    scope_name: str | None = None
     design_owner_id: uuid.UUID | None = None
     reviewer_id: uuid.UUID | None = None
     impl_owner_id: uuid.UUID | None = None

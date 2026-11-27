@@ -485,3 +485,12 @@ async def test_get_feature_accepts_actor_email(client, scope, actor):
     resp = await client.get(f"{BASE}/features/{feat['id']}", params={"actor_email": actor["email"]})
     assert resp.status_code == 200
     assert len(resp.json()["transitions"]) == 6
+
+
+async def test_list_and_detail_carry_the_scope_name(client, scope, actor):
+    feat = await _new_feature(client, scope, actor)
+    assert feat["scope_name"] == scope["name"]
+    detail = (await client.get(f"{BASE}/features/{feat['id']}")).json()
+    assert detail["scope_name"] == scope["name"]
+    rows = (await client.get(f"{BASE}/features", params={"scope_id": scope["id"]})).json()
+    assert next(r for r in rows if r["id"] == feat["id"])["scope_name"] == scope["name"]

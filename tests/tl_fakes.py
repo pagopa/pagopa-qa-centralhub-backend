@@ -176,6 +176,10 @@ class FakeGitClient:
         await self._enter("get_pull", number)
         return self.pulls[number]
 
+    async def close_pull(self, number: int) -> None:
+        await self._enter("close_pull", number)
+        self.set_pull_state(number, "closed")
+
     def set_pull_state(
         self, number: int, state: str, merge_commit_sha: str | None = None
     ) -> None:

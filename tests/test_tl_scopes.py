@@ -83,17 +83,17 @@ async def test_create_scope_duplicate_code_case_insensitive_returns_409(client, 
     assert resp.json()["detail"]["code"] == "scope_code_conflict"
 
 
-async def test_scope_code_is_immutable_once_features_exist(client, cleanup):
+async def test_scope_code_can_change_with_features_that_have_nothing_published(
+    client, cleanup
+):
+    # the features inserted here have no revision: they can always be adapted
     scope = (await _create(client, cleanup)).json()
     await _add_feature(scope["id"])
+    new = _code()
     resp = await client.patch(
-        f"/api/v1/test-lifecycle/scopes/{scope['id']}", json={"code": _code()}
+        f"/api/v1/test-lifecycle/scopes/{scope['id']}", json={"code": new}
     )
-    assert resp.status_code == 409
-    assert resp.json()["detail"] == {
-        "code": "scope_code_locked",
-        "message": "Il codice dell'ambito non può cambiare: esistono già feature",
-    }
+    assert resp.status_code == 200 and resp.json()["code"] == new
 
 
 async def test_scope_code_editable_without_features_and_conflict(client, cleanup):

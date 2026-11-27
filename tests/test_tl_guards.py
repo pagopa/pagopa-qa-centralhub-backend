@@ -330,5 +330,12 @@ async def test_update_scope_waits_for_concurrent_feature_creation(client, scope,
         await asyncio.sleep(0.3)
         assert not task.done(), "update_scope deve attendere il lock dell'ambito"
         await holder.commit()
-    with pytest.raises(scopes_svc.ScopeCodeLockedError):
-        await asyncio.wait_for(task, timeout=5)
+    # the rename waited for the scope lock and then adapted the feature created meanwhile
+    renamed = await asyncio.wait_for(task, timeout=5)
+    async with TestSession() as s:
+        codes = list(
+            (
+                await s.execute(select(TlFeature.code).where(TlFeature.scope_id == scope_id))
+            ).scalars()
+        )
+    assert codes and all(c.endswith(renamed.code) for c in codes)

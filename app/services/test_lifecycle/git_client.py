@@ -232,6 +232,10 @@ class TlGitClient:
         resp = await self._request("GET", f"pulls/{number}")
         return _pull_from(_json(resp))
 
+    async def close_pull(self, number: int) -> None:
+        """Closes a pull request without merging it (it can be reopened on GitHub)."""
+        await self._request("PATCH", f"pulls/{number}", json={"state": "closed"})
+
     async def compare(self, base_sha: str, head_sha: str) -> list[ChangedFile]:
         out: list[ChangedFile] = []
         page = 1

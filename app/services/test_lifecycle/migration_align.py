@@ -92,8 +92,8 @@ async def _get_scope_row(db: AsyncSession, scope_code: str) -> TlMigrationScope:
     return row
 
 
-async def open_alignment_pr(db: AsyncSession, scope_code: str, git: Any) -> TlMigrationScopeOut:
-    """Crea o aggiorna branch e PR di allineamento dell'ambito. Errori salvati in `pr_error`."""
+async def _targets(db: AsyncSession, scope_code: str) -> list[dict[str, Any]]:
+    """Files of the scope's migrated features still waiting for their alignment pull request."""
     rows = (
         await db.execute(
             select(TlFeature, TlFeatureRevision, TlMigrationItem)
@@ -122,6 +122,12 @@ async def open_alignment_pr(db: AsyncSession, scope_code: str, git: Any) -> TlMi
                 "renames": renames,
             }
         )
+    return targets
+
+
+async def open_alignment_pr(db: AsyncSession, scope_code: str, git: Any) -> TlMigrationScopeOut:
+    """Crea o aggiorna branch e PR di allineamento dell'ambito. Errori salvati in `pr_error`."""
+    targets = await _targets(db, scope_code)
     scope_row = await _get_scope_row(db, scope_code)
     await db.commit()
     if not targets:
@@ -217,3 +223,108 @@ async def sync_alignment_prs(db: AsyncSession, git: Any) -> None:
         else:
             row.pr_state, row.pr_error = "closed", "PR chiusa senza merge"
         await db.commit()
+
+
+async def retire_alignment_pr(db: AsyncSession, scope_code: str, git: Any) -> str | None:
+    """After features left `scope_code`: its open alignment pull request stops carrying them.
+
+    The files that are no longer the scope's get their `main` content back on the branch; when
+    nothing is left to carry the pull request is closed, otherwise it is refreshed with the
+    remaining features. Returns an error message, or `None`.
+    """
+    row = (
+        await db.execute(
+            select(TlMigrationScope).where(
+                func.lower(TlMigrationScope.scope_code) == scope_code.lower()
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None or row.pr_state != "open" or row.pr_number is None:
+        await db.rollback()
+        return None
+    number = row.pr_number
+    targets = await _targets(db, scope_code)
+    await db.commit()
+    branch = branch_for(row.scope_code)
+    try:
+        base = settings.tl_base_branch
+        head = await git.head_sha(base)
+        if await git.branch_exists(branch):
+            keep = {t["path"] for t in targets}
+            for changed in await git.compare(head, await git.head_sha(branch)):
+                if changed.path in keep:
+                    continue
+                original = await git.get_file(changed.path, head)
+                current = await git.get_file(changed.path, branch)
+                if current is None:
+                    continue
+                if original is None:
+                    await git.delete_file(
+                        changed.path,
+                        branch,
+                        "chore(qa-hub): togli il file spostato",
+                        current.blob_sha,
+                    )
+                elif current.text != original.text:
+                    await git.put_file(
+                        changed.path,
+                        original.text,
+                        branch,
+                        "chore(qa-hub): ripristina il file spostato in un altro ambito",
+                        current.blob_sha,
+                    )
+        if not targets:
+            await git.close_pull(number)
+    except TlGitError as exc:
+        row = await _get_scope_row(db, scope_code)
+        row.pr_error = exc.message[:2000]
+        await db.commit()
+        return f"PR di allineamento {scope_code}: {exc.message}"
+    row = await _get_scope_row(db, scope_code)
+    if not targets:
+        row.pr_state, row.pr_error = "closed", "PR chiusa: nessuna feature da allineare"
+        row.updated_at = datetime.now(UTC)
+        await db.commit()
+        return None
+    await db.commit()
+    out = await open_alignment_pr(db, scope_code, git)
+    return out.pr_error
+
+
+async def refresh_after_change(
+    db: AsyncSession, git: Any, moves: list[tuple[str, str]]
+) -> str | None:
+    """After a move or a scope rename: update the pull requests of the migration alignment.
+
+    `moves`: `(old scope code, new scope code)`. The destination's pull request is created or
+    updated from the hub content, the source's is retired. A Git problem never undoes the change
+    already made: it is returned as a message (and kept in the scope's `pr_error`).
+    """
+    if git is None:
+        # only worth a message when there is something to refresh
+        for old_code, new_code in moves:
+            row = (
+                await db.execute(
+                    select(TlMigrationScope.pr_state).where(
+                        func.lower(TlMigrationScope.scope_code) == old_code.lower()
+                    )
+                )
+            ).scalar_one_or_none()
+            if row == "open" or await _targets(db, new_code):
+                await db.rollback()
+                return (
+                    "Git non configurato: le PR di allineamento della migrazione "
+                    "non sono state aggiornate"
+                )
+        await db.rollback()
+        return None
+    errors: list[str] = []
+    for old_code, new_code in dict.fromkeys(moves):
+        out = await open_alignment_pr(db, new_code, git)
+        if out.pr_error:
+            errors.append(f"PR di allineamento {new_code}: {out.pr_error}")
+        if old_code.lower() != new_code.lower():
+            error = await retire_alignment_pr(db, old_code, git)
+            if error:
+                errors.append(error)
+    return "; ".join(errors) or None

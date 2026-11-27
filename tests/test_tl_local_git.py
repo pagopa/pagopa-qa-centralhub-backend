@@ -92,6 +92,16 @@ async def test_pull_lifecycle_and_merge(client, repo):
     assert "features/x.feature" in await client.list_tree("main")
 
 
+async def test_close_pull(client, repo):
+    base = await client.head_sha("main")
+    await client.create_branch("qa-hub/x", base)
+    await client.put_file("features/x.feature", "x\n", "qa-hub/x", "add")
+    pull = await client.create_pull("qa-hub/x", "main", "T", "B")
+    await client.close_pull(pull.number)
+    assert (await client.get_pull(pull.number)).state == "closed"
+    assert await client.find_open_pull("qa-hub/x") is None
+
+
 async def test_compare_unknown_base_is_404(client):
     head = await client.head_sha("main")
     with pytest.raises(TlGitError) as exc:
