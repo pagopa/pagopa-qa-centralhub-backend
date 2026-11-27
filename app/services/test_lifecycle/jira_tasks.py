@@ -332,6 +332,13 @@ class JiraTaskNotAllowed(Exception):  # noqa: N818
         self.reason = reason
 
 
+class JiraEpicRequired(Exception):  # noqa: N818
+    """Every design/implementation task hangs under an Epic QA: without one it is not created."""
+
+    def __init__(self) -> None:
+        super().__init__("Serve l'Epic QA: indicala per creare il task Jira")
+
+
 _KIND_LABEL = {"design": "Progettazione", "impl": "Implementazione suite"}
 
 
@@ -412,14 +419,23 @@ async def _feature_lock(db: AsyncSession, feature_id: uuid.UUID) -> Any:
 
 
 async def create_task(
-    db: AsyncSession, feature_id: uuid.UUID, kind: str, actor_email: str, client: Any
+    db: AsyncSession,
+    feature_id: uuid.UUID,
+    kind: str,
+    actor_email: str,
+    client: Any,
+    epic_key: str | None = None,
 ) -> str | None:
     """Crea (o ritrova) il task Jira `kind` ("design"|"impl") e lo collega alla feature.
 
     Restituisce l'eventuale avviso da mostrare (assegnatario non trovato, link non creato).
     Nessuna rete con lock di riga: advisory lock per feature, lettura breve, rete, rilock.
+    Il task è sempre figlio di un'Epic QA: quella indicata in `epic_key` (verificata e salvata
+    sulla feature) o, in mancanza, quella della feature o dell'ambito; senza, `JiraEpicRequired`.
     """
     from app.services.test_lifecycle import features as features_svc
+
+    epic_entry = await verify_key(epic_key, epic=True) if epic_key else None
 
     field = "jira_design_key" if kind == "design" else "jira_impl_key"
     async with await _feature_lock(db, feature_id) as got:
@@ -446,12 +462,18 @@ async def create_task(
         tags = (
             [sc.tag for sc, _ in (await history.build_render(db, feature, rev))[1]] if rev else []
         )
+        epic = epic_key or (effective_epic(feature, scope) if scope else feature.jira_qa_epic_key)
+        if not epic:
+            raise JiraEpicRequired
+        if epic_key and epic_key != feature.jira_qa_epic_key:
+            await features_svc.set_current_keys(db, feature, jira_qa_epic_key=epic_key)
+            merge_cache(feature, {epic_key: epic_entry} if epic_entry else {})
         params = {
             "code": feature.code,
             "title": rev.title if rev else feature.code,
             "revision_number": rev.number if rev else 1,
             "revision_id": rev.id if rev else None,
-            "epic": effective_epic(feature, scope) if scope else feature.jira_qa_epic_key,
+            "epic": epic,
             "component": scope.jira_component if scope else None,
             "product": rev.product_issue_key if rev else None,
             "owner_email": owner.email if owner else None,

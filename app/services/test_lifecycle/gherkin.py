@@ -237,7 +237,8 @@ def render_feature_file(feature: RenderFeature) -> str:
     out = [
         f"# qa-hub: {feature.code}",
         "# language: it",
-        f"{feature.feature_tag} @{feature.test_type}" if feature.test_type else feature.feature_tag,
+        feature.feature_tag,
+        *([f"@{feature.test_type}"] if feature.test_type else []),
         f"Funzionalità: {feature.title}",
     ]
     if feature.description and feature.description.strip():
@@ -248,7 +249,7 @@ def render_feature_file(feature: RenderFeature) -> str:
     for sc in feature.scenarios:
         out.append("")
         tags = [f"@{t}" for t in sc.extra_tags] + [f"@{POLARITY_TAG[sc.polarity]}"]
-        out.append("  " + " ".join(tags))
+        out.extend(f"  {tag}" for tag in tags)  # one tag per line, even though a line may hold many
         out.append(f"  {sc.tag}")
         link = _single_line(sc.detail_link)
         if link:

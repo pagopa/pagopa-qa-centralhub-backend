@@ -53,7 +53,9 @@ async def test_pull_brings_the_repository_version_into_the_draft(client, scope, 
     new_tag = first["tag"][:-2] + "02"
     edited = text.replace("Quando paga", "Quando paga con carta")
     edited = edited.replace(f"{first['tag'][:-3]}\n", f"{first['tag'][:-3]} @api\n", 1)
-    edited = edited.replace("@runnable @positive", "@runnable @checkout @positive", 1)
+    edited = edited.replace(
+        "@runnable\n  @positive", "@runnable @checkout @positive", 1
+    )
     edited += f"\n  @runnable @positive\n  {new_tag}\n  Scenario: Nuovo\n    Dato x\n    Allora y\n"
     fake.seed_file(path, edited, branch=BRANCH)
 

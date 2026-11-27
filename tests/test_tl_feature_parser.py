@@ -127,7 +127,7 @@ def test_classify_missing_header_is_structural():
 def test_classify_unknown_extra_tag_is_textual():
     r = classify(
         _expected(),
-        _parsed(GOLDEN.replace("@runnable @positive", "@runnable @e2e @positive")),
+        _parsed(GOLDEN.replace("@runnable\n  @positive", "@runnable @e2e @positive")),
         **KW,
     )
     assert r.textual
@@ -223,12 +223,12 @@ def test_parse_reads_both_polarity_spellings_and_keeps_them_out_of_extra_tags():
 
 
 def test_parse_keeps_every_other_tag_by_default():
-    text = GOLDEN.replace("@runnable @positive", "@smoke @runnable @flaky @custom_x @positive")
+    text = GOLDEN.replace("@runnable\n  @positive", "@smoke @runnable @flaky @custom_x @positive")
     assert _parsed(text).scenarios[0].extra_tags == ["smoke", "runnable", "flaky", "custom_x"]
 
 
 def test_parse_with_an_explicit_list_still_filters():
-    text = GOLDEN.replace("@runnable @positive", "@smoke @runnable @positive")
+    text = GOLDEN.replace("@runnable\n  @positive", "@smoke @runnable @positive")
     p = parse_feature_file(text, allowed_extra=("runnable",))
     assert p.scenarios[0].extra_tags == ["runnable"]
 
@@ -251,5 +251,7 @@ def test_roundtrip_keeps_the_test_type_and_custom_tags():
 
 def test_parse_does_not_keep_identity_shaped_tags_as_extra_tags():
     # the API rejects these names on a scenario, so keeping them would block every later edit
-    text = GOLDEN.replace("@runnable @positive", "@runnable @FDR3_001 @CHK_012 @smoke @positive")
+    text = GOLDEN.replace(
+        "@runnable\n  @positive", "@runnable @FDR3_001 @CHK_012 @smoke @positive"
+    )
     assert _parsed(text).scenarios[0].extra_tags == ["runnable", "smoke"]
