@@ -8,10 +8,13 @@ from sqlalchemy import func, select
 from app.models.audit_log import AuditLog
 from app.models.test_lifecycle import (
     TlFeature,
+    TlFeatureRevision,
+    TlIssueKind,
     TlFeatureStatus,
     TlFeatureVersion,
     TlIssue,
     TlMigrationScope,
+    TlScenario,
     TlScope,
 )
 from app.services.test_lifecycle import git_import, git_sync, migration_align
@@ -122,3 +125,54 @@ async def test_run_sync_calls_alignment_check(monkeypatch):
 
 async def _noop():
     return None
+
+
+async def test_merge_keeps_pending_a_feature_whose_file_the_pr_did_not_align(env):
+    s, conf, git, _ = env
+    await _analyze_confirm(conf, git, s)
+    out = await _execute(env)
+    path = f"src/{s}/pay.feature"
+    # the pull request is merged, but its branch carries the file as it was (legacy)
+    git.seed_file(path, LEGACY.format(s=s), branch=migration_align.branch_for(s))
+    git.merge_pull(out.pr_number)
+    async with TestSession() as db:
+        await migration_align.sync_alignment_prs(db, git)
+    feat = await _feature(s)
+    assert feat.alignment_pending  # still waiting: main has no `# qa-hub:` header for it
+    assert (
+        await _count(
+            AuditLog, AuditLog.resource_id == str(feat.id), AuditLog.action == "tl.feature.aligned"
+        )
+        == 0
+    )
+    async with TestSession() as db:
+        row = await db.get(TlMigrationScope, s)
+    assert row.pr_state == "merged" and path in row.pr_error
+
+
+async def test_a_file_without_identity_never_empties_the_published_scenarios(env):
+    s, conf, git, _ = env
+    await _analyze_confirm(conf, git, s)
+    out = await _execute(env)
+    path = f"src/{s}/pay.feature"
+    sha = git.merge_pull(out.pr_number)
+    async with TestSession() as db:
+        await migration_align.sync_alignment_prs(db, git)
+    async with TestSession() as db:
+        await git_import.import_changed_file(db, path, None, sha, git)
+    before = await _feature(s)
+    scenarios = await _count(TlScenario, TlScenario.feature_id == before.id)
+    assert scenarios > 0 and not before.alignment_pending
+    # later the file on main goes back to a version without header and identity tags
+    legacy_sha = git.seed_file(path, LEGACY.format(s=s))
+    async with TestSession() as db:
+        await git_import.import_changed_file(db, path, None, legacy_sha, git)
+    after = await _feature(s)
+    assert after.published_revision_id == before.published_revision_id
+    assert await _count(TlScenario, TlScenario.feature_id == after.id) == scenarios
+    assert await _count(
+        TlFeatureRevision, TlFeatureRevision.feature_id == after.id
+    ) == await _count(TlFeatureRevision, TlFeatureRevision.feature_id == before.id)
+    assert await _count(
+        TlIssue, TlIssue.feature_id == after.id, TlIssue.kind == TlIssueKind.STRUCTURAL_CHANGE
+    ) >= 1

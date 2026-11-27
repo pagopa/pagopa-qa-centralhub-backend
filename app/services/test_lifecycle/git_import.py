@@ -246,6 +246,12 @@ async def _import_locked(
         changed = bool(diff.textual) or [s.identity_tag for s in valid] != [
             s.tag for s in render.scenarios
         ]
+        if parsed.code is None and render.scenarios and not valid:
+            # A file with no `# qa-hub:` header and no valid scenario identity (a legacy file, a
+            # lost header) is not a version of this feature: replacing the hub content with it
+            # would empty the feature. The structural anomalies below tell what is wrong; the
+            # content stays as it is. (With the header present Git stays the truth.)
+            changed = False
 
     # identità già note (anche se assenti dalla pubblicata): non sono "nuovi scenari"
     known_tags = set(

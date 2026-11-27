@@ -23,6 +23,7 @@ from app.models.test_lifecycle import (
 )
 from app.schemas.test_lifecycle import TlMigrationScopeOut
 from app.services.test_lifecycle import history
+from app.services.test_lifecycle.feature_parser import parse_feature_file
 from app.services.test_lifecycle.gherkin import render_feature_file
 from app.services.test_lifecycle.git_client import TlGitError
 
@@ -170,6 +171,46 @@ async def open_alignment_pr(db: AsyncSession, scope_code: str, git: Any) -> TlMi
     return await scope_out(db, scope_code)
 
 
+async def _pending_of_scope(db: AsyncSession, scope_code: str) -> list[tuple[Any, str, str | None]]:
+    """`(feature id, code, git path)` of the pending features whose migration scope is this one."""
+    rows = (
+        await db.execute(
+            select(TlFeature.id, TlFeature.code, TlFeature.git_path, TlMigrationItem)
+            .join(TlMigrationItem, TlMigrationItem.feature_id == TlFeature.id)
+            .where(TlFeature.alignment_pending.is_(True))
+        )
+    ).all()
+    return [
+        (fid, code, path)
+        for fid, code, path, item in rows
+        if str(item.overrides.get("scope_code") or item.scope_code).lower() == scope_code.lower()
+    ]
+
+
+async def _aligned_on_main(
+    git: Any, candidates: list[tuple[Any, str, str | None]], ref: str
+) -> tuple[list[Any], list[str]]:
+    """Which candidates really carry their `# qa-hub:` header at `ref` (the merge commit).
+
+    A merged pull request does not prove that a feature's file was aligned: it may not have
+    carried it (the feature joined the scope later, the refresh failed). Only the files that show
+    the feature's code in their header are aligned; the others stay pending.
+    """
+    aligned: list[Any] = []
+    missed: list[str] = []
+    for fid, code, path in candidates:
+        try:
+            file = await git.get_file(path, ref) if path else None
+        except TlGitError as exc:
+            logger.warning("Verifica allineamento di %s non riuscita: %s", path, exc.message)
+            file = None
+        if file is not None and parse_feature_file(file.text).code == code:
+            aligned.append(fid)
+        else:
+            missed.append(path or code)
+    return aligned, missed
+
+
 async def sync_alignment_prs(db: AsyncSession, git: Any) -> None:
     """Dal sync: PR di allineamento mergiate (feature non più in attesa) o chiuse (errore)."""
     rows = list(
@@ -193,25 +234,24 @@ async def sync_alignment_prs(db: AsyncSession, git: Any) -> None:
         row = await _get_scope_row(db, scope_code)
         if pull.state == "merged":
             row.pr_state, row.pr_error = "merged", None
+            candidates = await _pending_of_scope(db, scope_code)
+            await db.commit()
+            aligned, missed = await _aligned_on_main(
+                git, candidates, pull.merge_commit_sha or settings.tl_base_branch
+            )
+            if missed:
+                row = await _get_scope_row(db, scope_code)
+                row.pr_error = (
+                    "PR mergiata ma questi file non sono allineati su main: " + ", ".join(missed)
+                )[:2000]
             features = (
                 await db.execute(
                     select(TlFeature)
-                    .join(TlMigrationItem, TlMigrationItem.feature_id == TlFeature.id)
-                    .where(TlFeature.alignment_pending.is_(True))
+                    .where(TlFeature.id.in_(aligned), TlFeature.alignment_pending.is_(True))
                     .with_for_update(of=TlFeature)
                 )
             ).scalars()
             for feature in features:
-                item_scope = (
-                    await db.execute(
-                        select(TlMigrationItem.scope_code, TlMigrationItem.overrides).where(
-                            TlMigrationItem.feature_id == feature.id
-                        )
-                    )
-                ).first()
-                code = (item_scope[1] or {}).get("scope_code") or item_scope[0]
-                if str(code).lower() != scope_code.lower():
-                    continue
                 feature.alignment_pending = False
                 history.record_event(
                     db,
