@@ -223,6 +223,9 @@ class LocalGitClient:
                 return _pull_info(p)
         raise TlGitError(404, f"PR {number} inesistente")
 
+    async def close_pull(self, number: int) -> None:
+        await self._call(local_close, self.repo, number)
+
     # ── confronto e albero ────────────────────────────────────────────────────
 
     def _compare(self, base_sha: str, head_sha: str) -> list[ChangedFile]:

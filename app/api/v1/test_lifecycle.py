@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import asdict
 from typing import Literal
@@ -43,6 +44,8 @@ from app.schemas.test_lifecycle import (
     TlIssueUpdate,
     TlJiraActorRequest,
     TlJiraLink,
+    TlMoveRequest,
+    TlMoveResult,
     TlNrtRunLink,
     TlPreviewOut,
     TlPrRequest,
@@ -66,7 +69,7 @@ from app.services.test_lifecycle import branch_sync as branch_sync_svc
 from app.services.test_lifecycle import deletion as deletion_svc
 from app.services.test_lifecycle import features as features_svc
 from app.services.test_lifecycle import git_client as git_client_mod
-from app.services.test_lifecycle import git_import_file
+from app.services.test_lifecycle import git_import_file, migration_align
 from app.services.test_lifecycle import git_publish as git_publish_svc
 from app.services.test_lifecycle import git_sync as git_sync_svc
 from app.services.test_lifecycle import history as history_svc
@@ -75,6 +78,7 @@ from app.services.test_lifecycle import jira_client as jira_client_mod
 from app.services.test_lifecycle import jira_tasks as jira_tasks_svc
 from app.services.test_lifecycle import nrt as nrt_svc
 from app.services.test_lifecycle import rebase as rebase_svc
+from app.services.test_lifecycle import rekey as rekey_svc
 from app.services.test_lifecycle import reviews as reviews_svc
 from app.services.test_lifecycle import scopes as scopes_svc
 from app.services.test_lifecycle import tag_cleanup as tag_cleanup_svc
@@ -82,6 +86,8 @@ from app.services.test_lifecycle import workflow as workflow_svc
 from app.services.test_lifecycle.actors import UnknownActorError, resolve_actor
 from app.services.test_lifecycle.category_tags import category_tags
 from app.services.test_lifecycle.git_client import TlGitError, TlGitNotConfigured
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -110,18 +116,16 @@ async def create_scope(body: TlScopeCreate, db: DbDep) -> TlScopeOut:
 
 @router.patch("/scopes/{scope_id}", response_model=TlScopeOut)
 async def update_scope(scope_id: uuid.UUID, body: TlScopeUpdate, db: DbDep) -> TlScopeOut:
+    old_code = (
+        await db.execute(select(TlScope.code).where(TlScope.id == scope_id))
+    ).scalar_one_or_none()
+    await db.rollback()
     try:
         scope = await scopes_svc.update_scope(db, scope_id, body)
     except scopes_svc.ScopeNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Ambito non trovato") from exc
-    except scopes_svc.ScopeCodeLockedError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "scope_code_locked",
-                "message": "Il codice dell'ambito non può cambiare: esistono già feature",
-            },
-        ) from exc
+    except (scopes_svc.ScopeCodeBlockedError, rekey_svc.MigrationRunningError) as exc:
+        raise _translate(exc) from exc
     except scopes_svc.ScopeCodeConflictError as exc:
         raise HTTPException(
             status_code=409,
@@ -132,7 +136,11 @@ async def update_scope(scope_id: uuid.UUID, body: TlScopeUpdate, db: DbDep) -> T
         ) from exc
     except (jira_tasks_svc.JiraIssueNotFound, jira_tasks_svc.JiraNotAnEpic) as exc:
         raise _translate(exc) from exc
-    return await scopes_svc.get_scope_out(db, scope)
+    new_code = scope.code
+    out = await scopes_svc.get_scope_out(db, scope)
+    if old_code is not None and old_code != new_code:
+        out.alignment_error = await _refresh_alignment(db, [(old_code, new_code)])
+    return out
 
 
 @router.get("/scopes/{scope_id}/delete-preview", response_model=TlDeletePreview)
@@ -359,6 +367,36 @@ def _translate(exc: Exception) -> HTTPException:
         return HTTPException(
             status_code=502, detail={"code": "github_error", "message": exc.message}
         )
+    if isinstance(exc, rekey_svc.AdaptBlockedError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "adapt_blocked",
+                "message": "Alcune feature non si possono adeguare: sono già sul repository "
+                "con i codici e i tag attuali",
+                "blocked": [
+                    {**b, "feature_id": str(b["feature_id"])} for b in exc.blocked
+                ],
+            },
+        )
+    if isinstance(exc, scopes_svc.ScopeCodeBlockedError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "scope_code_blocked",
+                "message": "Il codice non si può cambiare: alcune feature sono già sul "
+                "repository con i codici e i tag attuali",
+                "blocked": [{**b, "feature_id": str(b["feature_id"])} for b in exc.blocked],
+            },
+        )
+    if isinstance(exc, rekey_svc.MigrationRunningError):
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "migration_in_progress",
+                "message": "Una migrazione è in corso: riprova tra poco",
+            },
+        )
     if isinstance(exc, branch_sync_svc.RepoChangedError):
         return HTTPException(
             status_code=409,
@@ -423,6 +461,38 @@ async def list_features(
     owner_id: uuid.UUID | None = None,
 ) -> list[TlFeatureListItem]:
     return await features_svc.list_features(db, scope_id, status, owner_id)
+
+
+async def _refresh_alignment(db, pairs: list[tuple[str, str]]) -> str | None:
+    """Best effort after a change already committed: never turns it into an error."""
+    try:
+        try:
+            client = git_client_mod.get_git_client()
+        except TlGitNotConfigured:
+            client = None
+        return await migration_align.refresh_after_change(db, client, pairs)
+    except Exception:
+        logger.exception("Aggiornamento delle PR di allineamento non riuscito")
+        return "Aggiornamento delle PR di allineamento non riuscito"
+
+
+@router.post("/features/move", response_model=TlMoveResult)
+async def move_features(body: TlMoveRequest, db: DbDep) -> TlMoveResult:
+    """Sposta feature in un altro ambito, tutto o niente. Le feature prendono codice, numero e
+    tag dell'ambito di arrivo (solo se non sono già sul repo con i codici dell'hub: 409
+    `adapt_blocked` con l'elenco)."""
+    try:
+        actor = await resolve_actor(db, body.actor_email)
+        moved, skipped = await rekey_svc.move_features(
+            db, body.feature_ids, body.target_scope_id, actor
+        )
+        alignment_error = None
+        if moved:
+            pairs = [(m.old_scope_code, m.new_scope_code) for m in moved]
+            alignment_error = await _refresh_alignment(db, pairs)
+        return TlMoveResult(moved=moved, skipped=skipped, alignment_error=alignment_error)
+    except Exception as exc:
+        raise _translate(exc) from exc
 
 
 @router.post("/features", response_model=TlFeatureDetail, status_code=status.HTTP_201_CREATED)

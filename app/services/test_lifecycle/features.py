@@ -33,6 +33,7 @@ from app.schemas.test_lifecycle import (
 )
 from app.services.test_lifecycle import history, jira_tasks
 from app.services.test_lifecycle.actors import UnknownActorError, resolve_actor
+from app.services.test_lifecycle.alias_guard import number_held_by_aliases
 from app.services.test_lifecycle.deletable import undeletable_clause
 from app.services.test_lifecycle.gherkin import (
     feature_code,
@@ -245,6 +246,13 @@ async def create_feature(db: AsyncSession, data: TlFeatureCreate) -> uuid.UUID:
     if scope is None:
         raise ScopeNotFoundError(str(data.scope_id))
     number = scope.next_feature_number
+    # a code can be taken by a feature that kept it when it was moved here from another scope
+    while (
+        await db.execute(
+            select(TlFeature.id).where(TlFeature.code == feature_code(scope.code, number)).limit(1)
+        )
+    ).first() is not None or await number_held_by_aliases(db, scope.code, number):
+        number += 1
     scope.next_feature_number = number + 1
     feature = TlFeature(
         scope_id=scope.id,
@@ -434,6 +442,7 @@ async def get_feature_detail(
         status=feature.status,
         scope_id=feature.scope_id,
         scope_code=scope_code,
+        scope_name=scope.name,
         design_owner_id=feature.design_owner_id,
         reviewer_id=feature.reviewer_id,
         impl_owner_id=feature.impl_owner_id,
@@ -488,6 +497,7 @@ async def list_features(
             )
         )
     rows = (await db.execute(stmt)).all()
+    scope_names = dict((await db.execute(select(TlScope.id, TlScope.name))).all())
     shown = {
         f.id: f.working_revision_id or f.published_revision_id
         for f, _, _ in rows
@@ -527,6 +537,7 @@ async def list_features(
                 status=f.status,
                 scope_id=f.scope_id,
                 scope_code=scope_code,
+                scope_name=scope_names.get(f.scope_id),
                 design_owner_id=f.design_owner_id,
                 reviewer_id=f.reviewer_id,
                 impl_owner_id=f.impl_owner_id,

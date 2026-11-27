@@ -430,3 +430,16 @@ async def test_safe_refs_and_paths_are_quoted():
     await c.get_file("src/fdr3/feature/FEAT 011 è.feature", "main")
     assert paths[0] == "/repos/org/repo/git/ref/heads/PQ-827-fdr/e2e_test.1"
     assert paths[1].startswith("/repos/org/repo/contents/src/fdr3/feature/FEAT%20011%20%C3%A8.feature")
+
+
+async def test_close_pull():
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["method"], seen["path"] = req.method, req.url.path
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"number": 7, "state": "closed"})
+
+    await make_client(handler).close_pull(7)
+    assert seen["method"] == "PATCH" and seen["path"].endswith("/pulls/7")
+    assert seen["body"] == {"state": "closed"}

@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.test_lifecycle import TlFeature, TlFeatureStatus, TlScope
 from app.schemas.test_lifecycle import TlScopeCreate, TlScopeOut, TlScopeUpdate
-from app.services.test_lifecycle import jira_tasks, nrt
+from app.services.test_lifecycle import history, jira_tasks, nrt
+from app.services.test_lifecycle.advisory_lock import try_advisory_lock
+from app.services.test_lifecycle.alias_guard import code_held_by_aliases
 from app.services.test_lifecycle.deletable import undeletable_clause
 
 
@@ -20,8 +22,12 @@ class ScopeCodeConflictError(Exception):
     pass
 
 
-class ScopeCodeLockedError(Exception):
-    pass
+class ScopeCodeBlockedError(Exception):
+    """The new code cannot be applied: some features cannot be adapted. `blocked` lists them."""
+
+    def __init__(self, blocked: list[dict]) -> None:
+        super().__init__(", ".join(b["code"] for b in blocked))
+        self.blocked = blocked
 
 
 def _empty_counts() -> dict[str, int]:
@@ -89,7 +95,7 @@ async def _code_taken(db: AsyncSession, code: str, exclude_id: uuid.UUID | None 
 async def create_scope(db: AsyncSession, data: TlScopeCreate) -> TlScope:
     # Epic QA verificata su Jira prima di aprire la transazione
     await jira_tasks.verify_keys({"epic": data.jira_qa_epic_key}, epics={"epic"})
-    if await _code_taken(db, data.code):
+    if await _code_taken(db, data.code) or await code_held_by_aliases(db, data.code):
         raise ScopeCodeConflictError(data.code)
     scope = TlScope(**data.model_dump())
     db.add(scope)
@@ -119,22 +125,82 @@ async def update_scope(db: AsyncSession, scope_id: uuid.UUID, data: TlScopeUpdat
         raise ScopeNotFoundError(str(scope_id))
     changes = data.model_dump(exclude_unset=True)
     new_code = changes.get("code")
-    if new_code is not None and new_code != scope.code:
-        has_features = (
-            await db.execute(select(TlFeature.id).where(TlFeature.scope_id == scope_id).limit(1))
-        ).first() is not None
-        if has_features:
-            raise ScopeCodeLockedError(str(scope_id))
-        if await _code_taken(db, new_code, exclude_id=scope_id):
-            raise ScopeCodeConflictError(new_code)
-    elif "code" in changes:
-        changes.pop("code")
-    for key, value in changes.items():
-        setattr(scope, key, value)
-    try:
-        await db.commit()
-    except IntegrityError as exc:
-        await db.rollback()
-        raise ScopeCodeConflictError(str(new_code)) from exc
+    renamed = new_code is not None and new_code != scope.code
+    if not renamed:
+        changes.pop("code", None)
+    elif await _code_taken(db, new_code, exclude_id=scope_id) or await code_held_by_aliases(
+        db, new_code, own_scope_id=scope_id
+    ):
+        raise ScopeCodeConflictError(new_code)
+    if not renamed:
+        for key, value in changes.items():
+            setattr(scope, key, value)
+        try:
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ScopeCodeConflictError(str(new_code)) from exc
+        await db.refresh(scope)
+        return scope
+    await _rename_code(db, scope, changes)
     await db.refresh(scope)
     return scope
+
+
+async def _rename_code(db: AsyncSession, scope: TlScope, changes: dict) -> None:
+    """Applies `changes` (new code included): every feature takes the identifiers of the new code.
+
+    All or nothing: a feature that cannot be adapted (its identifiers are already on the
+    repository) refuses the rename with the list of the blocking features. Not while a
+    migration runs.
+    """
+    from app.services.test_lifecycle import rekey
+    from app.services.test_lifecycle.migration import LOCK_KEY
+
+    old_code = scope.code
+    async with try_advisory_lock(db, LOCK_KEY) as got:
+        if not got:
+            await db.rollback()
+            raise rekey.MigrationRunningError
+        features = list(
+            (
+                await db.execute(
+                    select(TlFeature)
+                    .where(TlFeature.scope_id == scope.id)
+                    .order_by(TlFeature.id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).scalars()
+        )
+        blocked = []
+        for f in features:
+            reasons = await rekey.adapt_blockers(db, f)
+            if reasons:
+                blocked.append({"feature_id": f.id, "code": f.code, "reasons": reasons})
+        if blocked:
+            await db.rollback()
+            raise ScopeCodeBlockedError(blocked)
+        for key, value in changes.items():
+            setattr(scope, key, value)
+        for f in features:
+            old_feature_code = f.code
+            _, new_feature_code = await rekey.adapt_feature(db, f, scope, f.number)
+            history.record_event(
+                db,
+                f.id,
+                "tl.feature.moved",
+                None,
+                {
+                    "old_scope": old_code,
+                    "new_scope": scope.code,
+                    "old_code": old_feature_code,
+                    "new_code": new_feature_code,
+                    "adapted": True,
+                },
+            )
+        try:
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ScopeCodeConflictError(scope.code) from exc
