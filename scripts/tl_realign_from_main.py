@@ -1,12 +1,14 @@
-"""Rebuild the Test Lifecycle features emptied by a legacy file on main (main wins).
+"""Rebuild the Test Lifecycle features whose file on main lost the hub header (main wins).
 
 Usage:
     uv run python -m scripts.tl_realign_from_main                 # dry run: report only
     uv run python -m scripts.tl_realign_from_main --apply         # rebuild and reopen the PRs
     uv run python -m scripts.tl_realign_from_main --code FEAT_001_WISP [--apply]
 
-A feature is a candidate when its published revision has no scenario and a previous revision
-has some. Cases that are not clear-cut are reported as "skipped" and left untouched. With
+A feature is a candidate when it is not waiting for alignment and its published revision has no
+scenario, or it has an open structural anomaly. Cases that are not clear-cut (a different number
+of scenarios in the file and in the hub, a file that already has the header, a draft with work in
+it) are reported as "skipped" and left untouched. With
 --apply, the alignment pull request of every touched scope is created or updated afterwards.
 Needs the database and GITHUB_TOKEN.
 """
@@ -16,15 +18,24 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.core.db import async_session
-from app.models.test_lifecycle import TlFeature, TlFeatureRevision, TlScenarioContent, TlScope
+from app.models.test_lifecycle import (
+    TlFeature,
+    TlIssue,
+    TlIssueKind,
+    TlIssueStatus,
+    TlScenarioContent,
+    TlScope,
+)
 from app.services.test_lifecycle import migration_align, realign
 from app.services.test_lifecycle.git_client import get_git_client
 
 
 async def _candidates(code: str | None) -> list[tuple]:
+    """Features not waiting for alignment whose published revision is empty or that have an
+    open structural anomaly; `realign_from_main` decides which of them can be rebuilt."""
     async with async_session() as db:
         scenarios = (
             select(func.count())
@@ -32,29 +43,29 @@ async def _candidates(code: str | None) -> list[tuple]:
             .where(TlScenarioContent.revision_id == TlFeature.published_revision_id)
             .scalar_subquery()
         )
+        open_structural = (
+            select(TlIssue.id)
+            .where(
+                TlIssue.feature_id == TlFeature.id,
+                TlIssue.kind == TlIssueKind.STRUCTURAL_CHANGE,
+                TlIssue.status == TlIssueStatus.OPEN,
+            )
+            .exists()
+        )
         stmt = (
             select(TlFeature.id, TlFeature.code, TlScope.code)
             .join(TlScope, TlScope.id == TlFeature.scope_id)
-            .where(TlFeature.published_revision_id.is_not(None), scenarios == 0)
+            .where(
+                TlFeature.published_revision_id.is_not(None),
+                TlFeature.git_path.is_not(None),
+                TlFeature.alignment_pending.is_(False),
+                or_(scenarios == 0, open_structural),
+            )
             .order_by(TlScope.code, TlFeature.number)
         )
         if code:
             stmt = stmt.where(TlFeature.code == code)
-        rows = (await db.execute(stmt)).all()
-        # only those that had content before (the emptied ones)
-        out = []
-        for fid, fcode, scope_code in rows:
-            earlier = (
-                await db.execute(
-                    select(func.count())
-                    .select_from(TlFeatureRevision)
-                    .join(TlScenarioContent, TlScenarioContent.revision_id == TlFeatureRevision.id)
-                    .where(TlFeatureRevision.feature_id == fid)
-                )
-            ).scalar_one()
-            if earlier:
-                out.append((fid, fcode, scope_code))
-        return out
+        return [tuple(r) for r in (await db.execute(stmt)).all()]
 
 
 async def _main(apply: bool, code: str | None) -> int:
