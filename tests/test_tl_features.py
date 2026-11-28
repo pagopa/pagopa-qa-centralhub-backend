@@ -9,7 +9,7 @@ from sqlalchemy import delete, select
 from app.deps import get_db
 from app.main import app
 from app.models.audit_log import AuditLog
-from app.models.test_lifecycle import TlScope
+from app.models.test_lifecycle import TlScenario, TlScope
 from app.models.user import User
 from app.schemas.test_lifecycle import TlScenarioCreate
 from app.services.test_lifecycle import features as features_svc
@@ -186,21 +186,54 @@ async def test_add_scenario_assigns_identity_tag(client, scope, actor):
     assert sc["position"] == 1
 
 
-async def test_removed_scenario_number_is_never_reused(client, scope, actor):
-    feat = await _new_feature(client, scope, actor)
+async def _remove_scenario(client, feat, actor, scenario):
     rev = feat["working_revision"]["id"]
-    await _new_scenario(client, feat, actor, "uno")
-    second = await _new_scenario(client, feat, actor, "due")
     resp = await client.delete(
-        f"{BASE}/features/{feat['id']}/revisions/{rev}/scenarios/{second['id']}",
+        f"{BASE}/features/{feat['id']}/revisions/{rev}/scenarios/{scenario['id']}",
         params={"actor_email": actor["email"]},
     )
     assert resp.status_code == 200
-    assert [s["number"] for s in resp.json()["scenarios"]] == [1]
+    return resp.json()
+
+
+async def test_number_of_a_removed_draft_scenario_is_reused(client, scope, actor):
+    feat = await _new_feature(client, scope, actor)
+    await _new_scenario(client, feat, actor, "uno")
+    second = await _new_scenario(client, feat, actor, "due")
+    out = await _remove_scenario(client, feat, actor, second)
+    assert [s["number"] for s in out["scenarios"]] == [1]
     third = await _new_scenario(client, feat, actor, "tre")
-    assert third["number"] == 3
-    assert third["tag"].endswith("_001_03")
+    assert third["number"] == 2
+    assert third["tag"].endswith("_001_02")
     assert third["position"] == 2
+
+
+async def test_the_lowest_free_number_is_reused_first(client, scope, actor):
+    feat = await _new_feature(client, scope, actor)
+    one = await _new_scenario(client, feat, actor, "uno")
+    two = await _new_scenario(client, feat, actor, "due")
+    await _new_scenario(client, feat, actor, "tre")
+    await _remove_scenario(client, feat, actor, two)
+    await _remove_scenario(client, feat, actor, one)
+    first = await _new_scenario(client, feat, actor, "quattro")
+    second = await _new_scenario(client, feat, actor, "cinque")
+    third = await _new_scenario(client, feat, actor, "sei")
+    assert [first["number"], second["number"], third["number"]] == [1, 2, 4]
+
+
+async def test_reused_number_keeps_a_single_scenario_identity(client, scope, actor):
+    feat = await _new_feature(client, scope, actor)
+    one = await _new_scenario(client, feat, actor, "uno")
+    await _remove_scenario(client, feat, actor, one)
+    again = await _new_scenario(client, feat, actor, "uno bis")
+    assert again["number"] == 1
+    async with TestSession() as s:
+        rows = (
+            await s.execute(
+                select(TlScenario).where(TlScenario.feature_id == uuid.UUID(feat["id"]))
+            )
+        ).scalars().all()
+    assert [r.number for r in rows] == [1]
 
 
 async def test_concurrent_scenario_creation_allocates_distinct_numbers(client, scope, actor):

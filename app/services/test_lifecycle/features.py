@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.test_lifecycle import (
@@ -14,6 +14,7 @@ from app.models.test_lifecycle import (
     TlIssueStatus,
     TlRevisionStatus,
     TlScenario,
+    TlScenarioAlias,
     TlScenarioContent,
     TlScenarioKind,
     TlScope,
@@ -602,14 +603,31 @@ async def add_scenario(
     scope_code = (
         await db.execute(select(TlScope.code).where(TlScope.id == feature.scope_id))
     ).scalar_one()
-    number = feature.next_scenario_number
-    feature.next_scenario_number = number + 1
-    scenario = TlScenario(
-        feature_id=feature.id,
-        number=number,
-        tag=scenario_tag(scope_code, feature.number, number),
-    )
-    db.add(scenario)
+    # The number of a scenario removed from the only revision it ever lived in is free again: its
+    # identity has no content anywhere (and no alias), so nothing refers to it. One that appears
+    # in any revision, published or not, keeps its number consumed: history, NRT results and Git
+    # are keyed on it.
+    scenario = (
+        await db.execute(
+            select(TlScenario)
+            .where(
+                TlScenario.feature_id == feature.id,
+                ~exists().where(TlScenarioContent.scenario_id == TlScenario.id),
+                ~exists().where(TlScenarioAlias.scenario_id == TlScenario.id),
+            )
+            .order_by(TlScenario.number)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if scenario is None:
+        number = feature.next_scenario_number
+        feature.next_scenario_number = number + 1
+        scenario = TlScenario(
+            feature_id=feature.id,
+            number=number,
+            tag=scenario_tag(scope_code, feature.number, number),
+        )
+        db.add(scenario)
     await db.flush()
     max_pos = (
         await db.execute(
